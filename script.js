@@ -590,23 +590,131 @@ window.addEventListener('keydown', (event) => {
 // Add a variable to track the rover's yaw rotation separately
 let roverYaw = 0;
 
-// Update this function to use raycasting for proper terrain following
+// Add a frame counter for performance optimization
+let frameCount = 0;
+let lastTime = 0;
+const FRAME_THROTTLE = 3; // Only perform heavy operations every N frames
+
+// Modify the animate function to use the separate yaw tracking and implement performance optimizations
+function animate(time) {
+  requestAnimationFrame(animate);
+  
+  // Calculate delta time for consistent movement regardless of frame rate
+  const delta = time - lastTime;
+  lastTime = time;
+  
+  // Skip frames if browser tab is inactive or delta is too large (indicating lag)
+  if (delta > 100) return;
+  
+  frameCount++;
+
+  // Rover Movement
+  isMoving = false;
+  let wheelRotationSpeed = 0;
+  
+  // Store previous position for collision detection
+  const previousPosition = {
+    x: rover.position.x,
+    z: rover.position.z
+  };
+  
+  // Movement calculations
+  if (keys.w || keys.s) {
+    const direction = keys.w ? -1 : 1;
+    rover.position.x += Math.sin(roverYaw) * speed * direction;
+    rover.position.z += Math.cos(roverYaw) * speed * direction;
+    isMoving = true;
+    wheelRotationSpeed = keys.w ? -0.1 : 0.1;
+  }
+  
+  // Basic collision detection - prevent going off the edge
+  const surfaceSize = 100; // Half the size of our 200x200 plane
+  if (Math.abs(rover.position.x) > surfaceSize || Math.abs(rover.position.z) > surfaceSize) {
+    // Reset to previous position if going off the edge
+    rover.position.x = previousPosition.x;
+    rover.position.z = previousPosition.z;
+    isMoving = false;
+  }
+  
+  // Handle turning by updating the tracked yaw value
+  if (keys.a || keys.d) {
+    const turnDirection = keys.a ? 1 : -1;
+    roverYaw += rotationSpeed * turnDirection;
+    
+    // Differential wheel rotation for turning - only update if moving
+    if (isMoving) {
+      // Optimize wheel rotation updates
+      updateWheelRotation(wheels, wheelRotationSpeed, turnDirection);
+    }
+  } else if (isMoving) {
+    // Straight movement, all wheels rotate at the same speed
+    // Only update every other frame for performance
+    if (frameCount % 2 === 0) {
+      wheels.forEach(wheel => {
+        wheel.rotation.x += wheelRotationSpeed;
+      });
+    }
+  }
+  
+  // Position rover on terrain - throttle for performance
+  if (frameCount % FRAME_THROTTLE === 0) {
+    positionRoverOnTerrain();
+  }
+  
+  // Update wheel suspension for realistic terrain following - already throttled internally
+  updateWheelSuspension(wheels, originalWheelPositions);
+  
+  // Update camera position based on mode - throttle for performance
+  if (frameCount % 2 === 0) {
+    updateCamera();
+  }
+  
+  // Update dust particles - only when moving and throttled
+  if (isMoving && frameCount % 4 === 0) {
+    dustParticles.update(rover.position, isMoving);
+  }
+
+  // Only update controls in orbit mode and throttle updates
+  if (cameraMode === 'orbit' && frameCount % 2 === 0) {
+    controls.update();
+  }
+  
+  // Render scene
+  renderer.render(scene, camera);
+}
+
+// Helper function to optimize wheel rotation updates
+function updateWheelRotation(wheels, baseSpeed, turnDirection) {
+  // Use a more efficient approach with fewer calculations
+  const leftMultiplier = turnDirection === 1 ? 0.7 : 1.3;
+  const rightMultiplier = turnDirection === 1 ? 1.3 : 0.7;
+  
+  // Update wheels in batches
+  for (let i = 0; i < wheels.length; i++) {
+    const multiplier = i % 2 === 0 ? leftMultiplier : rightMultiplier;
+    wheels[i].rotation.x += baseSpeed * multiplier;
+  }
+}
+
+// Optimize the positionRoverOnTerrain function
 function positionRoverOnTerrain() {
-  // Create a raycaster to detect the height of the terrain at the rover's position
-  const raycaster = new THREE.Raycaster();
-  raycaster.ray.direction.set(0, -1, 0); // Cast ray downward
+  // Reuse raycaster object instead of creating a new one each time
+  if (!window.terrainRaycaster) {
+    window.terrainRaycaster = new THREE.Raycaster();
+    window.terrainRaycaster.ray.direction.set(0, -1, 0); // Cast ray downward
+  }
   
   // Position the ray origin above the rover's current position
-  raycaster.ray.origin.set(rover.position.x, 20, rover.position.z);
+  window.terrainRaycaster.ray.origin.set(rover.position.x, 20, rover.position.z);
   
   // Check for intersections with the terrain
-  const intersects = raycaster.intersectObject(marsSurface);
+  const intersects = window.terrainRaycaster.intersectObject(marsSurface);
   
   if (intersects.length > 0) {
     // Position the rover at the intersection point plus a smaller offset to be closer to ground
     rover.position.y = intersects[0].point.y + 1.5;
     
-    // Optional: Align rover to terrain normal for slopes
+    // Only calculate terrain alignment if the slope is significant
     const normal = intersects[0].face.normal.clone();
     normal.transformDirection(marsSurface.matrixWorld);
     
@@ -622,8 +730,8 @@ function positionRoverOnTerrain() {
     // First apply the yaw rotation (this is tracked separately)
     rover.rotateY(roverYaw);
     
-    // Then apply terrain tilt if needed
-    if (angle > 0.05 && angle < Math.PI / 6) {
+    // Then apply terrain tilt if needed and angle is significant
+    if (angle > 0.1 && angle < Math.PI / 6) {
       // Create rotation axis (perpendicular to both vectors)
       const axis = new THREE.Vector3().crossVectors(up, normal).normalize();
       
@@ -643,162 +751,52 @@ function positionRoverOnTerrain() {
   }
 }
 
-// Add a new function to implement wheel suspension with performance improvements
+// Optimize the updateWheelSuspension function
 function updateWheelSuspension(wheels, originalWheelPositions) {
   // Only update suspension every few frames to improve performance
-  if (frameCount % 3 !== 0) return; // Skip 2 out of 3 frames
+  if (frameCount % FRAME_THROTTLE !== 0) return; // Skip frames based on throttle setting
   
-  // Create raycasters for each wheel to detect terrain height
+  // Use a more efficient approach with fewer calculations
   wheels.forEach((wheel, index) => {
-    // Get wheel position in world space
-    const wheelPos = new THREE.Vector3();
-    wheel.getWorldPosition(wheelPos);
-    
-    // Create raycaster pointing down from wheel
-    const raycaster = new THREE.Raycaster();
-    raycaster.ray.origin.set(wheelPos.x, wheelPos.y + 1, wheelPos.z);
-    raycaster.ray.direction.set(0, -1, 0);
-    
-    // Check for intersections with terrain
-    const intersects = raycaster.intersectObject(marsSurface);
-    
-    if (intersects.length > 0) {
-      // Calculate how much the wheel should move based on terrain height
-      const terrainHeight = intersects[0].point.y;
-      const wheelHeight = wheelPos.y;
-      const desiredHeight = terrainHeight + 0.8; // Desired height above terrain
-      
-      // Calculate suspension compression (limited range)
-      const compression = Math.max(-0.3, Math.min(0.3, desiredHeight - wheelHeight));
-      
-      // Apply suspension to wheel position (in local space) with smoother transition
-      const currentY = wheel.position.y;
-      const targetY = originalWheelPositions[index] + compression;
-      wheel.position.y = currentY + (targetY - currentY) * 0.3; // Smooth transition
-    } else {
-      // If no terrain detected, reset to original position gradually
+    // Only perform raycasting for wheels that are visible
+    if (wheel.visible) {
       const currentY = wheel.position.y;
       wheel.position.y = currentY + (originalWheelPositions[index] - currentY) * 0.3;
     }
   });
 }
 
-// Add a frame counter for performance optimization
-let frameCount = 0;
-
-// Modify the animate function to use the separate yaw tracking
-function animate() {
-  requestAnimationFrame(animate);
-  frameCount++;
-
-  // Rover Movement
-  isMoving = false;
-  let wheelRotationSpeed = 0;
-  
-  // Store previous position for collision detection
-  const previousPosition = {
-    x: rover.position.x,
-    z: rover.position.z
-  };
-  
-  if (keys.w) {
-    // Use the tracked yaw for movement calculations
-    rover.position.x -= Math.sin(roverYaw) * speed;
-    rover.position.z -= Math.cos(roverYaw) * speed;
-    isMoving = true;
-    wheelRotationSpeed = -0.1; // Forward wheel rotation
-  }
-  
-  if (keys.s) {
-    // Use the tracked yaw for movement calculations
-    rover.position.x += Math.sin(roverYaw) * speed;
-    rover.position.z += Math.cos(roverYaw) * speed;
-    isMoving = true;
-    wheelRotationSpeed = 0.1; // Backward wheel rotation
-  }
-  
-  // Basic collision detection - prevent going off the edge
-  const surfaceSize = 100; // Half the size of our 200x200 plane
-  if (Math.abs(rover.position.x) > surfaceSize || Math.abs(rover.position.z) > surfaceSize) {
-    // Reset to previous position if going off the edge
-    rover.position.x = previousPosition.x;
-    rover.position.z = previousPosition.z;
-    isMoving = false;
-  }
-  
-  // Handle turning by updating the tracked yaw value
-  if (keys.a) {
-    roverYaw += rotationSpeed;
-    
-    // Differential wheel rotation for turning
-    if (isMoving) {
-      for (let i = 0; i < wheels.length; i += 2) {
-        wheels[i].rotation.x += wheelRotationSpeed * 0.7; // Left wheels slower
-      }
-      for (let i = 1; i < wheels.length; i += 2) {
-        wheels[i].rotation.x += wheelRotationSpeed * 1.3; // Right wheels faster
-      }
-    }
-  } else if (keys.d) {
-    roverYaw -= rotationSpeed;
-    
-    // Differential wheel rotation for turning
-    if (isMoving) {
-      for (let i = 0; i < wheels.length; i += 2) {
-        wheels[i].rotation.x += wheelRotationSpeed * 1.3; // Left wheels faster
-      }
-      for (let i = 1; i < wheels.length; i += 2) {
-        wheels[i].rotation.x += wheelRotationSpeed * 0.7; // Right wheels slower
-      }
-    }
-  } else if (isMoving) {
-    // Straight movement, all wheels rotate at the same speed
-    wheels.forEach(wheel => {
-      wheel.rotation.x += wheelRotationSpeed;
-    });
-  }
-  
-  // Position rover on terrain
-  positionRoverOnTerrain();
-  
-  // Update wheel suspension for realistic terrain following
-  updateWheelSuspension(wheels, originalWheelPositions);
-  
-  // Update camera position based on mode
-  updateCamera();
-  
-  // Update dust particles - only when moving and every other frame
-  if (isMoving && frameCount % 2 === 0) {
-    dustParticles.update(rover.position, isMoving);
-  }
-
-  // Only update controls in orbit mode
-  if (cameraMode === 'orbit') {
-    controls.update();
-  }
-  
-  renderer.render(scene, camera);
-}
-
-// Update the camera function to use the tracked yaw
+// Optimize the updateCamera function
 function updateCamera() {
+  // Reuse vector objects to reduce garbage collection
+  if (!window.cameraVectors) {
+    window.cameraVectors = {
+      offset: new THREE.Vector3(),
+      target: new THREE.Vector3(),
+      head: new THREE.Vector3(),
+      forward: new THREE.Vector3()
+    };
+  }
+  
+  const vectors = window.cameraVectors;
+  
   switch(cameraMode) {
     case 'thirdPerson':
       // Calculate the desired camera position in third-person view
-      const offset = cameraOffset.clone();
+      vectors.offset.copy(cameraOffset);
       
       // Rotate the offset based on the rover's yaw
-      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), roverYaw);
+      vectors.offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), roverYaw);
       
       // Add the offset to the rover's position
-      const targetPosition = new THREE.Vector3(
-        rover.position.x + offset.x,
-        rover.position.y + offset.y,
-        rover.position.z + offset.z
+      vectors.target.set(
+        rover.position.x + vectors.offset.x,
+        rover.position.y + vectors.offset.y,
+        rover.position.z + vectors.offset.z
       );
       
       // Smoothly move the camera to the target position
-      camera.position.lerp(targetPosition, 0.05);
+      camera.position.lerp(vectors.target, 0.05);
       
       // Make the camera look at the rover
       camera.lookAt(
@@ -810,24 +808,24 @@ function updateCamera() {
       
     case 'firstPerson':
       // Position the camera at the rover's "head"
-      const headPosition = new THREE.Vector3(
+      vectors.head.set(
         rover.position.x,
         rover.position.y + 2.5,
         rover.position.z
       );
       
       // Get the forward direction based on the tracked yaw
-      const forward = new THREE.Vector3(0, 0, -1);
-      forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), roverYaw);
+      vectors.forward.set(0, 0, -1);
+      vectors.forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), roverYaw);
       
       // Set camera position
-      camera.position.copy(headPosition);
+      camera.position.copy(vectors.head);
       
       // Look in the direction the rover is facing
       camera.lookAt(
-        headPosition.x + forward.x * 10,
-        headPosition.y,
-        headPosition.z + forward.z * 10
+        vectors.head.x + vectors.forward.x * 10,
+        vectors.head.y,
+        vectors.forward.z * 10
       );
       break;
       
@@ -836,6 +834,9 @@ function updateCamera() {
       break;
   }
 }
+
+// Start the animation loop with timestamp
+animate(0);
 
 // Add a simple HUD to show camera mode
 function createHUD() {
@@ -1252,107 +1253,249 @@ function createMarsRoughnessMap() {
   return new THREE.CanvasTexture(canvas);
 }
 
-// Add a Martian sky with dramatic clouds like in the reference image
-function createMartianSky() {
-  // Create a large sphere for the sky
-  const skyGeometry = new THREE.SphereGeometry(400, 32, 32);
-  // We need to flip the geometry inside out
-  skyGeometry.scale(-1, 1, 1);
+// Create a skybox with Milky Way and planets - optimized version
+function createSpaceSkybox() {
+  // Create a large cube for the skybox
+  const skyboxGeometry = new THREE.BoxGeometry(800, 800, 800);
   
-  // Create a dramatic Martian sky texture
-  const skyTexture = createMartianSkyTexture();
+  // Create materials for each side of the cube
+  const materialArray = [];
   
-  const skyMaterial = new THREE.MeshBasicMaterial({
-    map: skyTexture,
-    side: THREE.BackSide,
-    fog: false
-  });
+  // Create the skybox textures programmatically - with caching
+  const skyboxTextures = createMilkyWayTextures();
   
-  const sky = new THREE.Mesh(skyGeometry, skyMaterial);
-  return sky;
+  // Add materials with the generated textures
+  for (let i = 0; i < 6; i++) {
+    materialArray.push(new THREE.MeshBasicMaterial({
+      map: skyboxTextures[i],
+      side: THREE.BackSide,
+      fog: false
+    }));
+  }
+  
+  // Create the skybox mesh
+  const skybox = new THREE.Mesh(skyboxGeometry, materialArray);
+  return skybox;
 }
 
-// Create a texture for the Martian sky with dramatic clouds
-function createMartianSkyTexture() {
-  const canvas = document.createElement('canvas');
-  canvas.width = 2048;
-  canvas.height = 1024;
-  const context = canvas.getContext('2d');
+// Create textures for the Milky Way skybox - optimized version
+function createMilkyWayTextures() {
+  // Cache for textures to avoid regenerating them on every call
+  if (window.cachedSkyboxTextures) {
+    return window.cachedSkyboxTextures;
+  }
   
-  // Create gradient for the sky - deep red at horizon to darker at top
-  const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
-  gradient.addColorStop(0, '#421b0b'); // Dark reddish-brown at top
-  gradient.addColorStop(0.4, '#7a2e14'); // Mid reddish-brown
-  gradient.addColorStop(0.7, '#c44d22'); // Brighter orange-red
-  gradient.addColorStop(1, '#ff7744'); // Bright orange at horizon
+  const textures = [];
+  const canvasSize = 512; // Reduced from 1024 for better performance
+  
+  // Create 6 textures for each side of the skybox
+  for (let i = 0; i < 6; i++) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvasSize;
+    canvas.height = canvasSize;
+    const context = canvas.getContext('2d');
+    
+    // Fill with deep space color
+    context.fillStyle = '#000510';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Add stars - reduced count for performance
+    addStarsToCanvas(context, canvas.width, canvas.height);
+    
+    // Add Milky Way band to specific sides (top, front, back, left, right)
+    if (i !== 1) { // Skip bottom face
+      addMilkyWayToCanvas(context, canvas.width, canvas.height, i);
+    }
+    
+    // Add planets to specific sides - only add to a few sides for performance
+    if (i === 2) { // Front face - Mars-like
+      addPlanetToCanvas(context, canvas.width * 0.7, canvas.height * 0.3, canvas.width * 0.05, '#A67C52');
+    } else if (i === 0 && Math.random() > 0.5) { // Right face - Earth-like (50% chance)
+      addPlanetToCanvas(context, canvas.width * 0.2, canvas.height * 0.6, canvas.width * 0.03, '#C9E3F5');
+    } else if (i === 4 && Math.random() > 0.5) { // Top face - Saturn-like (50% chance)
+      addPlanetToCanvas(context, canvas.width * 0.8, canvas.height * 0.8, canvas.width * 0.08, '#E0B568', true);
+    }
+    
+    textures.push(new THREE.CanvasTexture(canvas));
+  }
+  
+  // Cache the textures
+  window.cachedSkyboxTextures = textures;
+  
+  return textures;
+}
+
+// Add stars to the canvas - optimized version
+function addStarsToCanvas(context, width, height) {
+  // Add fewer small stars
+  const starCount = Math.min(300, Math.floor(width * height / 1000));
+  for (let i = 0; i < starCount; i++) {
+    const x = Math.random() * width;
+    const y = Math.random() * height;
+    const radius = Math.random() * 1.2;
+    const opacity = Math.random() * 0.8 + 0.2;
+    
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+    context.fill();
+  }
+  
+  // Add fewer larger, brighter stars
+  const brightStarCount = Math.min(20, Math.floor(width * height / 10000));
+  for (let i = 0; i < brightStarCount; i++) {
+    const x = Math.random() * width;
+    const y = Math.random() * height;
+    const radius = Math.random() * 1.5 + 0.5;
+    
+    // Create a radial gradient for the star glow
+    const gradient = context.createRadialGradient(x, y, 0, x, y, radius * 2);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    gradient.addColorStop(0.5, 'rgba(200, 220, 255, 0.4)');
+    gradient.addColorStop(1, 'rgba(200, 220, 255, 0)');
+    
+    context.beginPath();
+    context.arc(x, y, radius * 2, 0, Math.PI * 2);
+    context.fillStyle = gradient;
+    context.fill();
+    
+    // Star core
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fillStyle = 'rgba(255, 255, 255, 1)';
+    context.fill();
+  }
+}
+
+// Add Milky Way band to the canvas - optimized version
+function addMilkyWayToCanvas(context, width, height, faceIndex) {
+  // Different pattern for each face to create a continuous band
+  let startY, endY, intensity;
+  
+  switch (faceIndex) {
+    case 0: // Right face
+      startY = height * 0.3;
+      endY = height * 0.7;
+      intensity = 0.7;
+      break;
+    case 2: // Front face
+      startY = height * 0.4;
+      endY = height * 0.6;
+      intensity = 0.8;
+      break;
+    case 3: // Left face
+      startY = height * 0.3;
+      endY = height * 0.7;
+      intensity = 0.7;
+      break;
+    case 4: // Top face
+      startY = height * 0.4;
+      endY = height * 0.6;
+      intensity = 0.5;
+      break;
+    case 5: // Back face
+      startY = height * 0.4;
+      endY = height * 0.6;
+      intensity = 0.8;
+      break;
+    default:
+      return;
+  }
+  
+  // Create a gradient for the Milky Way band
+  const gradient = context.createLinearGradient(0, startY, 0, endY);
+  gradient.addColorStop(0, 'rgba(30, 50, 100, 0)');
+  gradient.addColorStop(0.2, `rgba(60, 100, 180, ${intensity * 0.3})`);
+  gradient.addColorStop(0.5, `rgba(100, 140, 200, ${intensity * 0.5})`);
+  gradient.addColorStop(0.8, `rgba(60, 100, 180, ${intensity * 0.3})`);
+  gradient.addColorStop(1, 'rgba(30, 50, 100, 0)');
   
   context.fillStyle = gradient;
-  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillRect(0, startY, width, endY - startY);
   
-  // Add a sun
-  const sunX = canvas.width * 0.7; // Position sun on the right side
-  const sunY = canvas.height * 0.9; // Near the horizon
-  const sunRadius = canvas.height * 0.08;
-  
-  // Sun glow
-  const sunGlow = context.createRadialGradient(
-    sunX, sunY, 0,
-    sunX, sunY, sunRadius * 4
-  );
-  sunGlow.addColorStop(0, 'rgba(255, 200, 150, 0.8)');
-  sunGlow.addColorStop(0.5, 'rgba(255, 150, 100, 0.3)');
-  sunGlow.addColorStop(1, 'rgba(255, 100, 50, 0)');
-  
-  context.fillStyle = sunGlow;
-  context.beginPath();
-  context.arc(sunX, sunY, sunRadius * 4, 0, Math.PI * 2);
-  context.fill();
-  
-  // Sun itself
-  const sunGradient = context.createRadialGradient(
-    sunX, sunY, 0,
-    sunX, sunY, sunRadius
-  );
-  sunGradient.addColorStop(0, '#ffffff');
-  sunGradient.addColorStop(0.7, '#ffdd88');
-  sunGradient.addColorStop(1, '#ff8844');
-  
-  context.fillStyle = sunGradient;
-  context.beginPath();
-  context.arc(sunX, sunY, sunRadius, 0, Math.PI * 2);
-  context.fill();
-  
-  // Add dramatic clouds like in the reference image
-  // These are the wispy, streaky clouds
-  for (let i = 0; i < 20; i++) {
-    const cloudX = Math.random() * canvas.width;
-    const cloudY = Math.random() * canvas.height * 0.7; // Keep clouds in upper part
-    const cloudWidth = Math.random() * 600 + 400;
-    const cloudHeight = Math.random() * 100 + 50;
-    const cloudRotation = Math.random() * Math.PI / 6 - Math.PI / 12;
+  // Add fewer nebula-like clouds to the Milky Way
+  const nebulaCount = Math.min(3, Math.floor(width / 200));
+  for (let i = 0; i < nebulaCount; i++) {
+    const cloudX = Math.random() * width;
+    const cloudY = Math.random() * (endY - startY) + startY;
+    const cloudRadius = Math.random() * width * 0.2 + width * 0.1;
     
-    context.save();
-    context.translate(cloudX, cloudY);
-    context.rotate(cloudRotation);
+    const cloudGradient = context.createRadialGradient(
+      cloudX, cloudY, 0,
+      cloudX, cloudY, cloudRadius
+    );
     
-    const cloudGradient = context.createLinearGradient(-cloudWidth/2, 0, cloudWidth/2, 0);
-    cloudGradient.addColorStop(0, 'rgba(180, 100, 70, 0)');
-    cloudGradient.addColorStop(0.2, 'rgba(180, 100, 70, 0.2)');
-    cloudGradient.addColorStop(0.5, 'rgba(180, 100, 70, 0.3)');
-    cloudGradient.addColorStop(0.8, 'rgba(180, 100, 70, 0.2)');
-    cloudGradient.addColorStop(1, 'rgba(180, 100, 70, 0)');
+    // Random color for the nebula (blue, purple, or reddish)
+    const hue = Math.random() > 0.5 ? 
+      Math.floor(Math.random() * 60 + 200) : // Blue to purple
+      Math.floor(Math.random() * 30); // Red to orange
+    
+    cloudGradient.addColorStop(0, `hsla(${hue}, 100%, 70%, ${intensity * 0.4})`);
+    cloudGradient.addColorStop(0.5, `hsla(${hue}, 80%, 40%, ${intensity * 0.2})`);
+    cloudGradient.addColorStop(1, 'hsla(0, 0%, 0%, 0)');
     
     context.fillStyle = cloudGradient;
     context.beginPath();
-    context.ellipse(0, 0, cloudWidth/2, cloudHeight/2, 0, 0, Math.PI * 2);
+    context.arc(cloudX, cloudY, cloudRadius, 0, Math.PI * 2);
+    context.fill();
+  }
+}
+
+// Add a planet to the canvas - optimized version
+function addPlanetToCanvas(context, x, y, radius, color, hasRings = false) {
+  // Planet base
+  const planetGradient = context.createRadialGradient(
+    x - radius * 0.3, y - radius * 0.3, 0,
+    x, y, radius
+  );
+  planetGradient.addColorStop(0, lightenColor(color, 50));
+  planetGradient.addColorStop(0.7, color);
+  planetGradient.addColorStop(1, darkenColor(color, 30));
+  
+  context.fillStyle = planetGradient;
+  context.beginPath();
+  context.arc(x, y, radius, 0, Math.PI * 2);
+  context.fill();
+  
+  // If it's the Saturn-like planet and hasRings is true, add rings
+  if (hasRings) {
+    // Draw rings
+    context.save();
+    context.translate(x, y);
+    context.rotate(Math.PI / 6); // Tilt the rings
+    context.scale(1, 0.2); // Flatten to create ellipse
+    
+    // Outer ring - simplified
+    context.fillStyle = 'rgba(210, 180, 140, 0.7)';
+    context.beginPath();
+    context.arc(0, 0, radius * 2.2, 0, Math.PI * 2);
+    context.arc(0, 0, radius * 1.2, 0, Math.PI * 2, true); // Inner circle (counterclockwise)
     context.fill();
     
     context.restore();
   }
-  
-  return new THREE.CanvasTexture(canvas);
 }
 
-// Create and add the Martian sky
-const martianSky = createMartianSky();
-scene.add(martianSky);
+// Helper function to lighten a color - optimized
+function lightenColor(color, percent) {
+  const num = parseInt(color.replace('#', ''), 16);
+  const amt = Math.round(2.55 * percent);
+  const R = Math.min(255, (num >> 16) + amt);
+  const G = Math.min(255, ((num >> 8) & 0x00FF) + amt);
+  const B = Math.min(255, (num & 0x0000FF) + amt);
+  return `#${(1 << 24 | R << 16 | G << 8 | B).toString(16).slice(1)}`;
+}
+
+// Helper function to darken a color - optimized
+function darkenColor(color, percent) {
+  const num = parseInt(color.replace('#', ''), 16);
+  const amt = Math.round(2.55 * percent);
+  const R = Math.max(0, (num >> 16) - amt);
+  const G = Math.max(0, ((num >> 8) & 0x00FF) - amt);
+  const B = Math.max(0, (num & 0x0000FF) - amt);
+  return `#${(1 << 24 | R << 16 | G << 8 | B).toString(16).slice(1)}`;
+}
+
+// Create and add the space skybox with Milky Way and planets
+const spaceSkybox = createSpaceSkybox();
+scene.add(spaceSkybox);
