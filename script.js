@@ -1,21 +1,20 @@
 // Scene, Camera, Renderer
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
 camera.position.set(0, 10, 20);
 
-// Performance-optimized renderer
+// Performance-optimized renderer with better quality settings for visibility
 const renderer = new THREE.WebGLRenderer({ 
-  antialias: false, // Disable antialiasing for performance
+  antialias: true, // Enable antialiasing for better star visibility
   powerPreference: 'high-performance',
-  precision: 'mediump' // Use medium precision for better performance
+  precision: 'highp' // Higher precision for better visibility
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = false; // Disable shadows for performance
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1)); // Limit pixel ratio to 1
+renderer.setPixelRatio(window.devicePixelRatio); // Use device pixel ratio for sharper rendering
 document.body.appendChild(renderer.domElement);
 
-// Fog for distance culling - increased distance for smoother transitions
-scene.fog = new THREE.Fog(0xb77c5a, 150, 400);
+// Fog for distance culling - more distant and less intense for better star visibility
+scene.fog = new THREE.Fog(0xb77c5a, 1000, 7000);
 
 // Endless terrain system with reduced complexity
 const terrainSystem = {
@@ -579,6 +578,11 @@ function animate(time) {
   
   frameCount++;
 
+  // Make the skybox follow the camera ONLY if it exists
+  if (window.spaceSkybox) {
+    window.spaceSkybox.position.copy(camera.position);
+  }
+
   // Rover Movement
   isMoving = false;
   let wheelRotationSpeed = 0;
@@ -893,8 +897,6 @@ function createHUD() {
 
 // Create the HUD
 createHUD();
-
-animate();
 
 // Resize Window
 window.addEventListener('resize', () => {
@@ -1270,28 +1272,38 @@ function createMarsRoughnessMap() {
 
 // Create a skybox with Milky Way and planets - improved dome-like version
 function createSpaceSkybox() {
+  console.log("Creating skybox...");
+  
   // Use a sphere instead of a cube for a dome-like appearance without corners
-  // Increased size and segments for better quality
-  const skyboxGeometry = new THREE.SphereGeometry(2000, 96, 96);
+  // Increased size for proper placement but lower segments for performance
+  const skyboxGeometry = new THREE.SphereGeometry(4000, 64, 64);
   
   // Create a single material for the entire skybox sphere
+  const texture = createSphericalSkyTexture();
+  
   const skyboxMaterial = new THREE.MeshBasicMaterial({
-    map: createSphericalSkyTexture(),
+    map: texture,
     side: THREE.BackSide,
-    fog: false
+    fog: false,
+    transparent: true,
+    opacity: 1.0
   });
   
   // Create the skybox mesh
   const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
+  
+  // Ensure skybox is visible by explicitly setting these properties
+  skybox.renderOrder = -1000; // Render before other objects
+  skybox.frustumCulled = false; // Prevent frustum culling
+  
+  console.log("Skybox created successfully"); // Debug log
+  
   return skybox;
 }
 
 // Create a single spherical texture for the dome-like skybox
 function createSphericalSkyTexture() {
-  // Cache for texture to avoid regenerating it on every call
-  if (window.cachedSkyboxTexture) {
-    return window.cachedSkyboxTexture;
-  }
+  // Create a new texture every time to avoid caching issues
   
   // Create a large canvas for the spherical map
   const canvas = document.createElement('canvas');
@@ -1300,34 +1312,34 @@ function createSphericalSkyTexture() {
   canvas.height = canvasSize;
   const context = canvas.getContext('2d');
   
-  // Fill with deep space color - using a darker base for better contrast with stars
-  context.fillStyle = '#000005'; // Almost black with slight blue tint
+  // Fill with dark but not completely black background
+  context.fillStyle = '#010114'; // Very dark blue instead of pure black
   context.fillRect(0, 0, canvas.width, canvas.height);
   
-  // Add background stars across the entire sky - dense layer
-  addBackgroundStarsLayer(context, canvasSize);
+  // Make stars more visible by increasing their brightness and quantity
+  addBrighterBackgroundStars(context, canvasSize);
   
-  // Add a prominent Milky Way band across the sky
-  addMilkyWayToSphericalCanvas(context, canvasSize);
+  // Add a brighter Milky Way band
+  addBrighterMilkyWay(context, canvasSize);
   
-  // Add mid-layer stars that appear in front of distant nebulae but behind bright features
-  addMidLayerStars(context, canvasSize);
+  // Add more prominent mid-layer stars
+  addBrighterMidLayerStars(context, canvasSize);
   
   // Add atmospheric glow at the horizon
   addAtmosphericGlow(context, canvasSize);
   
-  // Add foreground stars - brighter stars that appear in front of everything
-  addForegroundStars(context, canvasSize);
+  // Add more prominent foreground stars
+  addBrighterForegroundStars(context, canvasSize);
   
-  // Add a few planets
+  // Add a few planets - made slightly larger for visibility
   // Mars-like planet
-  addPlanetToCanvas(context, canvasSize * 0.7, canvasSize * 0.3, canvasSize * 0.03, '#A67C52');
+  addPlanetToCanvas(context, canvasSize * 0.7, canvasSize * 0.3, canvasSize * 0.06, '#A67C52');
   
   // Earth-like planet
-  addPlanetToCanvas(context, canvasSize * 0.2, canvasSize * 0.6, canvasSize * 0.02, '#C9E3F5');
+  addPlanetToCanvas(context, canvasSize * 0.2, canvasSize * 0.6, canvasSize * 0.05, '#C9E3F5');
   
   // Saturn-like planet with rings
-  addPlanetToCanvas(context, canvasSize * 0.8, canvasSize * 0.8, canvasSize * 0.04, '#E0B568', true);
+  addPlanetToCanvas(context, canvasSize * 0.8, canvasSize * 0.8, canvasSize * 0.07, '#E0B568', true);
   
   // Create texture from canvas
   const texture = new THREE.CanvasTexture(canvas);
@@ -1335,71 +1347,64 @@ function createSphericalSkyTexture() {
   // Set texture mapping for a sphere
   texture.mapping = THREE.EquirectangularReflectionMapping;
   
-  // Cache the texture
-  window.cachedSkyboxTexture = texture;
+  console.log("Sky texture created successfully"); // Debug log
   
   return texture;
 }
 
-// Add a dense background layer of stars
-function addBackgroundStarsLayer(context, size) {
-  // Extremely dense background star field - fills the entire sky
-  const starCount = Math.floor(size * size / 100); // Much denser star field
+// Add much brighter background stars
+function addBrighterBackgroundStars(context, size) {
+  // Very dense star field
+  const starCount = Math.floor(size * size / 50);
   
   for (let i = 0; i < starCount; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
-    const radius = Math.random() * 0.8; // Smaller stars for background
+    // Create cluster-like distribution
+    let x, y;
     
-    // Vary star colors slightly for more realism
-    const colorVariation = Math.random();
-    let starColor;
-    
-    if (colorVariation < 0.7) {
-      // White to slightly blue stars (most common)
-      const blueIntensity = 180 + Math.floor(Math.random() * 75);
-      starColor = `rgba(220, 220, ${blueIntensity}, ${Math.random() * 0.3 + 0.2})`;
-    } else if (colorVariation < 0.85) {
-      // Slightly yellow/orange stars
-      const redGreen = 180 + Math.floor(Math.random() * 75);
-      starColor = `rgba(${redGreen}, ${redGreen - 20}, 150, ${Math.random() * 0.3 + 0.2})`;
+    // 70% of stars are in subtle clusters, 30% are more random
+    if (Math.random() < 0.7) {
+      // Create cluster centers scattered throughout the sky
+      const clusterCount = 20;
+      const clusterIndex = Math.floor(Math.random() * clusterCount);
+      const clusterCenterX = (clusterIndex % 5) * (size / 5) + (size / 10);
+      const clusterCenterY = Math.floor(clusterIndex / 5) * (size / 4) + (size / 8);
+      
+      // Distribute stars around cluster centers with Gaussian-like distribution
+      const distance = Math.pow(Math.random(), 2) * size / 4;
+      const angle = Math.random() * Math.PI * 2;
+      x = clusterCenterX + Math.cos(angle) * distance;
+      y = clusterCenterY + Math.sin(angle) * distance;
+      
+      // Ensure coordinates are within canvas
+      x = Math.max(0, Math.min(size - 1, x));
+      y = Math.max(0, Math.min(size - 1, y));
     } else {
-      // Slightly red stars (least common)
-      starColor = `rgba(200, 150, 150, ${Math.random() * 0.3 + 0.2})`;
+      // Random distribution for remaining stars
+      x = Math.random() * size;
+      y = Math.random() * size;
     }
     
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fillStyle = starColor;
-    context.fill();
-  }
-}
-
-// Add mid-layer stars that appear between nebulae layers
-function addMidLayerStars(context, size) {
-  // Medium density star layer
-  const starCount = Math.floor(size * size / 400);
-  
-  for (let i = 0; i < starCount; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
-    const radius = Math.random() * 1.2 + 0.3;
+    // Slightly larger radius for better visibility
+    const radius = Math.random() * 0.6 + 0.2;
     
-    // Vary star colors slightly for more realism
+    // Much brighter stars for visibility
     const colorVariation = Math.random();
     let starColor;
     
-    if (colorVariation < 0.7) {
+    if (colorVariation < 0.75) {
       // White to slightly blue stars (most common)
       const blueIntensity = 220 + Math.floor(Math.random() * 35);
-      starColor = `rgba(255, 255, ${blueIntensity}, ${Math.random() * 0.6 + 0.4})`;
-    } else if (colorVariation < 0.85) {
+      const brightness = Math.random() * 0.4 + 0.1;  // Much brighter
+      starColor = `rgba(220, 220, ${blueIntensity}, ${brightness})`;
+    } else if (colorVariation < 0.9) {
       // Slightly yellow/orange stars
       const redGreen = 220 + Math.floor(Math.random() * 35);
-      starColor = `rgba(${redGreen}, ${redGreen}, 180, ${Math.random() * 0.6 + 0.4})`;
+      const brightness = Math.random() * 0.4 + 0.1;  // Much brighter
+      starColor = `rgba(${redGreen}, ${redGreen - 10}, 200, ${brightness})`;
     } else {
       // Slightly red stars (least common)
-      starColor = `rgba(255, 200, 200, ${Math.random() * 0.6 + 0.4})`;
+      const brightness = Math.random() * 0.4 + 0.1;  // Much brighter
+      starColor = `rgba(220, 180, 180, ${brightness})`;
     }
     
     context.beginPath();
@@ -1409,14 +1414,75 @@ function addMidLayerStars(context, size) {
   }
 }
 
-// Add foreground stars - the brightest stars with glow effects
-function addForegroundStars(context, size) {
-  // Add larger, brighter stars with glow
-  const brightStarCount = Math.floor(size * size / 3000);
+// Add brighter mid-layer stars
+function addBrighterMidLayerStars(context, size) {
+  // Medium density star layer
+  const starCount = Math.floor(size * size / 300);
+  
+  for (let i = 0; i < starCount; i++) {
+    let x, y;
+    
+    // Similar clustering as background layer but with different distribution
+    if (Math.random() < 0.6) {
+      const clusterCount = 15;
+      const clusterIndex = Math.floor(Math.random() * clusterCount);
+      const clusterCenterX = (clusterIndex % 5) * (size / 5) + (size / 10) + (Math.random() - 0.5) * size / 10;
+      const clusterCenterY = Math.floor(clusterIndex / 3) * (size / 3) + (size / 6) + (Math.random() - 0.5) * size / 10;
+      
+      const distance = Math.pow(Math.random(), 1.5) * size / 6;
+      const angle = Math.random() * Math.PI * 2;
+      x = clusterCenterX + Math.cos(angle) * distance;
+      y = clusterCenterY + Math.sin(angle) * distance;
+      
+      x = Math.max(0, Math.min(size - 1, x));
+      y = Math.max(0, Math.min(size - 1, y));
+    } else {
+      x = Math.random() * size;
+      y = Math.random() * size;
+    }
+    
+    // Larger stars for better visibility
+    const radius = Math.random() * 1.0 + 0.3;
+    
+    // Much brighter stars
+    const colorVariation = Math.random();
+    let starColor;
+    
+    if (colorVariation < 0.75) {
+      // White to slightly blue stars (most common)
+      const blueIntensity = 225 + Math.floor(Math.random() * 30);
+      const brightness = Math.random() * 0.5 + 0.2;  // Much brighter
+      starColor = `rgba(255, 255, ${blueIntensity}, ${brightness})`;
+    } else if (colorVariation < 0.9) {
+      // Slightly yellow/orange stars
+      const redGreen = 225 + Math.floor(Math.random() * 30);
+      const blue = 180 + Math.floor(Math.random() * 20);
+      const brightness = Math.random() * 0.5 + 0.2;  // Much brighter
+      starColor = `rgba(${redGreen}, ${redGreen - 5}, ${blue}, ${brightness})`;
+    } else {
+      // Slightly red stars (least common)
+      const brightness = Math.random() * 0.5 + 0.2;  // Much brighter
+      starColor = `rgba(255, 200, 200, ${brightness})`;
+    }
+    
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fillStyle = starColor;
+    context.fill();
+  }
+}
+
+// Add brighter foreground stars
+function addBrighterForegroundStars(context, size) {
+  // Brighter stars - increased number
+  const brightStarCount = Math.floor(size * size / 3000); 
+  
   for (let i = 0; i < brightStarCount; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
-    const radius = Math.random() * 2.5 + 1.5;
+    
+    // Larger stars for visibility
+    const radius = Math.random() * 1.5 + 0.6;
     
     // Vary bright star colors for realism
     const colorVariation = Math.random();
@@ -1424,26 +1490,26 @@ function addForegroundStars(context, size) {
     
     if (colorVariation < 0.6) {
       // White/blue stars
-      coreColor = 'rgba(255, 255, 255, 1)';
-      glowColor = 'rgba(200, 220, 255, 0.8)';
+      coreColor = 'rgba(255, 255, 255, 1.0)';  // Full opacity
+      glowColor = 'rgba(240, 250, 255, 0.7)';  // More visible glow
     } else if (colorVariation < 0.85) {
       // Yellow/orange stars
-      coreColor = 'rgba(255, 250, 220, 1)';
-      glowColor = 'rgba(255, 240, 180, 0.8)';
+      coreColor = 'rgba(255, 250, 230, 1.0)';  // Full opacity
+      glowColor = 'rgba(255, 240, 190, 0.7)';  // More visible glow
     } else {
       // Red stars
-      coreColor = 'rgba(255, 230, 230, 1)';
-      glowColor = 'rgba(255, 180, 180, 0.8)';
+      coreColor = 'rgba(255, 230, 230, 1.0)';  // Full opacity
+      glowColor = 'rgba(255, 190, 190, 0.7)';  // More visible glow
     }
     
-    // Create a radial gradient for the star glow
-    const gradient = context.createRadialGradient(x, y, 0, x, y, radius * 4);
+    // Create a more prominent glow
+    const gradient = context.createRadialGradient(x, y, 0, x, y, radius * 3.0);
     gradient.addColorStop(0, coreColor);
     gradient.addColorStop(0.5, glowColor);
     gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
     
     context.beginPath();
-    context.arc(x, y, radius * 4, 0, Math.PI * 2);
+    context.arc(x, y, radius * 3.0, 0, Math.PI * 2);
     context.fillStyle = gradient;
     context.fill();
     
@@ -1453,11 +1519,11 @@ function addForegroundStars(context, size) {
     context.fillStyle = coreColor;
     context.fill();
     
-    // Add random diffraction spikes to some bright stars for realism
-    if (Math.random() > 0.3) {
-      const spikeLength = radius * (Math.random() * 6 + 6);
+    // Add subtle diffraction spikes to only the brightest stars
+    if (Math.random() > 0.5) { // More stars get spikes (50% vs 30% before)
+      const spikeLength = radius * (Math.random() * 3 + 3); // Longer spikes
       context.strokeStyle = glowColor;
-      context.lineWidth = Math.random() * 1.2 + 0.5;
+      context.lineWidth = Math.random() * 0.7 + 0.3; // Slightly thicker spikes
       
       // Horizontal spike
       context.beginPath();
@@ -1471,8 +1537,8 @@ function addForegroundStars(context, size) {
       context.lineTo(x, y + spikeLength);
       context.stroke();
       
-      // Optional diagonal spikes for some stars
-      if (Math.random() > 0.5) {
+      // More stars get diagonal spikes (30% vs 10% before)
+      if (Math.random() > 0.7) {
         const diagonalLength = spikeLength * 0.7;
         
         // Diagonal spike 1
@@ -1491,113 +1557,125 @@ function addForegroundStars(context, size) {
   }
 }
 
-// Add a prominent Milky Way band to the spherical canvas
-function addMilkyWayToSphericalCanvas(context, size) {
+// Add a brighter Milky Way
+function addBrighterMilkyWay(context, size) {
   // Create a wide, sweeping Milky Way band across the sky
-  // The band will be positioned diagonally across the equirectangular map
-  
-  // Define the Milky Way path
   const centerY = size * 0.5;
-  const bandWidth = size * 0.7; // Even wider band for more prominence
-  const startY = centerY - bandWidth / 2;
-  const endY = centerY + bandWidth / 2;
+  const bandWidth = size * 0.5; // Wider band for better visibility
   
-  // Draw the main band with a slight curve
-  context.save();
-  context.translate(size/2, size/2);
-  context.rotate(Math.PI * 0.1); // Slight rotation
-  context.translate(-size/2, -size/2);
+  // Use screen blend mode for brighter appearance
+  context.globalCompositeOperation = 'screen';
   
-  // Create a gradient for the main Milky Way band - brighter and more realistic
-  const gradient = context.createLinearGradient(0, startY, 0, endY);
-  gradient.addColorStop(0, 'rgba(30, 50, 100, 0)');
-  gradient.addColorStop(0.2, 'rgba(70, 120, 200, 0.6)');
-  gradient.addColorStop(0.5, 'rgba(180, 215, 255, 0.8)');
-  gradient.addColorStop(0.8, 'rgba(70, 120, 200, 0.6)');
-  gradient.addColorStop(1, 'rgba(30, 50, 100, 0)');
+  // Main Milky Way band - brighter
+  const mainGradient = context.createLinearGradient(0, centerY - bandWidth/2, 0, centerY + bandWidth/2);
+  mainGradient.addColorStop(0, 'rgba(10, 20, 40, 0)');
+  mainGradient.addColorStop(0.2, 'rgba(30, 40, 70, 0.2)'); // Brighter
+  mainGradient.addColorStop(0.5, 'rgba(40, 50, 90, 0.3)'); // Brighter
+  mainGradient.addColorStop(0.8, 'rgba(30, 40, 70, 0.2)'); // Brighter
+  mainGradient.addColorStop(1, 'rgba(10, 20, 40, 0)');
   
-  context.fillStyle = gradient;
-  context.fillRect(0, startY, size, endY - startY);
+  context.fillStyle = mainGradient;
+  context.fillRect(0, centerY - bandWidth/2, size, bandWidth);
   
-  // Add a secondary band crossing the main one for a more realistic galaxy structure
-  context.globalCompositeOperation = 'screen'; // Blend mode for additive light
-  
-  const secondaryGradient = context.createLinearGradient(startY, 0, endY, 0);
-  secondaryGradient.addColorStop(0, 'rgba(30, 50, 100, 0)');
-  secondaryGradient.addColorStop(0.2, 'rgba(70, 100, 180, 0.4)');
-  secondaryGradient.addColorStop(0.5, 'rgba(140, 180, 255, 0.5)');
-  secondaryGradient.addColorStop(0.8, 'rgba(70, 100, 180, 0.4)');
-  secondaryGradient.addColorStop(1, 'rgba(30, 50, 100, 0)');
-  
-  context.fillStyle = secondaryGradient;
-  context.fillRect(startY, 0, endY - startY, size);
-  
-  // Add tertiary bands for more structure
-  const tertiaryBandCount = 5; // More bands for complexity
-  for (let i = 0; i < tertiaryBandCount; i++) {
-    const bandPosition = centerY + (Math.random() - 0.5) * bandWidth * 0.8;
-    const bandThickness = size * (0.05 + Math.random() * 0.15);
+  // Secondary bands for more complexity
+  const secondaryBandCount = 4;
+  for (let i = 0; i < secondaryBandCount; i++) {
+    const bandPosition = centerY + (Math.random() - 0.5) * bandWidth * 0.6;
+    const bandThickness = size * (0.08 + Math.random() * 0.12);
     
-    const tertiaryGradient = context.createLinearGradient(0, bandPosition - bandThickness/2, 0, bandPosition + bandThickness/2);
-    tertiaryGradient.addColorStop(0, 'rgba(70, 100, 180, 0)');
-    tertiaryGradient.addColorStop(0.5, 'rgba(140, 180, 255, 0.4)');
-    tertiaryGradient.addColorStop(1, 'rgba(70, 100, 180, 0)');
+    const secondaryGradient = context.createLinearGradient(0, bandPosition - bandThickness/2, 0, bandPosition + bandThickness/2);
+    secondaryGradient.addColorStop(0, 'rgba(15, 25, 50, 0)');
+    secondaryGradient.addColorStop(0.5, 'rgba(40, 60, 100, 0.25)'); // Brighter
+    secondaryGradient.addColorStop(1, 'rgba(15, 25, 50, 0)');
     
-    context.fillStyle = tertiaryGradient;
+    context.fillStyle = secondaryGradient;
     context.fillRect(0, bandPosition - bandThickness/2, size, bandThickness);
   }
   
   // Reset blend mode
   context.globalCompositeOperation = 'source-over';
   
-  // Add nebula-like clouds to the Milky Way
-  const nebulaCount = 35; // Even more nebulae for a richer galaxy
+  // Add a few subtle dust lanes
+  const dustLaneCount = 4;
+  for (let i = 0; i < dustLaneCount; i++) {
+    const laneY = centerY + (Math.random() - 0.5) * bandWidth * 0.7;
+    const laneThickness = size * (0.01 + Math.random() * 0.03);
+    const laneOpacity = Math.random() * 0.2 + 0.05;
+    
+    // Draw curved dust lane
+    context.beginPath();
+    context.moveTo(0, laneY);
+    
+    // Create wavy path for dust lane
+    const segments = 20;
+    for (let j = 1; j <= segments; j++) {
+      const x = size * j / segments;
+      const waveAmplitude = Math.random() * laneThickness * 4;
+      const waveFrequency = 2 + Math.random() * 3;
+      const y = laneY + Math.sin(j * waveFrequency) * waveAmplitude;
+      
+      if (j === 1) {
+        context.moveTo(x, y);
+      } else {
+        context.lineTo(x, y);
+      }
+    }
+    
+    context.strokeStyle = `rgba(0, 0, 0, ${laneOpacity})`;
+    context.lineWidth = laneThickness;
+    context.stroke();
+  }
+  
+  // Add brighter nebula-like clouds
+  const nebulaCount = 30;
   for (let i = 0; i < nebulaCount; i++) {
     // Position nebulae along the Milky Way band with some variation
     const angle = Math.random() * Math.PI * 2;
-    const distance = Math.random() * size * 0.45;
+    const distance = Math.random() * size * 0.35;
     const cloudX = size/2 + Math.cos(angle) * distance;
     const cloudY = size/2 + Math.sin(angle) * distance;
-    const cloudRadius = Math.random() * size * 0.18 + size * 0.06;
+    const cloudRadius = Math.random() * size * 0.1 + size * 0.03; // Larger nebulae
     
     const cloudGradient = context.createRadialGradient(
       cloudX, cloudY, 0,
       cloudX, cloudY, cloudRadius
     );
     
-    // More varied and vibrant nebula colors
+    // More visible nebula colors
     const colorType = Math.random();
-    let hue, saturation, lightness;
+    let hue, saturation, lightness, opacity;
     
-    if (colorType < 0.35) {
+    if (colorType < 0.4) {
       // Blue to purple nebulae
       hue = Math.floor(Math.random() * 60 + 200);
-      saturation = 70 + Math.floor(Math.random() * 30);
-      lightness = 55 + Math.floor(Math.random() * 20);
-    } else if (colorType < 0.7) {
+      saturation = 50 + Math.floor(Math.random() * 20);
+      lightness = 40 + Math.floor(Math.random() * 15);
+      opacity = 0.15 + Math.random() * 0.15; // Brighter
+    } else if (colorType < 0.75) {
       // Red to orange nebulae
-      hue = Math.floor(Math.random() * 30);
-      saturation = 70 + Math.floor(Math.random() * 30);
-      lightness = 55 + Math.floor(Math.random() * 20);
+      hue = Math.floor(Math.random() * 40);
+      saturation = 50 + Math.floor(Math.random() * 20);
+      lightness = 40 + Math.floor(Math.random() * 15);
+      opacity = 0.15 + Math.random() * 0.15; // Brighter
     } else if (colorType < 0.9) {
       // Teal to green nebulae
       hue = Math.floor(Math.random() * 40 + 160);
-      saturation = 60 + Math.floor(Math.random() * 30);
-      lightness = 50 + Math.floor(Math.random() * 20);
+      saturation = 40 + Math.floor(Math.random() * 20);
+      lightness = 35 + Math.floor(Math.random() * 15);
+      opacity = 0.15 + Math.random() * 0.15; // Brighter
     } else {
       // Pink to magenta nebulae (rare)
       hue = Math.floor(Math.random() * 30 + 300);
-      saturation = 70 + Math.floor(Math.random() * 30);
-      lightness = 60 + Math.floor(Math.random() * 15);
+      saturation = 50 + Math.floor(Math.random() * 20);
+      lightness = 40 + Math.floor(Math.random() * 15);
+      opacity = 0.15 + Math.random() * 0.15; // Brighter
     }
     
-    // Use screen blend mode for some nebulae to create brighter overlaps
-    if (Math.random() > 0.4) {
-      context.globalCompositeOperation = 'screen';
-    }
+    // Use screen blend mode for brighter effect
+    context.globalCompositeOperation = 'screen';
     
-    cloudGradient.addColorStop(0, `hsla(${hue}, ${saturation}%, ${lightness}%, 0.7)`);
-    cloudGradient.addColorStop(0.5, `hsla(${hue}, ${saturation-15}%, ${lightness-10}%, 0.5)`);
+    cloudGradient.addColorStop(0, `hsla(${hue}, ${saturation}%, ${lightness}%, ${opacity})`);
+    cloudGradient.addColorStop(0.5, `hsla(${hue}, ${saturation-10}%, ${lightness-5}%, ${opacity*0.6})`);
     cloudGradient.addColorStop(1, 'hsla(0, 0%, 0%, 0)');
     
     context.fillStyle = cloudGradient;
@@ -1608,106 +1686,74 @@ function addMilkyWayToSphericalCanvas(context, size) {
     // Reset blend mode
     context.globalCompositeOperation = 'source-over';
     
-    // Add star clusters within nebulae
-    const clusterStarCount = Math.floor(Math.random() * 50 + 40);
+    // Add stars within nebulae
+    const clusterStarCount = Math.floor(Math.random() * 25 + 15);
     for (let j = 0; j < clusterStarCount; j++) {
       // Position stars within the nebula
       const starAngle = Math.random() * Math.PI * 2;
       const starDistance = Math.random() * cloudRadius * 0.8;
       const starX = cloudX + Math.cos(starAngle) * starDistance;
       const starY = cloudY + Math.sin(starAngle) * starDistance;
-      const starRadius = Math.random() * 1.8 + 0.6;
+      const starRadius = Math.random() * 0.6 + 0.2;
       
       // Brighter stars in the nebula
       context.beginPath();
       context.arc(starX, starY, starRadius, 0, Math.PI * 2);
-      context.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.6 + 0.4})`;
+      context.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.4 + 0.2})`; // Brighter
       context.fill();
     }
   }
   
-  // Add a galactic core - bright central region
-  context.globalCompositeOperation = 'screen'; // Use screen blend mode for brighter core
+  // Add a brighter galactic core
+  context.globalCompositeOperation = 'screen';
   
   const coreGradient = context.createRadialGradient(
     size * 0.6, size * 0.5, 0,
-    size * 0.6, size * 0.5, size * 0.3
+    size * 0.6, size * 0.5, size * 0.2
   );
   
-  coreGradient.addColorStop(0, 'rgba(255, 245, 230, 0.8)');
-  coreGradient.addColorStop(0.2, 'rgba(255, 230, 200, 0.6)');
-  coreGradient.addColorStop(0.5, 'rgba(220, 180, 140, 0.4)');
-  coreGradient.addColorStop(0.8, 'rgba(180, 140, 100, 0.2)');
+  coreGradient.addColorStop(0, 'rgba(80, 70, 60, 0.3)'); // Brighter
+  coreGradient.addColorStop(0.2, 'rgba(70, 60, 50, 0.25)'); // Brighter
+  coreGradient.addColorStop(0.5, 'rgba(60, 50, 40, 0.2)'); // Brighter
+  coreGradient.addColorStop(0.8, 'rgba(50, 40, 30, 0.1)'); // Brighter
   coreGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
   
   context.fillStyle = coreGradient;
   context.beginPath();
-  context.arc(size * 0.6, size * 0.5, size * 0.3, 0, Math.PI * 2);
+  context.arc(size * 0.6, size * 0.5, size * 0.2, 0, Math.PI * 2);
   context.fill();
   
   // Add dense star field in the galactic core
-  for (let i = 0; i < 500; i++) {
+  for (let i = 0; i < 400; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const distance = Math.random() * size * 0.25;
+    const distance = Math.random() * size * 0.15;
     const x = size * 0.6 + Math.cos(angle) * distance;
     const y = size * 0.5 + Math.sin(angle) * distance;
-    const radius = Math.random() * 1.8 + 0.4;
+    const radius = Math.random() * 0.7 + 0.2;
     
     context.beginPath();
     context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.8 + 0.2})`;
+    context.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.5 + 0.2})`; // Brighter
     context.fill();
   }
   
-  // Add bright central bulge
+  // Add central bulge
   const bulgeGradient = context.createRadialGradient(
     size * 0.6, size * 0.5, 0,
-    size * 0.6, size * 0.5, size * 0.1
+    size * 0.6, size * 0.5, size * 0.07
   );
   
-  bulgeGradient.addColorStop(0, 'rgba(255, 250, 240, 0.9)');
-  bulgeGradient.addColorStop(0.5, 'rgba(255, 240, 220, 0.7)');
-  bulgeGradient.addColorStop(1, 'rgba(255, 230, 200, 0)');
+  bulgeGradient.addColorStop(0, 'rgba(90, 80, 70, 0.25)'); // Brighter
+  bulgeGradient.addColorStop(0.5, 'rgba(80, 70, 60, 0.2)'); // Brighter
+  bulgeGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
   
   context.fillStyle = bulgeGradient;
   context.beginPath();
-  context.arc(size * 0.6, size * 0.5, size * 0.1, 0, Math.PI * 2);
+  context.arc(size * 0.6, size * 0.5, size * 0.07, 0, Math.PI * 2);
   context.fill();
   
   // Reset blend mode
   context.globalCompositeOperation = 'source-over';
-  
-  // Add dark dust lanes across the Milky Way
-  for (let i = 0; i < 12; i++) {
-    const laneY = centerY + (Math.random() - 0.5) * bandWidth * 0.8;
-    const laneWidth = size * (0.05 + Math.random() * 0.15);
-    const laneOpacity = Math.random() * 0.6 + 0.2;
-    
-    // Create curved dust lanes
-    context.fillStyle = `rgba(0, 0, 0, ${laneOpacity})`;
-    
-    context.beginPath();
-    context.moveTo(0, laneY - laneWidth/2);
-    
-    // Add some waviness to the dust lanes
-    const segments = 10;
-    for (let j = 1; j <= segments; j++) {
-      const x = size * j / segments;
-      const yOffset = Math.sin(j * 0.5) * laneWidth * (Math.random() * 0.5 + 0.5);
-      context.lineTo(x, laneY - laneWidth/2 + yOffset);
-    }
-    
-    for (let j = segments; j >= 0; j--) {
-      const x = size * j / segments;
-      const yOffset = Math.sin(j * 0.5) * laneWidth * (Math.random() * 0.3 + 0.3);
-      context.lineTo(x, laneY + laneWidth/2 + yOffset);
-    }
-    
-    context.closePath();
-    context.fill();
-  }
-  
-  context.restore();
 }
 
 // Add atmospheric glow at the horizon
@@ -1814,6 +1860,111 @@ function darkenColor(color, percent) {
   return `#${(1 << 24 | R << 16 | G << 8 | B).toString(16).slice(1)}`;
 }
 
-// Create and add the space skybox with Milky Way and planets
-const spaceSkybox = createSpaceSkybox();
-scene.add(spaceSkybox);
+// Initialize scene elements in the correct order
+function initializeScene() {
+  console.log("Initializing scene elements...");
+  
+  // Create the HUD
+  createHUD();
+  console.log("HUD created");
+  
+  // Create the skybox first and make it globally accessible
+  window.spaceSkybox = createSpaceSkybox();
+  scene.add(window.spaceSkybox);
+  console.log("Skybox added to scene");
+  
+  // Initialize the terrain system
+  terrainSystem.init();
+  console.log("Terrain system initialized");
+  
+  // Start the animation loop with timestamp - ONLY CALL THIS ONCE
+  console.log("Starting animation loop");
+  animate(0);
+}
+
+// Add a day/night toggle and cycle
+let isDaytime = false; // Start with night scene
+
+function toggleDayNight() {
+  isDaytime = !isDaytime;
+  updateSkyAppearance();
+}
+
+function updateSkyAppearance() {
+  if (isDaytime) {
+    // Create Martian daytime sky
+    scene.fog = new THREE.Fog(0xd09060, 200, 2000); // Dusty orange-tan fog
+    scene.background = createMarsDaySkyTexture();
+    // Adjust lighting
+    sunLight.intensity = 0.9;
+    sunLight.position.set(10, 100, 10); // Sun overhead
+    ambientLight.intensity = 0.7;
+    ambientLight.color.set(0xff9966); // Warm ambient light
+  } else {
+    // Revert to night sky
+    scene.fog = new THREE.Fog(0xb77c5a, 500, 5000);
+    // Restore night skybox
+    scene.add(spaceSkybox);
+    // Adjust lighting
+    sunLight.intensity = 0.3;
+    sunLight.position.set(-10, -5, 10); // Low sun angle
+    ambientLight.intensity = 0.4;
+    ambientLight.color.set(0xff8866);
+  }
+}
+
+// Add a keypress handler for toggling
+document.addEventListener('keydown', function(event) {
+  if (event.key === 'l' || event.key === 'L') { // 'L' for Light cycle
+    toggleDayNight();
+  }
+});
+
+function createMarsDaySkyTexture() {
+  const canvas = document.createElement('canvas');
+  const canvasSize = 2048;
+  canvas.width = canvasSize;
+  canvas.height = canvasSize;
+  const context = canvas.getContext('2d');
+  
+  // Create gradient from horizon to zenith
+  const gradient = context.createLinearGradient(0, canvasSize, 0, 0);
+  gradient.addColorStop(0, '#c27e54'); // Dusty orange-brown at horizon
+  gradient.addColorStop(0.5, '#d7a28b'); // Pinkish in middle
+  gradient.addColorStop(1, '#e6b499'); // Lighter at zenith
+  
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvasSize, canvasSize);
+  
+  // Add atmospheric haze/dust
+  addMarsDust(context, canvasSize);
+  
+  // Add sun
+  addMarsSun(context, canvasSize);
+  
+  // Add Phobos and Deimos (Mars' moons)
+  addMarsMoons(context, canvasSize);
+  
+  // Create texture from canvas
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  
+  return texture;
+}
+
+// Run the initialization in the correct order
+initializeScene();
+
+// Initialize the camera mode toggle
+document.addEventListener('keydown', function(event) {
+  if (event.key === 'c' || event.key === 'C') {
+    toggleCameraMode();
+  }
+});
+
+// Resize Window
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
