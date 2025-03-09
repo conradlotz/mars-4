@@ -600,7 +600,7 @@ function animate(time) {
   requestAnimationFrame(animate);
   
   // Calculate delta time for consistent movement regardless of frame rate
-  const delta = time - lastTime;
+  const delta = time - lastTime || 16.67; // Default to 60fps if lastTime is not set
   lastTime = time;
   
   // Skip frames if browser tab is inactive or delta is too large (indicating lag)
@@ -621,16 +621,32 @@ function animate(time) {
   // Movement calculations
   if (keys.w || keys.s) {
     const direction = keys.w ? -1 : 1;
-    rover.position.x += Math.sin(roverYaw) * speed * direction;
-    rover.position.z += Math.cos(roverYaw) * speed * direction;
+    
+    // Calculate new position
+    const newX = rover.position.x + Math.sin(roverYaw) * speed * direction;
+    const newZ = rover.position.z + Math.cos(roverYaw) * speed * direction;
+    
+    // Apply movement
+    rover.position.x = newX;
+    rover.position.z = newZ;
+    
     isMoving = true;
     wheelRotationSpeed = keys.w ? -0.1 : 0.1;
   }
   
-  // Basic collision detection - prevent going off the edge
-  const surfaceSize = 100; // Half the size of our 200x200 plane
-  if (Math.abs(rover.position.x) > surfaceSize || Math.abs(rover.position.z) > surfaceSize) {
-    // Reset to previous position if going off the edge
+  // Update terrain system with current rover position
+  terrainSystem.update(rover.position);
+  
+  // Basic collision detection - prevent going off the edge of the current terrain system
+  const currentChunk = terrainSystem.getChunkCoords(rover.position.x, rover.position.z);
+  const chunkDistance = Math.max(
+    Math.abs(currentChunk.x - terrainSystem.currentChunk.x),
+    Math.abs(currentChunk.z - terrainSystem.currentChunk.z)
+  );
+  
+  // If we're too far from the current chunk center or outside the terrain bounds
+  if (chunkDistance > terrainSystem.visibleRadius) {
+    // Reset to previous position if going too far
     rover.position.x = previousPosition.x;
     rover.position.z = previousPosition.z;
     isMoving = false;
@@ -640,6 +656,10 @@ function animate(time) {
   if (keys.a || keys.d) {
     const turnDirection = keys.a ? 1 : -1;
     roverYaw += rotationSpeed * turnDirection;
+    
+    // Normalize roverYaw to keep it within 0-2π range to prevent floating point issues
+    roverYaw = roverYaw % (Math.PI * 2);
+    if (roverYaw < 0) roverYaw += Math.PI * 2;
     
     // Differential wheel rotation for turning - only update if moving
     if (isMoving) {
@@ -707,16 +727,40 @@ function positionRoverOnTerrain() {
   // Position the ray origin above the rover's current position
   window.terrainRaycaster.ray.origin.set(rover.position.x, 20, rover.position.z);
   
-  // Check for intersections with the terrain
-  const intersects = window.terrainRaycaster.intersectObject(marsSurface);
+  // Get all active terrain chunks to check for intersections
+  const terrainChunks = [];
+  for (const chunk of terrainSystem.chunks.values()) {
+    terrainChunks.push(chunk);
+  }
   
-  if (intersects.length > 0) {
+  // If no chunks are available, use the main surface as fallback
+  if (terrainChunks.length === 0) {
+    terrainChunks.push(marsSurface);
+  }
+  
+  // Check for intersections with all terrain chunks
+  let closestIntersection = null;
+  let closestDistance = Infinity;
+  
+  for (const chunk of terrainChunks) {
+    const intersects = window.terrainRaycaster.intersectObject(chunk);
+    
+    if (intersects.length > 0) {
+      const distance = intersects[0].distance;
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestIntersection = intersects[0];
+      }
+    }
+  }
+  
+  if (closestIntersection) {
     // Position the rover at the intersection point plus a smaller offset to be closer to ground
-    rover.position.y = intersects[0].point.y + 1.5;
+    rover.position.y = closestIntersection.point.y + 1.5;
     
     // Only calculate terrain alignment if the slope is significant
-    const normal = intersects[0].face.normal.clone();
-    normal.transformDirection(marsSurface.matrixWorld);
+    const normal = closestIntersection.face.normal.clone();
+    normal.transformDirection(closestIntersection.object.matrixWorld);
     
     // Create a temporary up vector
     const up = new THREE.Vector3(0, 1, 0);
