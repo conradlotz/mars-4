@@ -23,18 +23,23 @@ marsBumpMap.wrapS = THREE.RepeatWrapping;
 marsBumpMap.wrapT = THREE.RepeatWrapping;
 marsBumpMap.repeat.set(4, 4);
 
-const marsSurface = new THREE.Mesh(
-  new THREE.PlaneGeometry(200, 200, 32, 32),
-  new THREE.MeshStandardMaterial({ 
-    map: marsTexture,
-    bumpMap: marsBumpMap,
-    bumpScale: 0.5,
-    roughness: 0.8,
-    metalness: 0.2
-  })
-);
-marsSurface.rotation.x = -Math.PI / 2;
-marsSurface.receiveShadow = true;
+// Replace the simple Mars surface with the realistic terrain
+// const marsSurface = new THREE.Mesh(
+//   new THREE.PlaneGeometry(200, 200, 32, 32),
+//   new THREE.MeshStandardMaterial({ 
+//     map: marsTexture,
+//     bumpMap: marsBumpMap,
+//     bumpScale: 0.5,
+//     roughness: 0.8,
+//     metalness: 0.2
+//   })
+// );
+// marsSurface.rotation.x = -Math.PI / 2;
+// marsSurface.receiveShadow = true;
+// scene.add(marsSurface);
+
+// Create and add the realistic Mars terrain
+const marsSurface = createRealisticMarsTerrain();
 scene.add(marsSurface);
 
 // Improved Rover Model
@@ -541,16 +546,60 @@ function updateCamera() {
   }
 }
 
-// Add this function before your animate function
+// Update this function to use raycasting for proper terrain following
 function positionRoverOnTerrain() {
-  // Since we're using a flat plane for Mars surface in your current code,
-  // we'll just set a fixed height for the rover
+  // Create a raycaster to detect the height of the terrain at the rover's position
+  const raycaster = new THREE.Raycaster();
+  raycaster.ray.direction.set(0, -1, 0); // Cast ray downward
   
-  // For a flat surface, we can simply set the rover's y position
-  rover.position.y = 1.5; // Height above the surface
+  // Position the ray origin above the rover's current position
+  raycaster.ray.origin.set(rover.position.x, 20, rover.position.z);
   
-  // If you want to add terrain following later, you can expand this function
-  // to use raycasting to detect the height of the terrain at the rover's position
+  // Check for intersections with the terrain
+  const intersects = raycaster.intersectObject(marsSurface);
+  
+  if (intersects.length > 0) {
+    // Position the rover at the intersection point plus a small offset
+    rover.position.y = intersects[0].point.y + 1.5;
+    
+    // Optional: Align rover to terrain normal for slopes
+    // This makes the rover tilt according to the terrain
+    const normal = intersects[0].face.normal.clone();
+    normal.transformDirection(marsSurface.matrixWorld);
+    
+    // Create a temporary up vector
+    const up = new THREE.Vector3(0, 1, 0);
+    
+    // Calculate the angle between the normal and up vector
+    const angle = up.angleTo(normal);
+    
+    // Only apply tilt if the angle is significant but not too steep
+    if (angle > 0.05 && angle < Math.PI / 6) {
+      // IMPORTANT: Save the current Y rotation before applying terrain tilt
+      const currentYRotation = rover.rotation.y;
+      
+      // Create rotation axis (perpendicular to both vectors)
+      const axis = new THREE.Vector3().crossVectors(up, normal).normalize();
+      
+      // Apply subtle rotation to match terrain (reduced effect for stability)
+      rover.quaternion.setFromAxisAngle(axis, angle * 0.5);
+      
+      // IMPORTANT: Reapply the Y rotation after terrain tilt
+      // Create a rotation quaternion for the Y axis
+      const yRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), currentYRotation);
+      
+      // Combine the terrain tilt with the Y rotation
+      rover.quaternion.premultiply(yRotation);
+    } else {
+      // On flat terrain, only apply the Y rotation
+      rover.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rover.rotation.y);
+      rover.rotation.x = 0;
+      rover.rotation.z = 0;
+    }
+  } else {
+    // Fallback if no intersection found
+    rover.position.y = 1.5;
+  }
 }
 
 // Modify the animate function to update the camera
