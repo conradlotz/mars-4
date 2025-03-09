@@ -338,6 +338,8 @@ function createSolarPanelTexture() {
 }
 
 const { rover, wheels } = createRealisticRover();
+// Set initial rotation to face away from the screen
+rover.rotation.y = 0;
 scene.add(rover);
 
 // Dust Particle System
@@ -430,6 +432,7 @@ controls.dampingFactor = 0.05;
 controls.minDistance = 10;
 controls.maxDistance = 100;
 controls.maxPolarAngle = Math.PI / 2 - 0.1; // Prevent going below the ground
+controls.enabled = false; // Disable orbit controls since we're starting in third-person mode
 
 // Movement Logic
 const keys = { w: false, a: false, s: false, d: false };
@@ -446,8 +449,10 @@ window.addEventListener('keyup', (event) => {
 });
 
 // Add camera modes and third-person view
-let cameraMode = 'orbit'; // 'orbit', 'thirdPerson', 'firstPerson'
-const cameraOffset = new THREE.Vector3(0, 5, 10); // Default third-person camera position (behind and above)
+const cameraOffset = new THREE.Vector3(0, 7, 15); // Positive Z to position behind the rover
+
+// Change default camera mode to thirdPerson
+let cameraMode = 'thirdPerson'; // 'orbit', 'thirdPerson', 'firstPerson'
 
 // Function to toggle between camera modes
 function toggleCameraMode() {
@@ -495,13 +500,13 @@ function updateCamera() {
         rover.position.z + offset.z
       );
       
-      // Smoothly move the camera to the target position
-      camera.position.lerp(targetPosition, 0.1);
+      // Smoothly move the camera to the target position (increased smoothness)
+      camera.position.lerp(targetPosition, 0.05);
       
-      // Make the camera look at the rover
+      // Make the camera look at the rover with slight offset for better view
       camera.lookAt(
         rover.position.x,
-        rover.position.y + 2, // Look slightly above the rover
+        rover.position.y + 1.5, // Look at the middle of the rover
         rover.position.z
       );
       break;
@@ -563,15 +568,15 @@ function animate() {
   };
   
   if (keys.w) {
-    rover.position.x += Math.sin(rover.rotation.y) * speed;
-    rover.position.z += Math.cos(rover.rotation.y) * speed;
+    rover.position.x -= Math.sin(rover.rotation.y) * speed;
+    rover.position.z -= Math.cos(rover.rotation.y) * speed;
     isMoving = true;
     wheelRotationSpeed = -0.1; // Forward wheel rotation
   }
   
   if (keys.s) {
-    rover.position.x -= Math.sin(rover.rotation.y) * speed;
-    rover.position.z -= Math.cos(rover.rotation.y) * speed;
+    rover.position.x += Math.sin(rover.rotation.y) * speed;
+    rover.position.z += Math.cos(rover.rotation.y) * speed;
     isMoving = true;
     wheelRotationSpeed = 0.1; // Backward wheel rotation
   }
@@ -586,7 +591,7 @@ function animate() {
   }
   
   if (keys.a) {
-    rover.rotation.y += rotationSpeed;
+    rover.rotation.y += rotationSpeed; // Turn left
     // Differential wheel rotation for turning
     if (isMoving) {
       wheels.forEach(wheel => {
@@ -594,7 +599,7 @@ function animate() {
       });
     }
   } else if (keys.d) {
-    rover.rotation.y -= rotationSpeed;
+    rover.rotation.y -= rotationSpeed; // Turn right
     // Differential wheel rotation for turning
     if (isMoving) {
       wheels.forEach(wheel => {
@@ -639,7 +644,7 @@ function createHUD() {
   hudElement.style.borderRadius = '5px';
   hudElement.style.pointerEvents = 'none'; // Don't interfere with mouse events
   hudElement.id = 'cameraHUD';
-  hudElement.innerHTML = 'Camera: Orbit Mode (Press C to change)';
+  hudElement.innerHTML = 'Camera: Third Person Mode (Press C to change)';
   document.body.appendChild(hudElement);
   
   // Update HUD when camera mode changes
@@ -649,13 +654,13 @@ function createHUD() {
       if (hud) {
         switch(cameraMode) {
           case 'orbit':
-            hud.innerHTML = 'Camera: Third Person Mode (Press C to change)';
+            hud.innerHTML = 'Camera: Orbit Mode (Press C to change)';
             break;
           case 'thirdPerson':
-            hud.innerHTML = 'Camera: First Person Mode (Press C to change)';
+            hud.innerHTML = 'Camera: Third Person Mode (Press C to change)';
             break;
           case 'firstPerson':
-            hud.innerHTML = 'Camera: Orbit Mode (Press C to change)';
+            hud.innerHTML = 'Camera: First Person Mode (Press C to change)';
             break;
         }
       }
