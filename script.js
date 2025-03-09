@@ -1297,103 +1297,119 @@ function createMarsRoughnessMap() {
   return new THREE.CanvasTexture(canvas);
 }
 
-// Create a skybox with Milky Way and planets - improved version for realism and seamless borders
+// Create a skybox with Milky Way and planets - improved dome-like version
 function createSpaceSkybox() {
-  // Create a large cube for the skybox - increased size for better immersion
-  const skyboxGeometry = new THREE.BoxGeometry(1200, 1200, 1200);
- 
-  // Create materials for each side of the cube
-  const materialArray = [];
+  // Use a sphere instead of a cube for a dome-like appearance without corners
+  // Increased size and segments for better quality
+  const skyboxGeometry = new THREE.SphereGeometry(2000, 96, 96);
   
-  // Create the skybox textures programmatically - with caching
-  const skyboxTextures = createMilkyWayTextures();
-  
-  // Add materials with the generated textures
-  for (let i = 0; i < 6; i++) {
-    materialArray.push(new THREE.MeshBasicMaterial({
-      map: skyboxTextures[i],
-      side: THREE.BackSide,
-      fog: false
-    }));
-  }
+  // Create a single material for the entire skybox sphere
+  const skyboxMaterial = new THREE.MeshBasicMaterial({
+    map: createSphericalSkyTexture(),
+    side: THREE.BackSide,
+    fog: false
+  });
   
   // Create the skybox mesh
-  const skybox = new THREE.Mesh(skyboxGeometry, materialArray);
+  const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
   return skybox;
 }
 
-// Create textures for the Milky Way skybox - improved version for realism and seamless borders
-function createMilkyWayTextures() {
-  // Cache for textures to avoid regenerating them on every call
-  if (window.cachedSkyboxTextures) {
-    return window.cachedSkyboxTextures;
+// Create a single spherical texture for the dome-like skybox
+function createSphericalSkyTexture() {
+  // Cache for texture to avoid regenerating it on every call
+  if (window.cachedSkyboxTexture) {
+    return window.cachedSkyboxTexture;
   }
   
-  const textures = [];
-  const canvasSize = 1024; // Increased from 512 for better quality
-  
-  // Generate a consistent star field for all faces to avoid visible seams
-  const starField = generateConsistentStarField(canvasSize);
-  
-  // Create 6 textures for each side of the skybox
-  for (let i = 0; i < 6; i++) {
-    const canvas = document.createElement('canvas');
-    canvas.width = canvasSize;
-    canvas.height = canvasSize;
-    const context = canvas.getContext('2d');
-    
-    // Fill with deep space color - using a darker base for better contrast with stars
-    const spaceGradient = context.createRadialGradient(
-      canvasSize/2, canvasSize/2, 0,
-      canvasSize/2, canvasSize/2, canvasSize * 0.8
-    );
-    spaceGradient.addColorStop(0, '#030B20'); // Deep blue core
-    spaceGradient.addColorStop(0.5, '#020814'); // Darker middle
-    spaceGradient.addColorStop(1, '#010308'); // Almost black edges
-    
-    context.fillStyle = spaceGradient;
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    
-    // Apply the consistent star field
-    context.drawImage(starField, 0, 0);
-    
-    // Add Milky Way band with consistent positioning across cube faces
-    addSeamlessMilkyWay(context, canvas.width, canvas.height, i);
-    
-    // Add planets to specific sides with consistent positioning
-    if (i === 2) { // Front face - Mars-like
-      addPlanetToCanvas(context, canvas.width * 0.7, canvas.height * 0.3, canvas.width * 0.05, '#A67C52');
-    } else if (i === 0) { // Right face - Earth-like
-      addPlanetToCanvas(context, canvas.width * 0.2, canvas.height * 0.6, canvas.width * 0.03, '#C9E3F5');
-    } else if (i === 4) { // Top face - Saturn-like
-      addPlanetToCanvas(context, canvas.width * 0.8, canvas.height * 0.8, canvas.width * 0.08, '#E0B568', true);
-    }
-    
-    textures.push(new THREE.CanvasTexture(canvas));
-  }
-  
-  // Cache the textures
-  window.cachedSkyboxTextures = textures;
-  
-  return textures;
-}
-
-// Generate a consistent star field to be used across all skybox faces
-function generateConsistentStarField(size) {
+  // Create a large canvas for the spherical map
   const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
+  const canvasSize = 4096; // Doubled resolution for better quality
+  canvas.width = canvasSize;
+  canvas.height = canvasSize;
   const context = canvas.getContext('2d');
   
-  // Clear canvas
-  context.clearRect(0, 0, size, size);
+  // Fill with deep space color - using a darker base for better contrast with stars
+  context.fillStyle = '#000005'; // Almost black with slight blue tint
+  context.fillRect(0, 0, canvas.width, canvas.height);
   
-  // Add small stars - increased count for more realism
-  const starCount = Math.floor(size * size / 400); // More stars for a denser field
+  // Add background stars across the entire sky - dense layer
+  addBackgroundStarsLayer(context, canvasSize);
+  
+  // Add a prominent Milky Way band across the sky
+  addMilkyWayToSphericalCanvas(context, canvasSize);
+  
+  // Add mid-layer stars that appear in front of distant nebulae but behind bright features
+  addMidLayerStars(context, canvasSize);
+  
+  // Add foreground stars - the brightest stars with glow effects
+  addForegroundStars(context, canvasSize);
+  
+  // Add a few planets
+  // Mars-like planet
+  addPlanetToCanvas(context, canvasSize * 0.7, canvasSize * 0.3, canvasSize * 0.03, '#A67C52');
+  
+  // Earth-like planet
+  addPlanetToCanvas(context, canvasSize * 0.2, canvasSize * 0.6, canvasSize * 0.02, '#C9E3F5');
+  
+  // Saturn-like planet with rings
+  addPlanetToCanvas(context, canvasSize * 0.8, canvasSize * 0.8, canvasSize * 0.04, '#E0B568', true);
+  
+  // Create texture from canvas
+  const texture = new THREE.CanvasTexture(canvas);
+  
+  // Set texture mapping for a sphere
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  
+  // Cache the texture
+  window.cachedSkyboxTexture = texture;
+  
+  return texture;
+}
+
+// Add a dense background layer of stars
+function addBackgroundStarsLayer(context, size) {
+  // Extremely dense background star field - fills the entire sky
+  const starCount = Math.floor(size * size / 100); // Much denser star field
+  
   for (let i = 0; i < starCount; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
-    const radius = Math.random() * 1.2;
+    const radius = Math.random() * 0.8; // Smaller stars for background
+    
+    // Vary star colors slightly for more realism
+    const colorVariation = Math.random();
+    let starColor;
+    
+    if (colorVariation < 0.7) {
+      // White to slightly blue stars (most common)
+      const blueIntensity = 180 + Math.floor(Math.random() * 75);
+      starColor = `rgba(220, 220, ${blueIntensity}, ${Math.random() * 0.3 + 0.2})`;
+    } else if (colorVariation < 0.85) {
+      // Slightly yellow/orange stars
+      const redGreen = 180 + Math.floor(Math.random() * 75);
+      starColor = `rgba(${redGreen}, ${redGreen - 20}, 150, ${Math.random() * 0.3 + 0.2})`;
+    } else {
+      // Slightly red stars (least common)
+      starColor = `rgba(200, 150, 150, ${Math.random() * 0.3 + 0.2})`;
+    }
+    
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fillStyle = starColor;
+    context.fill();
+  }
+}
+
+// Add mid-layer stars that appear between nebulae layers
+function addMidLayerStars(context, size) {
+  // Medium density star layer
+  const starCount = Math.floor(size * size / 400);
+  
+  for (let i = 0; i < starCount; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const radius = Math.random() * 1.2 + 0.3;
     
     // Vary star colors slightly for more realism
     const colorVariation = Math.random();
@@ -1402,14 +1418,14 @@ function generateConsistentStarField(size) {
     if (colorVariation < 0.7) {
       // White to slightly blue stars (most common)
       const blueIntensity = 220 + Math.floor(Math.random() * 35);
-      starColor = `rgba(255, 255, ${blueIntensity}, ${Math.random() * 0.5 + 0.5})`;
+      starColor = `rgba(255, 255, ${blueIntensity}, ${Math.random() * 0.6 + 0.4})`;
     } else if (colorVariation < 0.85) {
       // Slightly yellow/orange stars
       const redGreen = 220 + Math.floor(Math.random() * 35);
-      starColor = `rgba(${redGreen}, ${redGreen}, 180, ${Math.random() * 0.5 + 0.5})`;
+      starColor = `rgba(${redGreen}, ${redGreen}, 180, ${Math.random() * 0.6 + 0.4})`;
     } else {
       // Slightly red stars (least common)
-      starColor = `rgba(255, 200, 200, ${Math.random() * 0.5 + 0.5})`;
+      starColor = `rgba(255, 200, 200, ${Math.random() * 0.6 + 0.4})`;
     }
     
     context.beginPath();
@@ -1417,13 +1433,16 @@ function generateConsistentStarField(size) {
     context.fillStyle = starColor;
     context.fill();
   }
-  
+}
+
+// Add foreground stars - the brightest stars with glow effects
+function addForegroundStars(context, size) {
   // Add larger, brighter stars with glow
-  const brightStarCount = Math.floor(size * size / 5000);
+  const brightStarCount = Math.floor(size * size / 3000);
   for (let i = 0; i < brightStarCount; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
-    const radius = Math.random() * 2 + 1;
+    const radius = Math.random() * 2.5 + 1.5;
     
     // Vary bright star colors for realism
     const colorVariation = Math.random();
@@ -1444,13 +1463,13 @@ function generateConsistentStarField(size) {
     }
     
     // Create a radial gradient for the star glow
-    const gradient = context.createRadialGradient(x, y, 0, x, y, radius * 3);
+    const gradient = context.createRadialGradient(x, y, 0, x, y, radius * 4);
     gradient.addColorStop(0, coreColor);
     gradient.addColorStop(0.5, glowColor);
     gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
     
     context.beginPath();
-    context.arc(x, y, radius * 3, 0, Math.PI * 2);
+    context.arc(x, y, radius * 4, 0, Math.PI * 2);
     context.fillStyle = gradient;
     context.fill();
     
@@ -1461,10 +1480,10 @@ function generateConsistentStarField(size) {
     context.fill();
     
     // Add random diffraction spikes to some bright stars for realism
-    if (Math.random() > 0.5) {
-      const spikeLength = radius * (Math.random() * 5 + 5);
+    if (Math.random() > 0.3) {
+      const spikeLength = radius * (Math.random() * 6 + 6);
       context.strokeStyle = glowColor;
-      context.lineWidth = Math.random() * 0.8 + 0.2;
+      context.lineWidth = Math.random() * 1.2 + 0.5;
       
       // Horizontal spike
       context.beginPath();
@@ -1477,98 +1496,95 @@ function generateConsistentStarField(size) {
       context.moveTo(x, y - spikeLength);
       context.lineTo(x, y + spikeLength);
       context.stroke();
+      
+      // Optional diagonal spikes for some stars
+      if (Math.random() > 0.5) {
+        const diagonalLength = spikeLength * 0.7;
+        
+        // Diagonal spike 1
+        context.beginPath();
+        context.moveTo(x - diagonalLength * 0.7, y - diagonalLength * 0.7);
+        context.lineTo(x + diagonalLength * 0.7, y + diagonalLength * 0.7);
+        context.stroke();
+        
+        // Diagonal spike 2
+        context.beginPath();
+        context.moveTo(x - diagonalLength * 0.7, y + diagonalLength * 0.7);
+        context.lineTo(x + diagonalLength * 0.7, y - diagonalLength * 0.7);
+        context.stroke();
+      }
     }
   }
-  
-  return canvas;
 }
 
-// Add Milky Way band to the canvas - improved version for seamless borders
-function addSeamlessMilkyWay(context, width, height, faceIndex) {
-  // Calculate Milky Way band position consistently across cube faces
-  // This ensures the band appears continuous across cube edges
-  let bandParams;
+// Add a prominent Milky Way band to the spherical canvas
+function addMilkyWayToSphericalCanvas(context, size) {
+  // Create a wide, sweeping Milky Way band across the sky
+  // The band will be positioned diagonally across the equirectangular map
   
-  switch (faceIndex) {
-    case 0: // Right face
-      bandParams = {
-        startY: height * 0.3,
-        endY: height * 0.7,
-        intensity: 0.8,
-        rotation: 0
-      };
-      break;
-    case 1: // Bottom face - add subtle glow for continuity
-      bandParams = {
-        startY: height * 0.4,
-        endY: height * 0.6,
-        intensity: 0.3,
-        rotation: 0
-      };
-      break;
-    case 2: // Front face
-      bandParams = {
-        startY: height * 0.3,
-        endY: height * 0.7,
-        intensity: 0.8,
-        rotation: 0
-      };
-      break;
-    case 3: // Left face
-      bandParams = {
-        startY: height * 0.3,
-        endY: height * 0.7,
-        intensity: 0.8,
-        rotation: 0
-      };
-      break;
-    case 4: // Top face
-      bandParams = {
-        startY: height * 0.4,
-        endY: height * 0.6,
-        intensity: 0.6,
-        rotation: 0
-      };
-      break;
-    case 5: // Back face
-      bandParams = {
-        startY: height * 0.3,
-        endY: height * 0.7,
-        intensity: 0.8,
-        rotation: 0
-      };
-      break;
-    default:
-      return;
-  }
+  // Define the Milky Way path
+  const centerY = size * 0.5;
+  const bandWidth = size * 0.6; // Even wider band
+  const startY = centerY - bandWidth / 2;
+  const endY = centerY + bandWidth / 2;
   
-  const { startY, endY, intensity, rotation } = bandParams;
-  
-  // Save context for rotation if needed
+  // Draw the main band with a slight curve
   context.save();
-  if (rotation !== 0) {
-    context.translate(width/2, height/2);
-    context.rotate(rotation);
-    context.translate(-width/2, -height/2);
-  }
+  context.translate(size/2, size/2);
+  context.rotate(Math.PI * 0.1); // Slight rotation
+  context.translate(-size/2, -size/2);
   
-  // Create a gradient for the Milky Way band - brighter and more colorful
+  // Create a gradient for the main Milky Way band - brighter
   const gradient = context.createLinearGradient(0, startY, 0, endY);
   gradient.addColorStop(0, 'rgba(30, 50, 100, 0)');
-  gradient.addColorStop(0.2, `rgba(70, 120, 200, ${intensity * 0.4})`);
-  gradient.addColorStop(0.5, `rgba(120, 160, 220, ${intensity * 0.6})`);
-  gradient.addColorStop(0.8, `rgba(70, 120, 200, ${intensity * 0.4})`);
+  gradient.addColorStop(0.2, 'rgba(70, 120, 200, 0.5)');
+  gradient.addColorStop(0.5, 'rgba(160, 200, 255, 0.7)');
+  gradient.addColorStop(0.8, 'rgba(70, 120, 200, 0.5)');
   gradient.addColorStop(1, 'rgba(30, 50, 100, 0)');
   
   context.fillStyle = gradient;
-  context.fillRect(0, startY, width, endY - startY);
+  context.fillRect(0, startY, size, endY - startY);
   
-  // Add more nebula-like clouds to the Milky Way for visual interest
-  const nebulaCount = Math.min(5, Math.floor(width / 150));
+  // Add a secondary band crossing the main one for a more realistic galaxy structure
+  context.globalCompositeOperation = 'screen'; // Blend mode for additive light
+  
+  const secondaryGradient = context.createLinearGradient(startY, 0, endY, 0);
+  secondaryGradient.addColorStop(0, 'rgba(30, 50, 100, 0)');
+  secondaryGradient.addColorStop(0.2, 'rgba(70, 100, 180, 0.3)');
+  secondaryGradient.addColorStop(0.5, 'rgba(120, 160, 240, 0.4)');
+  secondaryGradient.addColorStop(0.8, 'rgba(70, 100, 180, 0.3)');
+  secondaryGradient.addColorStop(1, 'rgba(30, 50, 100, 0)');
+  
+  context.fillStyle = secondaryGradient;
+  context.fillRect(startY, 0, endY - startY, size);
+  
+  // Add tertiary bands for more structure
+  const tertiaryBandCount = 3;
+  for (let i = 0; i < tertiaryBandCount; i++) {
+    const bandPosition = centerY + (Math.random() - 0.5) * bandWidth * 0.7;
+    const bandThickness = size * (0.05 + Math.random() * 0.1);
+    
+    const tertiaryGradient = context.createLinearGradient(0, bandPosition - bandThickness/2, 0, bandPosition + bandThickness/2);
+    tertiaryGradient.addColorStop(0, 'rgba(70, 100, 180, 0)');
+    tertiaryGradient.addColorStop(0.5, 'rgba(120, 160, 240, 0.3)');
+    tertiaryGradient.addColorStop(1, 'rgba(70, 100, 180, 0)');
+    
+    context.fillStyle = tertiaryGradient;
+    context.fillRect(0, bandPosition - bandThickness/2, size, bandThickness);
+  }
+  
+  // Reset blend mode
+  context.globalCompositeOperation = 'source-over';
+  
+  // Add nebula-like clouds to the Milky Way
+  const nebulaCount = 25; // Even more nebulae for a richer galaxy
   for (let i = 0; i < nebulaCount; i++) {
-    const cloudX = Math.random() * width;
-    const cloudY = Math.random() * (endY - startY) + startY;
-    const cloudRadius = Math.random() * width * 0.25 + width * 0.15;
+    // Position nebulae along the Milky Way band with some variation
+    const angle = Math.random() * Math.PI * 2;
+    const distance = Math.random() * size * 0.4;
+    const cloudX = size/2 + Math.cos(angle) * distance;
+    const cloudY = size/2 + Math.sin(angle) * distance;
+    const cloudRadius = Math.random() * size * 0.15 + size * 0.05;
     
     const cloudGradient = context.createRadialGradient(
       cloudX, cloudY, 0,
@@ -1596,8 +1612,13 @@ function addSeamlessMilkyWay(context, width, height, faceIndex) {
       lightness = 45 + Math.floor(Math.random() * 20);
     }
     
-    cloudGradient.addColorStop(0, `hsla(${hue}, ${saturation}%, ${lightness}%, ${intensity * 0.5})`);
-    cloudGradient.addColorStop(0.5, `hsla(${hue}, ${saturation-20}%, ${lightness-10}%, ${intensity * 0.3})`);
+    // Use screen blend mode for some nebulae to create brighter overlaps
+    if (Math.random() > 0.5) {
+      context.globalCompositeOperation = 'screen';
+    }
+    
+    cloudGradient.addColorStop(0, `hsla(${hue}, ${saturation}%, ${lightness}%, 0.6)`);
+    cloudGradient.addColorStop(0.5, `hsla(${hue}, ${saturation-20}%, ${lightness-10}%, 0.4)`);
     cloudGradient.addColorStop(1, 'hsla(0, 0%, 0%, 0)');
     
     context.fillStyle = cloudGradient;
@@ -1605,14 +1626,17 @@ function addSeamlessMilkyWay(context, width, height, faceIndex) {
     context.arc(cloudX, cloudY, cloudRadius, 0, Math.PI * 2);
     context.fill();
     
-    // Add some star clusters within nebulae
-    const clusterStarCount = Math.floor(Math.random() * 20 + 10);
+    // Reset blend mode
+    context.globalCompositeOperation = 'source-over';
+    
+    // Add star clusters within nebulae
+    const clusterStarCount = Math.floor(Math.random() * 40 + 30);
     for (let j = 0; j < clusterStarCount; j++) {
       // Position stars within the nebula
-      const angle = Math.random() * Math.PI * 2;
-      const distance = Math.random() * cloudRadius * 0.7;
-      const starX = cloudX + Math.cos(angle) * distance;
-      const starY = cloudY + Math.sin(angle) * distance;
+      const starAngle = Math.random() * Math.PI * 2;
+      const starDistance = Math.random() * cloudRadius * 0.7;
+      const starX = cloudX + Math.cos(starAngle) * starDistance;
+      const starY = cloudY + Math.sin(starAngle) * starDistance;
       const starRadius = Math.random() * 1.5 + 0.5;
       
       // Brighter stars in the nebula
@@ -1623,126 +1647,52 @@ function addSeamlessMilkyWay(context, width, height, faceIndex) {
     }
   }
   
-  // Restore context if we rotated
-  if (rotation !== 0) {
-    context.restore();
-  }
-}
-
-// Add stars to the canvas - optimized version
-function addStarsToCanvas(context, width, height) {
-  // Add fewer small stars
-  const starCount = Math.min(300, Math.floor(width * height / 1000));
-  for (let i = 0; i < starCount; i++) {
-    const x = Math.random() * width;
-    const y = Math.random() * height;
-    const radius = Math.random() * 1.2;
-    const opacity = Math.random() * 0.8 + 0.2;
+  // Add a galactic core - bright central region
+  context.globalCompositeOperation = 'screen'; // Use screen blend mode for brighter core
+  
+  const coreGradient = context.createRadialGradient(
+    size * 0.6, size * 0.5, 0,
+    size * 0.6, size * 0.5, size * 0.25
+  );
+  
+  coreGradient.addColorStop(0, 'rgba(255, 240, 220, 0.7)');
+  coreGradient.addColorStop(0.3, 'rgba(255, 220, 180, 0.5)');
+  coreGradient.addColorStop(0.6, 'rgba(200, 160, 120, 0.3)');
+  coreGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  
+  context.fillStyle = coreGradient;
+  context.beginPath();
+  context.arc(size * 0.6, size * 0.5, size * 0.25, 0, Math.PI * 2);
+  context.fill();
+  
+  // Add dense star field in the galactic core
+  for (let i = 0; i < 300; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const distance = Math.random() * size * 0.2;
+    const x = size * 0.6 + Math.cos(angle) * distance;
+    const y = size * 0.5 + Math.sin(angle) * distance;
+    const radius = Math.random() * 1.5 + 0.3;
     
     context.beginPath();
     context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+    context.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.7 + 0.3})`;
     context.fill();
   }
   
-  // Add fewer larger, brighter stars
-  const brightStarCount = Math.min(20, Math.floor(width * height / 10000));
-  for (let i = 0; i < brightStarCount; i++) {
-    const x = Math.random() * width;
-    const y = Math.random() * height;
-    const radius = Math.random() * 1.5 + 0.5;
-    
-    // Create a radial gradient for the star glow
-    const gradient = context.createRadialGradient(x, y, 0, x, y, radius * 2);
-    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-    gradient.addColorStop(0.5, 'rgba(200, 220, 255, 0.4)');
-    gradient.addColorStop(1, 'rgba(200, 220, 255, 0)');
-    
-    context.beginPath();
-    context.arc(x, y, radius * 2, 0, Math.PI * 2);
-    context.fillStyle = gradient;
-    context.fill();
-    
-    // Star core
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fillStyle = 'rgba(255, 255, 255, 1)';
-    context.fill();
-  }
-}
-
-// Add Milky Way band to the canvas - optimized version
-function addMilkyWayToCanvas(context, width, height, faceIndex) {
-  // Different pattern for each face to create a continuous band
-  let startY, endY, intensity;
+  // Reset blend mode
+  context.globalCompositeOperation = 'source-over';
   
-  switch (faceIndex) {
-    case 0: // Right face
-      startY = height * 0.3;
-      endY = height * 0.7;
-      intensity = 0.7;
-      break;
-    case 2: // Front face
-      startY = height * 0.4;
-      endY = height * 0.6;
-      intensity = 0.8;
-      break;
-    case 3: // Left face
-      startY = height * 0.3;
-      endY = height * 0.7;
-      intensity = 0.7;
-      break;
-    case 4: // Top face
-      startY = height * 0.4;
-      endY = height * 0.6;
-      intensity = 0.5;
-      break;
-    case 5: // Back face
-      startY = height * 0.4;
-      endY = height * 0.6;
-      intensity = 0.8;
-      break;
-    default:
-      return;
+  // Add dark dust lanes across the Milky Way
+  for (let i = 0; i < 8; i++) {
+    const laneY = centerY + (Math.random() - 0.5) * bandWidth * 0.7;
+    const laneWidth = size * (0.05 + Math.random() * 0.1);
+    const laneOpacity = Math.random() * 0.5 + 0.2;
+    
+    context.fillStyle = `rgba(0, 0, 0, ${laneOpacity})`;
+    context.fillRect(0, laneY - laneWidth/2, size, laneWidth);
   }
   
-  // Create a gradient for the Milky Way band
-  const gradient = context.createLinearGradient(0, startY, 0, endY);
-  gradient.addColorStop(0, 'rgba(30, 50, 100, 0)');
-  gradient.addColorStop(0.2, `rgba(60, 100, 180, ${intensity * 0.3})`);
-  gradient.addColorStop(0.5, `rgba(100, 140, 200, ${intensity * 0.5})`);
-  gradient.addColorStop(0.8, `rgba(60, 100, 180, ${intensity * 0.3})`);
-  gradient.addColorStop(1, 'rgba(30, 50, 100, 0)');
-  
-  context.fillStyle = gradient;
-  context.fillRect(0, startY, width, endY - startY);
-  
-  // Add fewer nebula-like clouds to the Milky Way
-  const nebulaCount = Math.min(3, Math.floor(width / 200));
-  for (let i = 0; i < nebulaCount; i++) {
-    const cloudX = Math.random() * width;
-    const cloudY = Math.random() * (endY - startY) + startY;
-    const cloudRadius = Math.random() * width * 0.2 + width * 0.1;
-    
-    const cloudGradient = context.createRadialGradient(
-      cloudX, cloudY, 0,
-      cloudX, cloudY, cloudRadius
-    );
-    
-    // Random color for the nebula (blue, purple, or reddish)
-    const hue = Math.random() > 0.5 ? 
-      Math.floor(Math.random() * 60 + 200) : // Blue to purple
-      Math.floor(Math.random() * 30); // Red to orange
-    
-    cloudGradient.addColorStop(0, `hsla(${hue}, 100%, 70%, ${intensity * 0.4})`);
-    cloudGradient.addColorStop(0.5, `hsla(${hue}, 80%, 40%, ${intensity * 0.2})`);
-    cloudGradient.addColorStop(1, 'hsla(0, 0%, 0%, 0)');
-    
-    context.fillStyle = cloudGradient;
-    context.beginPath();
-    context.arc(cloudX, cloudY, cloudRadius, 0, Math.PI * 2);
-    context.fill();
-  }
+  context.restore();
 }
 
 // Add a planet to the canvas - optimized version
