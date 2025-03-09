@@ -3,11 +3,110 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
 camera.position.set(0, 10, 20);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+// Performance-optimized renderer
+const renderer = new THREE.WebGLRenderer({ 
+  antialias: false, // Disable antialiasing for performance
+  powerPreference: 'high-performance',
+  precision: 'mediump' // Use medium precision for better performance
+});
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.enabled = false; // Disable shadows for performance
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1)); // Limit pixel ratio to 1
 document.body.appendChild(renderer.domElement);
+
+// Fog for distance culling - increased distance for smoother transitions
+scene.fog = new THREE.Fog(0xb77c5a, 150, 400);
+
+// Endless terrain system with reduced complexity
+const terrainSystem = {
+  chunkSize: 200, // Size of each terrain chunk
+  visibleRadius: 1, // Reduced visible radius (3x3 grid instead of 5x5)
+  chunks: new Map(), // Store active chunks
+  currentChunk: { x: 0, z: 0 }, // Current chunk coordinates
+  lastUpdateTime: 0, // Track last update time for throttling
+  
+  // Get chunk key from coordinates
+  getChunkKey: function(x, z) {
+    return `${x},${z}`;
+  },
+  
+  // Get chunk coordinates from world position
+  getChunkCoords: function(worldX, worldZ) {
+    return {
+      x: Math.floor(worldX / this.chunkSize),
+      z: Math.floor(worldZ / this.chunkSize)
+    };
+  },
+  
+  // Update visible chunks based on rover position
+  update: function(roverPosition) {
+    // Throttle updates based on time instead of frames for more consistent performance
+    const now = performance.now();
+    if (now - this.lastUpdateTime < 1000) return; // Only update once per second
+    
+    // Get current chunk from rover position
+    const newChunk = this.getChunkCoords(roverPosition.x, roverPosition.z);
+    
+    // If rover moved to a new chunk, update visible chunks
+    if (newChunk.x !== this.currentChunk.x || newChunk.z !== this.currentChunk.z) {
+      this.currentChunk = newChunk;
+      this.updateVisibleChunks();
+      this.lastUpdateTime = now;
+    }
+  },
+  
+  // Update which chunks should be visible
+  updateVisibleChunks: function() {
+    // Track which chunks should be visible
+    const shouldBeVisible = new Set();
+    
+    // Calculate which chunks should be visible
+    for (let xOffset = -this.visibleRadius; xOffset <= this.visibleRadius; xOffset++) {
+      for (let zOffset = -this.visibleRadius; zOffset <= this.visibleRadius; zOffset++) {
+        const x = this.currentChunk.x + xOffset;
+        const z = this.currentChunk.z + zOffset;
+        const key = this.getChunkKey(x, z);
+        shouldBeVisible.add(key);
+        
+        // If chunk doesn't exist yet, create it
+        if (!this.chunks.has(key)) {
+          const chunk = this.createChunk(x, z);
+          this.chunks.set(key, chunk);
+          scene.add(chunk);
+        }
+      }
+    }
+    
+    // Remove chunks that are no longer visible
+    for (const [key, chunk] of this.chunks.entries()) {
+      if (!shouldBeVisible.has(key)) {
+        scene.remove(chunk);
+        this.chunks.delete(key);
+      }
+    }
+  },
+  
+  // Create a new terrain chunk
+  createChunk: function(chunkX, chunkZ) {
+    // Calculate world position of chunk
+    const worldX = chunkX * this.chunkSize;
+    const worldZ = chunkZ * this.chunkSize;
+    
+    // Create terrain with offset for this chunk
+    const terrain = createRealisticMarsTerrainChunk(this.chunkSize, worldX, worldZ);
+    
+    // Position the chunk correctly in world space
+    terrain.position.set(worldX + this.chunkSize/2, 0, worldZ + this.chunkSize/2);
+    
+    return terrain;
+  },
+  
+  // Initialize the terrain system
+  init: function() {
+    this.lastUpdateTime = performance.now();
+    this.updateVisibleChunks();
+  }
+};
 
 // Mars Surface Texture
 // const textureLoader = new THREE.TextureLoader();
