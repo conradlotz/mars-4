@@ -219,7 +219,8 @@ function createRealisticRover() {
   
   // Wheels - create 6 wheels with proper suspension mounting points
   const wheels = [];
-  const wheelGeometry = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 24);
+  // Increase wheel size by making them larger
+  const wheelGeometry = new THREE.CylinderGeometry(0.6, 0.6, 0.4, 24);
   const wheelMaterial = new THREE.MeshStandardMaterial({ 
     color: 0x222222,
     roughness: 0.9,
@@ -253,14 +254,14 @@ function createRealisticRover() {
     map: wheelTexture
   });
   
-  // Wheel positions - 3 on each side
+  // Wheel positions - 3 on each side (adjust positions for larger wheels)
   const wheelPositions = [
-    { x: -1.3, y: 0.4, z: 1.3 },  // Front left
-    { x: 1.3, y: 0.4, z: 1.3 },   // Front right
-    { x: -1.3, y: 0.4, z: 0 },    // Middle left
-    { x: 1.3, y: 0.4, z: 0 },     // Middle right
-    { x: -1.3, y: 0.4, z: -1.3 }, // Rear left
-    { x: 1.3, y: 0.4, z: -1.3 }   // Rear right
+    { x: -1.4, y: 0.6, z: 1.3 },  // Front left
+    { x: 1.4, y: 0.6, z: 1.3 },   // Front right
+    { x: -1.4, y: 0.6, z: 0 },    // Middle left
+    { x: 1.4, y: 0.6, z: 0 },     // Middle right
+    { x: -1.4, y: 0.6, z: -1.3 }, // Rear left
+    { x: 1.4, y: 0.6, z: -1.3 }   // Rear right
   ];
   
   const originalWheelPositions = [];
@@ -342,7 +343,7 @@ function createSolarPanelTexture() {
   return new THREE.CanvasTexture(canvas);
 }
 
-const { rover, wheels } = createRealisticRover();
+const { rover, wheels, originalWheelPositions } = createRealisticRover();
 // Set initial rotation to face away from the screen
 rover.rotation.y = 0;
 scene.add(rover);
@@ -407,14 +408,14 @@ const createDustParticles = () => {
 
 const dustParticles = createDustParticles();
 
-// Enhanced Lighting for Mars
-// Ambient light (dim reddish to simulate Mars atmosphere)
-const ambientLight = new THREE.AmbientLight(0xffccaa, 0.4);
+// Enhanced Lighting for Mars - update to match the reference image
+// Ambient light (stronger reddish to simulate Mars atmosphere)
+const ambientLight = new THREE.AmbientLight(0xff8866, 0.6);
 scene.add(ambientLight);
 
-// Directional light (sun)
-const sunLight = new THREE.DirectionalLight(0xffeedd, 1.2);
-sunLight.position.set(50, 80, -30);
+// Directional light (sun) - make it more orange/red like in the image
+const sunLight = new THREE.DirectionalLight(0xff7744, 1.0);
+sunLight.position.set(-50, 30, 50); // Position the sun lower on the horizon
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.width = 2048;
 sunLight.shadow.mapSize.height = 2048;
@@ -427,7 +428,7 @@ sunLight.shadow.camera.bottom = -100;
 scene.add(sunLight);
 
 // Add a subtle hemisphere light to simulate light bouncing off the surface
-const hemisphereLight = new THREE.HemisphereLight(0xffeedd, 0xaa4400, 0.3);
+const hemisphereLight = new THREE.HemisphereLight(0xff6633, 0xaa4400, 0.4);
 scene.add(hemisphereLight);
 
 // Orbit Controls
@@ -487,64 +488,8 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
-// Function to update camera position based on mode
-function updateCamera() {
-  switch(cameraMode) {
-    case 'thirdPerson':
-      // Calculate the desired camera position in third-person view
-      // This position is relative to the rover's position and rotation
-      const offset = cameraOffset.clone();
-      
-      // Rotate the offset based on the rover's rotation
-      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), rover.rotation.y);
-      
-      // Add the offset to the rover's position
-      const targetPosition = new THREE.Vector3(
-        rover.position.x + offset.x,
-        rover.position.y + offset.y,
-        rover.position.z + offset.z
-      );
-      
-      // Smoothly move the camera to the target position (increased smoothness)
-      camera.position.lerp(targetPosition, 0.05);
-      
-      // Make the camera look at the rover with slight offset for better view
-      camera.lookAt(
-        rover.position.x,
-        rover.position.y + 1.5, // Look at the middle of the rover
-        rover.position.z
-      );
-      break;
-      
-    case 'firstPerson':
-      // Position the camera at the rover's "head"
-      const headPosition = new THREE.Vector3(
-        rover.position.x,
-        rover.position.y + 2.5, // Position at the rover's camera height
-        rover.position.z
-      );
-      
-      // Get the forward direction of the rover
-      const forward = new THREE.Vector3(0, 0, -1);
-      forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), rover.rotation.y);
-      
-      // Set camera position
-      camera.position.copy(headPosition);
-      
-      // Look in the direction the rover is facing
-      camera.lookAt(
-        headPosition.x + forward.x * 10,
-        headPosition.y,
-        headPosition.z + forward.z * 10
-      );
-      break;
-      
-    case 'orbit':
-      // In orbit mode, the OrbitControls handle the camera
-      // We don't need to do anything here
-      break;
-  }
-}
+// Add a variable to track the rover's yaw rotation separately
+let roverYaw = 0;
 
 // Update this function to use raycasting for proper terrain following
 function positionRoverOnTerrain() {
@@ -560,10 +505,9 @@ function positionRoverOnTerrain() {
   
   if (intersects.length > 0) {
     // Position the rover at the intersection point plus a small offset
-    rover.position.y = intersects[0].point.y + 1.5;
+    rover.position.y = intersects[0].point.y + 1.8;
     
     // Optional: Align rover to terrain normal for slopes
-    // This makes the rover tilt according to the terrain
     const normal = intersects[0].face.normal.clone();
     normal.transformDirection(marsSurface.matrixWorld);
     
@@ -573,38 +517,80 @@ function positionRoverOnTerrain() {
     // Calculate the angle between the normal and up vector
     const angle = up.angleTo(normal);
     
-    // Only apply tilt if the angle is significant but not too steep
+    // Reset the rover's rotation
+    rover.rotation.set(0, 0, 0);
+    
+    // First apply the yaw rotation (this is tracked separately)
+    rover.rotateY(roverYaw);
+    
+    // Then apply terrain tilt if needed
     if (angle > 0.05 && angle < Math.PI / 6) {
-      // IMPORTANT: Save the current Y rotation before applying terrain tilt
-      const currentYRotation = rover.rotation.y;
-      
       // Create rotation axis (perpendicular to both vectors)
       const axis = new THREE.Vector3().crossVectors(up, normal).normalize();
       
-      // Apply subtle rotation to match terrain (reduced effect for stability)
-      rover.quaternion.setFromAxisAngle(axis, angle * 0.5);
+      // Create a quaternion for the terrain tilt
+      const tiltQuaternion = new THREE.Quaternion().setFromAxisAngle(axis, angle * 0.5);
       
-      // IMPORTANT: Reapply the Y rotation after terrain tilt
-      // Create a rotation quaternion for the Y axis
-      const yRotation = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), currentYRotation);
-      
-      // Combine the terrain tilt with the Y rotation
-      rover.quaternion.premultiply(yRotation);
-    } else {
-      // On flat terrain, only apply the Y rotation
-      rover.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), rover.rotation.y);
-      rover.rotation.x = 0;
-      rover.rotation.z = 0;
+      // Apply the tilt quaternion
+      rover.quaternion.premultiply(tiltQuaternion);
     }
   } else {
     // Fallback if no intersection found
-    rover.position.y = 1.5;
+    rover.position.y = 1.8;
+    
+    // Just apply the yaw rotation
+    rover.rotation.set(0, 0, 0);
+    rover.rotateY(roverYaw);
   }
 }
 
-// Modify the animate function to update the camera
+// Add a new function to implement wheel suspension with performance improvements
+function updateWheelSuspension(wheels, originalWheelPositions) {
+  // Only update suspension every few frames to improve performance
+  if (frameCount % 3 !== 0) return; // Skip 2 out of 3 frames
+  
+  // Create raycasters for each wheel to detect terrain height
+  wheels.forEach((wheel, index) => {
+    // Get wheel position in world space
+    const wheelPos = new THREE.Vector3();
+    wheel.getWorldPosition(wheelPos);
+    
+    // Create raycaster pointing down from wheel
+    const raycaster = new THREE.Raycaster();
+    raycaster.ray.origin.set(wheelPos.x, wheelPos.y + 1, wheelPos.z);
+    raycaster.ray.direction.set(0, -1, 0);
+    
+    // Check for intersections with terrain
+    const intersects = raycaster.intersectObject(marsSurface);
+    
+    if (intersects.length > 0) {
+      // Calculate how much the wheel should move based on terrain height
+      const terrainHeight = intersects[0].point.y;
+      const wheelHeight = wheelPos.y;
+      const desiredHeight = terrainHeight + 0.6; // Desired height above terrain
+      
+      // Calculate suspension compression (limited range)
+      const compression = Math.max(-0.3, Math.min(0.3, desiredHeight - wheelHeight));
+      
+      // Apply suspension to wheel position (in local space) with smoother transition
+      const currentY = wheel.position.y;
+      const targetY = originalWheelPositions[index] + compression;
+      wheel.position.y = currentY + (targetY - currentY) * 0.3; // Smooth transition
+    } else {
+      // If no terrain detected, reset to original position gradually
+      const currentY = wheel.position.y;
+      wheel.position.y = currentY + (originalWheelPositions[index] - currentY) * 0.3;
+    }
+  });
+}
+
+// Add a frame counter for performance optimization
+let frameCount = 0;
+
+// Modify the animate function to use the separate yaw tracking
 function animate() {
   requestAnimationFrame(animate);
+  frameCount++;
 
   // Rover Movement
   isMoving = false;
@@ -617,15 +603,17 @@ function animate() {
   };
   
   if (keys.w) {
-    rover.position.x -= Math.sin(rover.rotation.y) * speed;
-    rover.position.z -= Math.cos(rover.rotation.y) * speed;
+    // Use the tracked yaw for movement calculations
+    rover.position.x -= Math.sin(roverYaw) * speed;
+    rover.position.z -= Math.cos(roverYaw) * speed;
     isMoving = true;
     wheelRotationSpeed = -0.1; // Forward wheel rotation
   }
   
   if (keys.s) {
-    rover.position.x += Math.sin(rover.rotation.y) * speed;
-    rover.position.z += Math.cos(rover.rotation.y) * speed;
+    // Use the tracked yaw for movement calculations
+    rover.position.x += Math.sin(roverYaw) * speed;
+    rover.position.z += Math.cos(roverYaw) * speed;
     isMoving = true;
     wheelRotationSpeed = 0.1; // Backward wheel rotation
   }
@@ -639,21 +627,30 @@ function animate() {
     isMoving = false;
   }
   
+  // Handle turning by updating the tracked yaw value
   if (keys.a) {
-    rover.rotation.y += rotationSpeed; // Turn left
+    roverYaw += rotationSpeed;
+    
     // Differential wheel rotation for turning
     if (isMoving) {
-      wheels.forEach(wheel => {
-        wheel.rotation.x += wheelRotationSpeed;
-      });
+      for (let i = 0; i < wheels.length; i += 2) {
+        wheels[i].rotation.x += wheelRotationSpeed * 0.7; // Left wheels slower
+      }
+      for (let i = 1; i < wheels.length; i += 2) {
+        wheels[i].rotation.x += wheelRotationSpeed * 1.3; // Right wheels faster
+      }
     }
   } else if (keys.d) {
-    rover.rotation.y -= rotationSpeed; // Turn right
+    roverYaw -= rotationSpeed;
+    
     // Differential wheel rotation for turning
     if (isMoving) {
-      wheels.forEach(wheel => {
-        wheel.rotation.x += wheelRotationSpeed;
-      });
+      for (let i = 0; i < wheels.length; i += 2) {
+        wheels[i].rotation.x += wheelRotationSpeed * 1.3; // Left wheels faster
+      }
+      for (let i = 1; i < wheels.length; i += 2) {
+        wheels[i].rotation.x += wheelRotationSpeed * 0.7; // Right wheels slower
+      }
     }
   } else if (isMoving) {
     // Straight movement, all wheels rotate at the same speed
@@ -665,11 +662,16 @@ function animate() {
   // Position rover on terrain
   positionRoverOnTerrain();
   
+  // Update wheel suspension for realistic terrain following
+  updateWheelSuspension(wheels, originalWheelPositions);
+  
   // Update camera position based on mode
   updateCamera();
   
-  // Update dust particles
-  dustParticles.update(rover.position, isMoving);
+  // Update dust particles - only when moving and every other frame
+  if (isMoving && frameCount % 2 === 0) {
+    dustParticles.update(rover.position, isMoving);
+  }
 
   // Only update controls in orbit mode
   if (cameraMode === 'orbit') {
@@ -677,6 +679,63 @@ function animate() {
   }
   
   renderer.render(scene, camera);
+}
+
+// Update the camera function to use the tracked yaw
+function updateCamera() {
+  switch(cameraMode) {
+    case 'thirdPerson':
+      // Calculate the desired camera position in third-person view
+      const offset = cameraOffset.clone();
+      
+      // Rotate the offset based on the rover's yaw
+      offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), roverYaw);
+      
+      // Add the offset to the rover's position
+      const targetPosition = new THREE.Vector3(
+        rover.position.x + offset.x,
+        rover.position.y + offset.y,
+        rover.position.z + offset.z
+      );
+      
+      // Smoothly move the camera to the target position
+      camera.position.lerp(targetPosition, 0.05);
+      
+      // Make the camera look at the rover
+      camera.lookAt(
+        rover.position.x,
+        rover.position.y + 1.5,
+        rover.position.z
+      );
+      break;
+      
+    case 'firstPerson':
+      // Position the camera at the rover's "head"
+      const headPosition = new THREE.Vector3(
+        rover.position.x,
+        rover.position.y + 2.5,
+        rover.position.z
+      );
+      
+      // Get the forward direction based on the tracked yaw
+      const forward = new THREE.Vector3(0, 0, -1);
+      forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), roverYaw);
+      
+      // Set camera position
+      camera.position.copy(headPosition);
+      
+      // Look in the direction the rover is facing
+      camera.lookAt(
+        headPosition.x + forward.x * 10,
+        headPosition.y,
+        headPosition.z + forward.z * 10
+      );
+      break;
+      
+    case 'orbit':
+      // In orbit mode, the OrbitControls handle the camera
+      break;
+  }
 }
 
 // Add a simple HUD to show camera mode
@@ -897,12 +956,12 @@ function createRealisticMarsTexture() {
   canvas.height = 2048;
   const context = canvas.getContext('2d');
   
-  // Base color - Mars reddish-orange
+  // Base color - deeper reddish-orange like in the reference image
   const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, '#c1440e');
-  gradient.addColorStop(0.3, '#a93d0c');
-  gradient.addColorStop(0.6, '#b54214');
-  gradient.addColorStop(1, '#9c3a0a');
+  gradient.addColorStop(0, '#a83c0c');
+  gradient.addColorStop(0.3, '#8a3208');
+  gradient.addColorStop(0.6, '#9c3a0a');
+  gradient.addColorStop(1, '#7a2e08');
   
   context.fillStyle = gradient;
   context.fillRect(0, 0, canvas.width, canvas.height);
@@ -918,22 +977,22 @@ function createRealisticMarsTexture() {
       x, y, radius
     );
     
-    // Random variation of Mars colors
+    // Random variation of Mars colors - darker and more varied like in the image
     const colorType = Math.random();
     let color1, color2;
     
     if (colorType < 0.33) {
       // Darker regions (iron-rich)
-      color1 = '#8a2e0a';
-      color2 = '#9c3a0a';
+      color1 = '#6a2208';
+      color2 = '#7a2a08';
     } else if (colorType < 0.66) {
-      // Lighter, more orange regions (dust)
-      color1 = '#d15a1e';
-      color2 = '#c1440e';
+      // Medium reddish regions
+      color1 = '#9c3a0a';
+      color2 = '#8a3208';
     } else {
       // More brownish regions (clay minerals)
-      color1 = '#a05030';
-      color2 = '#8a4020';
+      color1 = '#704020';
+      color2 = '#603010';
     }
     
     gradient.addColorStop(0, color1);
@@ -947,6 +1006,34 @@ function createRealisticMarsTexture() {
     context.globalAlpha = 1.0;
   }
   
+  // Add more visible rock formations like in the reference image
+  for (let i = 0; i < 500; i++) {
+    const x = Math.random() * canvas.width;
+    const y = Math.random() * canvas.height;
+    const size = Math.random() * 30 + 10;
+    
+    // Random rock color
+    const rockColor = Math.random() < 0.5 ? 
+      `rgba(${60 + Math.random() * 30}, ${30 + Math.random() * 20}, ${20 + Math.random() * 10}, 0.7)` :
+      `rgba(${100 + Math.random() * 40}, ${50 + Math.random() * 30}, ${30 + Math.random() * 20}, 0.7)`;
+    
+    context.fillStyle = rockColor;
+    context.beginPath();
+    
+    // Create irregular rock shapes
+    context.moveTo(x, y);
+    for (let j = 0; j < 6; j++) {
+      const angle = j * Math.PI / 3;
+      const distance = size * (0.7 + Math.random() * 0.6);
+      context.lineTo(
+        x + Math.cos(angle) * distance,
+        y + Math.sin(angle) * distance
+      );
+    }
+    context.closePath();
+    context.fill();
+  }
+  
   // Add dust deposits
   for (let i = 0; i < 200; i++) {
     const x = Math.random() * canvas.width;
@@ -958,37 +1045,10 @@ function createRealisticMarsTexture() {
       x, y, radius
     );
     
-    gradient.addColorStop(0, 'rgba(230, 200, 180, 0.3)');
-    gradient.addColorStop(1, 'rgba(230, 200, 180, 0)');
+    gradient.addColorStop(0, 'rgba(200, 150, 120, 0.3)');
+    gradient.addColorStop(1, 'rgba(200, 150, 120, 0)');
     
     context.fillStyle = gradient;
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fill();
-  }
-  
-  // Add small details and variations
-  for (let i = 0; i < 50000; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const radius = Math.random() * 3 + 1;
-    
-    // Random color variation
-    const colorType = Math.random();
-    let color;
-    
-    if (colorType < 0.6) {
-      // Darker spots (shadows, small rocks)
-      color = `rgba(${70 + Math.random() * 30}, ${30 + Math.random() * 20}, ${20 + Math.random() * 10}, 0.3)`;
-    } else if (colorType < 0.9) {
-      // Lighter spots (exposed minerals)
-      color = `rgba(${180 + Math.random() * 50}, ${120 + Math.random() * 40}, ${90 + Math.random() * 30}, 0.3)`;
-    } else {
-      // Occasional reddish spots (iron oxide concentrations)
-      color = `rgba(${200 + Math.random() * 55}, ${80 + Math.random() * 40}, ${50 + Math.random() * 30}, 0.3)`;
-    }
-    
-    context.fillStyle = color;
     context.beginPath();
     context.arc(x, y, radius, 0, Math.PI * 2);
     context.fill();
@@ -1092,3 +1152,108 @@ function createMarsRoughnessMap() {
   
   return new THREE.CanvasTexture(canvas);
 }
+
+// Add a Martian sky with dramatic clouds like in the reference image
+function createMartianSky() {
+  // Create a large sphere for the sky
+  const skyGeometry = new THREE.SphereGeometry(400, 32, 32);
+  // We need to flip the geometry inside out
+  skyGeometry.scale(-1, 1, 1);
+  
+  // Create a dramatic Martian sky texture
+  const skyTexture = createMartianSkyTexture();
+  
+  const skyMaterial = new THREE.MeshBasicMaterial({
+    map: skyTexture,
+    side: THREE.BackSide,
+    fog: false
+  });
+  
+  const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+  return sky;
+}
+
+// Create a texture for the Martian sky with dramatic clouds
+function createMartianSkyTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 2048;
+  canvas.height = 1024;
+  const context = canvas.getContext('2d');
+  
+  // Create gradient for the sky - deep red at horizon to darker at top
+  const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, '#421b0b'); // Dark reddish-brown at top
+  gradient.addColorStop(0.4, '#7a2e14'); // Mid reddish-brown
+  gradient.addColorStop(0.7, '#c44d22'); // Brighter orange-red
+  gradient.addColorStop(1, '#ff7744'); // Bright orange at horizon
+  
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  
+  // Add a sun
+  const sunX = canvas.width * 0.7; // Position sun on the right side
+  const sunY = canvas.height * 0.9; // Near the horizon
+  const sunRadius = canvas.height * 0.08;
+  
+  // Sun glow
+  const sunGlow = context.createRadialGradient(
+    sunX, sunY, 0,
+    sunX, sunY, sunRadius * 4
+  );
+  sunGlow.addColorStop(0, 'rgba(255, 200, 150, 0.8)');
+  sunGlow.addColorStop(0.5, 'rgba(255, 150, 100, 0.3)');
+  sunGlow.addColorStop(1, 'rgba(255, 100, 50, 0)');
+  
+  context.fillStyle = sunGlow;
+  context.beginPath();
+  context.arc(sunX, sunY, sunRadius * 4, 0, Math.PI * 2);
+  context.fill();
+  
+  // Sun itself
+  const sunGradient = context.createRadialGradient(
+    sunX, sunY, 0,
+    sunX, sunY, sunRadius
+  );
+  sunGradient.addColorStop(0, '#ffffff');
+  sunGradient.addColorStop(0.7, '#ffdd88');
+  sunGradient.addColorStop(1, '#ff8844');
+  
+  context.fillStyle = sunGradient;
+  context.beginPath();
+  context.arc(sunX, sunY, sunRadius, 0, Math.PI * 2);
+  context.fill();
+  
+  // Add dramatic clouds like in the reference image
+  // These are the wispy, streaky clouds
+  for (let i = 0; i < 20; i++) {
+    const cloudX = Math.random() * canvas.width;
+    const cloudY = Math.random() * canvas.height * 0.7; // Keep clouds in upper part
+    const cloudWidth = Math.random() * 600 + 400;
+    const cloudHeight = Math.random() * 100 + 50;
+    const cloudRotation = Math.random() * Math.PI / 6 - Math.PI / 12;
+    
+    context.save();
+    context.translate(cloudX, cloudY);
+    context.rotate(cloudRotation);
+    
+    const cloudGradient = context.createLinearGradient(-cloudWidth/2, 0, cloudWidth/2, 0);
+    cloudGradient.addColorStop(0, 'rgba(180, 100, 70, 0)');
+    cloudGradient.addColorStop(0.2, 'rgba(180, 100, 70, 0.2)');
+    cloudGradient.addColorStop(0.5, 'rgba(180, 100, 70, 0.3)');
+    cloudGradient.addColorStop(0.8, 'rgba(180, 100, 70, 0.2)');
+    cloudGradient.addColorStop(1, 'rgba(180, 100, 70, 0)');
+    
+    context.fillStyle = cloudGradient;
+    context.beginPath();
+    context.ellipse(0, 0, cloudWidth/2, cloudHeight/2, 0, 0, Math.PI * 2);
+    context.fill();
+    
+    context.restore();
+  }
+  
+  return new THREE.CanvasTexture(canvas);
+}
+
+// Create and add the Martian sky
+const martianSky = createMartianSky();
+scene.add(martianSky);
