@@ -10,18 +10,18 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 // Mars Surface Texture
-const textureLoader = new THREE.TextureLoader();
-// Using a reliable Mars texture from Three.js examples
-const marsTexture = textureLoader.load('https://threejs.org/examples/textures/planets/mars_1k_color.jpg');
-const marsBumpMap = textureLoader.load('https://threejs.org/examples/textures/planets/mars_1k_normal.jpg');
+// const textureLoader = new THREE.TextureLoader();
+// // Using a reliable Mars texture from Three.js examples
+// const marsTexture = textureLoader.load('https://threejs.org/examples/textures/planets/mars_1k_color.jpg');
+// const marsBumpMap = textureLoader.load('https://threejs.org/examples/textures/planets/mars_1k_normal.jpg');
 
-// Make the texture repeat for a larger surface
-marsTexture.wrapS = THREE.RepeatWrapping;
-marsTexture.wrapT = THREE.RepeatWrapping;
-marsTexture.repeat.set(4, 4);
-marsBumpMap.wrapS = THREE.RepeatWrapping;
-marsBumpMap.wrapT = THREE.RepeatWrapping;
-marsBumpMap.repeat.set(4, 4);
+// // Make the texture repeat for a larger surface
+// marsTexture.wrapS = THREE.RepeatWrapping;
+// marsTexture.wrapT = THREE.RepeatWrapping;
+// marsTexture.repeat.set(4, 4);
+// marsBumpMap.wrapS = THREE.RepeatWrapping;
+// marsBumpMap.wrapT = THREE.RepeatWrapping;
+// marsBumpMap.repeat.set(4, 4);
 
 // Replace the simple Mars surface with the realistic terrain
 // const marsSurface = new THREE.Mesh(
@@ -220,7 +220,7 @@ function createRealisticRover() {
   // Wheels - create 6 wheels with proper suspension mounting points
   const wheels = [];
   // Increase wheel size by making them larger
-  const wheelGeometry = new THREE.CylinderGeometry(0.6, 0.6, 0.4, 24);
+  const wheelGeometry = new THREE.CylinderGeometry(0.8, 0.8, 0.5, 24);
   const wheelMaterial = new THREE.MeshStandardMaterial({ 
     color: 0x222222,
     roughness: 0.9,
@@ -256,12 +256,12 @@ function createRealisticRover() {
   
   // Wheel positions - 3 on each side (adjust positions for larger wheels)
   const wheelPositions = [
-    { x: -1.4, y: 0.6, z: 1.3 },  // Front left
-    { x: 1.4, y: 0.6, z: 1.3 },   // Front right
-    { x: -1.4, y: 0.6, z: 0 },    // Middle left
-    { x: 1.4, y: 0.6, z: 0 },     // Middle right
-    { x: -1.4, y: 0.6, z: -1.3 }, // Rear left
-    { x: 1.4, y: 0.6, z: -1.3 }   // Rear right
+    { x: -1.4, y: 0.5, z: 1.3 },  // Front left
+    { x: 1.4, y: 0.5, z: 1.3 },   // Front right
+    { x: -1.4, y: 0.5, z: 0 },    // Middle left
+    { x: 1.4, y: 0.5, z: 0 },     // Middle right
+    { x: -1.4, y: 0.5, z: -1.3 }, // Rear left
+    { x: 1.4, y: 0.5, z: -1.3 }   // Rear right
   ];
   
   const originalWheelPositions = [];
@@ -504,8 +504,8 @@ function positionRoverOnTerrain() {
   const intersects = raycaster.intersectObject(marsSurface);
   
   if (intersects.length > 0) {
-    // Position the rover at the intersection point plus a small offset
-    rover.position.y = intersects[0].point.y + 1.8;
+    // Position the rover at the intersection point plus a smaller offset to be closer to ground
+    rover.position.y = intersects[0].point.y + 1.5;
     
     // Optional: Align rover to terrain normal for slopes
     const normal = intersects[0].face.normal.clone();
@@ -536,7 +536,7 @@ function positionRoverOnTerrain() {
     }
   } else {
     // Fallback if no intersection found
-    rover.position.y = 1.8;
+    rover.position.y = 1.5;
     
     // Just apply the yaw rotation
     rover.rotation.set(0, 0, 0);
@@ -567,7 +567,7 @@ function updateWheelSuspension(wheels, originalWheelPositions) {
       // Calculate how much the wheel should move based on terrain height
       const terrainHeight = intersects[0].point.y;
       const wheelHeight = wheelPos.y;
-      const desiredHeight = terrainHeight + 0.6; // Desired height above terrain
+      const desiredHeight = terrainHeight + 0.8; // Desired height above terrain
       
       // Calculate suspension compression (limited range)
       const compression = Math.max(-0.3, Math.min(0.3, desiredHeight - wheelHeight));
