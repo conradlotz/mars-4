@@ -117,7 +117,7 @@ function createRealisticRover() {
   const roverGroup = new THREE.Group();
   
   // Main chassis - lower platform
-  const chassisGeometry = new THREE.BoxGeometry(2.4, 0.2, 3.2);
+  const chassisGeometry = new THREE.BoxGeometry(2.4, 0.2, 3.2); // Increased size for better visibility
   const chassisMaterial = new THREE.MeshStandardMaterial({ 
     color: 0x888888,
     roughness: 0.7,
@@ -854,9 +854,7 @@ function updateCamera() {
   }
 }
 
-// Start the animation loop with timestamp
 animate(0);
-
 // Add a simple HUD to show camera mode
 function createHUD() {
   const hudElement = document.createElement('div');
@@ -1968,3 +1966,56 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+function initializeCamera() {
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+    
+    // Adjust initial camera position to be higher and further back
+    camera.position.set(0, 15, 55); // Increased height and distance
+    
+    // Tilt the camera down slightly to see the rover and the skyline
+    camera.rotation.x = -0.2; // Add a slight downward tilt
+    
+    controls = new THREE.OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.screenSpacePanning = false;
+    controls.minDistance = 1;
+    controls.maxDistance = 500;
+    controls.maxPolarAngle = Math.PI / 1.5; // Allow more upward view for the skyline
+}
+
+// Find where the Mars terrain material is defined and modify it
+function createMarsEnvironment() {
+    // ... existing code ...
+    
+    // If Mars terrain uses a MeshStandardMaterial or similar
+    const marsMaterial = new THREE.MeshStandardMaterial({
+        map: marsTexture,
+        normalMap: marsNormalMap,
+        roughnessMap: marsRoughnessMap,
+        // Reduce the color brightness by making it darker
+        color: new THREE.Color(0xaa5533), // Darker reddish-brown
+        // Reduce metalness if it's too reflective
+        metalness: 0.1, 
+        // Increase roughness to reduce specular highlights
+        roughness: 0.9
+    });
+    
+    // ... existing code ...
+}
+
+// Adjust lighting intensity
+function setupLighting() {
+    // ... existing code ...
+    
+    // Reduce the intensity of any sun/directional lights
+    sunLight.intensity = 0.8; // Reduced from whatever value it was (typically 1.0)
+    
+    // If there's ambient light, reduce that too
+    if (ambientLight) {
+        ambientLight.intensity = 0.3; // Reduced ambient light
+    }
+    
+    // ... existing code ...
+}
