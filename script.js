@@ -1185,6 +1185,48 @@ function createRealisticMarsTerrain() {
   terrain.receiveShadow = true;
   terrain.castShadow = true;
   
+  // 7. Add color variation to the terrain
+  const colors = new Float32Array(geometry.attributes.position.count * 3);
+  const positionArray = geometry.attributes.position.array;
+
+  for (let i = 0; i < geometry.attributes.position.count; i++) {
+      const elevation = positionArray[i * 3 + 1];
+      
+      // Base color components (darker Mars red)
+      let r = 0.545; // Base red
+      let g = 0.271; // Base green
+      let b = 0.075; // Base blue
+      
+      // Adjust color based on elevation
+      if (elevation > 5) {
+          // Higher terrain slightly lighter
+          const factor = Math.min((elevation - 5) / 15, 0.2);
+          r += factor;
+          g += factor;
+          b += factor;
+      } else if (elevation < -2) {
+          // Craters and low areas slightly darker
+          const factor = Math.min((-elevation - 2) / 5, 0.2);
+          r -= factor;
+          g -= factor;
+          b -= factor;
+      }
+      
+      // Add subtle random variation
+      const variation = (Math.random() - 0.5) * 0.05;
+      r += variation;
+      g += variation;
+      b += variation;
+      
+      // Set the colors
+      colors[i * 3] = r;
+      colors[i * 3 + 1] = g;
+      colors[i * 3 + 2] = b;
+  }
+
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  material.vertexColors = true;
+  
   return terrain;
 }
 
