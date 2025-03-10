@@ -571,6 +571,12 @@ let frameCount = 0;
 let lastTime = 0;
 const FRAME_THROTTLE = 3; // Only perform heavy operations every N frames
 
+// Add these variables at the top level of your script
+let isTransitioning = false;
+let transitionStartTime = 0;
+let transitionDuration = 10000; // 10 seconds in milliseconds
+let transitionStartState = 'day'; // or 'night'
+
 // Modify the animate function
 function animate(time) {
   requestAnimationFrame(animate);
