@@ -905,9 +905,14 @@ window.addEventListener('resize', () => {
 
 function createRealisticMarsTerrain() {
   // Create a much larger terrain with more detailed features
-  const terrainSize = 500; // Increased size for more exploration area
-  const resolution = 512; // Higher resolution for more detail
-  const geometry = new THREE.PlaneGeometry(terrainSize, terrainSize, resolution, resolution);
+  const terrainSize = 5000; // Increased size for more exploration area
+  const resolution = 1024; // Higher resolution for more detail
+  const geometry = new THREE.PlaneGeometry(
+    terrainSize, 
+    terrainSize, 
+    256,  // increase segments for smoother terrain
+    256   // increase segments for smoother terrain
+  );
   geometry.rotateX(-Math.PI / 2);
   
   // Apply more complex noise to create realistic terrain elevation
@@ -1023,6 +1028,127 @@ function createRealisticMarsTerrain() {
       }
     }
     
+    // 4. Add mountain ranges
+    const mountainRangeCount = 5;
+    for (let m = 0; m < mountainRangeCount; m++) {
+      // Define mountain range parameters
+      const rangeStartX = Math.sin(m * 2.7) * terrainSize * 0.4;
+      const rangeStartZ = Math.cos(m * 3.1) * terrainSize * 0.4;
+      const rangeEndX = Math.sin(m * 2.7 + 1.5) * terrainSize * 0.4;
+      const rangeEndZ = Math.cos(m * 3.1 + 1.5) * terrainSize * 0.4;
+      
+      // Calculate range direction and length
+      const rangeLength = Math.sqrt(Math.pow(rangeEndX - rangeStartX, 2) + Math.pow(rangeEndZ - rangeStartZ, 2));
+      const rangeDirX = (rangeEndX - rangeStartX) / rangeLength;
+      const rangeDirZ = (rangeEndZ - rangeStartZ) / rangeLength;
+      
+      // Calculate point projection onto range line
+      const pointToStartX = x - rangeStartX;
+      const pointToStartZ = z - rangeStartZ;
+      
+      const projection = pointToStartX * rangeDirX + pointToStartZ * rangeDirZ;
+      const projectionX = rangeStartX + rangeDirX * Math.max(0, Math.min(rangeLength, projection));
+      const projectionZ = rangeStartZ + rangeDirZ * Math.max(0, Math.min(rangeLength, projection));
+      
+      // Calculate distance to mountain range spine
+      const distanceToRange = Math.sqrt(Math.pow(x - projectionX, 2) + Math.pow(z - projectionZ, 2));
+      
+      // Mountain range width varies along its length - wider for smoother mountains
+      const rangeWidth = 70 + Math.sin(projection * 0.03) * 20;
+      
+      if (distanceToRange < rangeWidth && projection > 0 && projection < rangeLength) {
+        // Calculate mountain height based on distance from spine and position along range
+        const normalizedDistance = distanceToRange / rangeWidth;
+        
+        // Height profile varies along the range - much smoother
+        const baseHeight = 10 + Math.sin(projection * 0.01) * 4;
+        
+        // Create very gentle peaks and valleys along the range
+        const peakVariation = Math.sin(projection * 0.03) * Math.cos(projection * 0.02 + m) * 2;
+        
+        // Much smoother slope profile
+        const slopeProfile = Math.pow(1 - normalizedDistance, 1.5);
+        
+        // Calculate final mountain height - smoother
+        const mountainHeight = (baseHeight + peakVariation) * slopeProfile;
+        
+        // Add very subtle rocky detail to mountains - no spikes
+        const rockDetail = (
+          Math.sin(x * 0.08 + z * 0.08) * 
+          Math.cos(x * 0.07 - z * 0.07) * 
+          (1 - normalizedDistance) * 0.4
+        );
+        
+        elevation += mountainHeight + rockDetail;
+      }
+    }
+    
+    // 5. Add impact craters
+    const impactCraterCount = 15;
+    for (let c = 0; c < impactCraterCount; c++) {
+      // Random crater position
+      const craterX = (Math.random() * 2 - 1) * terrainSize * 0.8;
+      const craterZ = (Math.random() * 2 - 1) * terrainSize * 0.8;
+      
+      // Random crater size (smaller craters are more common)
+      const craterSize = Math.pow(Math.random(), 1.5) * 50 + 15;
+      
+      // Calculate distance from current point to crater center
+      const distanceToCrater = Math.sqrt(Math.pow(x - craterX, 2) + Math.pow(z - craterZ, 2));
+      
+      // Only modify terrain if within crater influence
+      if (distanceToCrater < craterSize * 1.5) {
+        // Normalized distance (0 at center, 1 at rim)
+        const normalizedDistance = distanceToCrater / craterSize;
+        
+        if (normalizedDistance < 1) {
+          // Inside the crater - very smooth depression
+          const craterDepth = -3.5 - craterSize * 0.08;
+          
+          // Crater shape: very smooth parabolic with subtle central peak for larger craters
+          let craterProfile;
+          if (craterSize > 45 && normalizedDistance < 0.3) {
+            // Central peak for larger craters - very subtle
+            const centralPeakHeight = craterSize * 0.04 * (1 - normalizedDistance * 3.3);
+            craterProfile = craterDepth * (Math.pow(normalizedDistance, 2.2) - 1) + centralPeakHeight;
+          } else {
+            // Simple parabolic depression - very smooth
+            craterProfile = craterDepth * (Math.pow(normalizedDistance, 2.2) - 1);
+          }
+          
+          // Add extremely subtle noise to crater floor - no spikes
+          const craterNoise = Math.sin(x * 0.2 + z * 0.2) * Math.cos(x * 0.18 - z * 0.18) * 0.15;
+          
+          elevation += craterProfile + craterNoise;
+        } else if (normalizedDistance < 1.5) {
+          // Crater rim and ejecta blanket - very smooth transition
+          const rimFactor = Math.pow(1.5 - normalizedDistance, 2) * Math.pow(normalizedDistance - 0.8, 2);
+          const rimHeight = craterSize * 0.06 * rimFactor * 4;
+          
+          // Add minimal variation to the rim
+          const rimVariation = Math.sin(Math.atan2(z - craterZ, x - craterX) * 4) * 0.1;
+          
+          elevation += rimHeight * (1 + rimVariation);
+        }
+      }
+    }
+    
+    // 6. Add gentle rocky terrain detail - no spikes
+    const rockyDetail = (
+      Math.sin(x * 0.05 + z * 0.06) * 
+      Math.cos(x * 0.055 - z * 0.045) * 
+      0.4 + 
+      Math.sin(x * 0.025 - z * 0.03) * 
+      Math.cos(x * 0.02 + z * 0.035) * 
+      0.3
+    );
+    
+    elevation += rockyDetail;
+    
+    // 7. Apply smoothing to entire terrain
+    const smoothingFactor = 0.8;
+    elevation = elevation * smoothingFactor;
+    
     positions[i + 1] = elevation;
   }
   
@@ -1046,15 +1172,13 @@ function createRealisticMarsTerrain() {
   roughnessMap.wrapT = THREE.RepeatWrapping;
   roughnessMap.repeat.set(8, 8);
   
+  // Create material with smooth shading
   const material = new THREE.MeshStandardMaterial({
-    map: marsTexture,
-    normalMap: normalMap,
-    roughnessMap: roughnessMap,
-    roughness: 0.85,
-    metalness: 0.1,
-    side: THREE.DoubleSide,
-    displacementMap: null, // We're using vertex displacement instead
-    displacementScale: 0
+    color: 0xaa6633,  // Martian reddish-brown color
+    roughness: 0.9,   // Very rough surface
+    metalness: 0.1,   // Low metalness for a dusty appearance
+    flatShading: false, // Use smooth shading
+    side: THREE.DoubleSide
   });
   
   const terrain = new THREE.Mesh(geometry, material);
@@ -1997,9 +2121,9 @@ function createMarsEnvironment() {
         // Reduce the color brightness by making it darker
         color: new THREE.Color(0xaa5533), // Darker reddish-brown
         // Reduce metalness if it's too reflective
-        metalness: 0.1, 
+        metalness: 0.3, 
         // Increase roughness to reduce specular highlights
-        roughness: 0.9
+        roughness: 1.5
     });
     
     // ... existing code ...
