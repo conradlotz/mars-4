@@ -905,9 +905,14 @@ window.addEventListener('resize', () => {
 
 function createRealisticMarsTerrain() {
   // Create a much larger terrain with more detailed features
-  const terrainSize = 500; // Increased size for more exploration area
-  const resolution = 512; // Higher resolution for more detail
-  const geometry = new THREE.PlaneGeometry(terrainSize, terrainSize, resolution, resolution);
+  const terrainSize = 5000; // Increased size for more exploration area
+  const resolution = 1024; // Higher resolution for more detail
+  const geometry = new THREE.PlaneGeometry(
+    terrainSize, 
+    terrainSize, 
+    256,  // increase segments for smoother terrain
+    256   // increase segments for smoother terrain
+  );
   geometry.rotateX(-Math.PI / 2);
   
   // Apply more complex noise to create realistic terrain elevation
@@ -1023,6 +1028,127 @@ function createRealisticMarsTerrain() {
       }
     }
     
+    // 4. Add mountain ranges
+    const mountainRangeCount = 5;
+    for (let m = 0; m < mountainRangeCount; m++) {
+      // Define mountain range parameters
+      const rangeStartX = Math.sin(m * 2.7) * terrainSize * 0.4;
+      const rangeStartZ = Math.cos(m * 3.1) * terrainSize * 0.4;
+      const rangeEndX = Math.sin(m * 2.7 + 1.5) * terrainSize * 0.4;
+      const rangeEndZ = Math.cos(m * 3.1 + 1.5) * terrainSize * 0.4;
+      
+      // Calculate range direction and length
+      const rangeLength = Math.sqrt(Math.pow(rangeEndX - rangeStartX, 2) + Math.pow(rangeEndZ - rangeStartZ, 2));
+      const rangeDirX = (rangeEndX - rangeStartX) / rangeLength;
+      const rangeDirZ = (rangeEndZ - rangeStartZ) / rangeLength;
+      
+      // Calculate point projection onto range line
+      const pointToStartX = x - rangeStartX;
+      const pointToStartZ = z - rangeStartZ;
+      
+      const projection = pointToStartX * rangeDirX + pointToStartZ * rangeDirZ;
+      const projectionX = rangeStartX + rangeDirX * Math.max(0, Math.min(rangeLength, projection));
+      const projectionZ = rangeStartZ + rangeDirZ * Math.max(0, Math.min(rangeLength, projection));
+      
+      // Calculate distance to mountain range spine
+      const distanceToRange = Math.sqrt(Math.pow(x - projectionX, 2) + Math.pow(z - projectionZ, 2));
+      
+      // Mountain range width varies along its length - wider for smoother mountains
+      const rangeWidth = 70 + Math.sin(projection * 0.03) * 20;
+      
+      if (distanceToRange < rangeWidth && projection > 0 && projection < rangeLength) {
+        // Calculate mountain height based on distance from spine and position along range
+        const normalizedDistance = distanceToRange / rangeWidth;
+        
+        // Height profile varies along the range - much smoother
+        const baseHeight = 10 + Math.sin(projection * 0.01) * 4;
+        
+        // Create very gentle peaks and valleys along the range
+        const peakVariation = Math.sin(projection * 0.03) * Math.cos(projection * 0.02 + m) * 2;
+        
+        // Much smoother slope profile
+        const slopeProfile = Math.pow(1 - normalizedDistance, 1.5);
+        
+        // Calculate final mountain height - smoother
+        const mountainHeight = (baseHeight + peakVariation) * slopeProfile;
+        
+        // Add very subtle rocky detail to mountains - no spikes
+        const rockDetail = (
+          Math.sin(x * 0.08 + z * 0.08) * 
+          Math.cos(x * 0.07 - z * 0.07) * 
+          (1 - normalizedDistance) * 0.4
+        );
+        
+        elevation += mountainHeight + rockDetail;
+      }
+    }
+    
+    // 5. Add impact craters
+    const impactCraterCount = 15;
+    for (let c = 0; c < impactCraterCount; c++) {
+      // Random crater position
+      const craterX = (Math.random() * 2 - 1) * terrainSize * 0.8;
+      const craterZ = (Math.random() * 2 - 1) * terrainSize * 0.8;
+      
+      // Random crater size (smaller craters are more common)
+      const craterSize = Math.pow(Math.random(), 1.5) * 50 + 15;
+      
+      // Calculate distance from current point to crater center
+      const distanceToCrater = Math.sqrt(Math.pow(x - craterX, 2) + Math.pow(z - craterZ, 2));
+      
+      // Only modify terrain if within crater influence
+      if (distanceToCrater < craterSize * 1.5) {
+        // Normalized distance (0 at center, 1 at rim)
+        const normalizedDistance = distanceToCrater / craterSize;
+        
+        if (normalizedDistance < 1) {
+          // Inside the crater - very smooth depression
+          const craterDepth = -3.5 - craterSize * 0.08;
+          
+          // Crater shape: very smooth parabolic with subtle central peak for larger craters
+          let craterProfile;
+          if (craterSize > 45 && normalizedDistance < 0.3) {
+            // Central peak for larger craters - very subtle
+            const centralPeakHeight = craterSize * 0.04 * (1 - normalizedDistance * 3.3);
+            craterProfile = craterDepth * (Math.pow(normalizedDistance, 2.2) - 1) + centralPeakHeight;
+          } else {
+            // Simple parabolic depression - very smooth
+            craterProfile = craterDepth * (Math.pow(normalizedDistance, 2.2) - 1);
+          }
+          
+          // Add extremely subtle noise to crater floor - no spikes
+          const craterNoise = Math.sin(x * 0.2 + z * 0.2) * Math.cos(x * 0.18 - z * 0.18) * 0.15;
+          
+          elevation += craterProfile + craterNoise;
+        } else if (normalizedDistance < 1.5) {
+          // Crater rim and ejecta blanket - very smooth transition
+          const rimFactor = Math.pow(1.5 - normalizedDistance, 2) * Math.pow(normalizedDistance - 0.8, 2);
+          const rimHeight = craterSize * 0.06 * rimFactor * 4;
+          
+          // Add minimal variation to the rim
+          const rimVariation = Math.sin(Math.atan2(z - craterZ, x - craterX) * 4) * 0.1;
+          
+          elevation += rimHeight * (1 + rimVariation);
+        }
+      }
+    }
+    
+    // 6. Add gentle rocky terrain detail - no spikes
+    const rockyDetail = (
+      Math.sin(x * 0.05 + z * 0.06) * 
+      Math.cos(x * 0.055 - z * 0.045) * 
+      0.4 + 
+      Math.sin(x * 0.025 - z * 0.03) * 
+      Math.cos(x * 0.02 + z * 0.035) * 
+      0.3
+    );
+    
+    elevation += rockyDetail;
+    
+    // 7. Apply smoothing to entire terrain
+    const smoothingFactor = 0.8;
+    elevation = elevation * smoothingFactor;
+    
     positions[i + 1] = elevation;
   }
   
@@ -1046,20 +1172,60 @@ function createRealisticMarsTerrain() {
   roughnessMap.wrapT = THREE.RepeatWrapping;
   roughnessMap.repeat.set(8, 8);
   
+  // Create material with smooth shading
   const material = new THREE.MeshStandardMaterial({
-    map: marsTexture,
-    normalMap: normalMap,
-    roughnessMap: roughnessMap,
-    roughness: 0.85,
-    metalness: 0.1,
-    side: THREE.DoubleSide,
-    displacementMap: null, // We're using vertex displacement instead
-    displacementScale: 0
+    color: 0xaa6633,  // Martian reddish-brown color
+    roughness: 0.9,   // Very rough surface
+    metalness: 0.1,   // Low metalness for a dusty appearance
+    flatShading: false, // Use smooth shading
+    side: THREE.DoubleSide
   });
   
   const terrain = new THREE.Mesh(geometry, material);
   terrain.receiveShadow = true;
   terrain.castShadow = true;
+  
+  // 7. Add color variation to the terrain
+  const colors = new Float32Array(geometry.attributes.position.count * 3);
+  const positionArray = geometry.attributes.position.array;
+
+  for (let i = 0; i < geometry.attributes.position.count; i++) {
+      const elevation = positionArray[i * 3 + 1];
+      
+      // Base color components (darker Mars red)
+      let r = 0.545; // Base red
+      let g = 0.271; // Base green
+      let b = 0.075; // Base blue
+      
+      // Adjust color based on elevation
+      if (elevation > 5) {
+          // Higher terrain slightly lighter
+          const factor = Math.min((elevation - 5) / 15, 0.2);
+          r += factor;
+          g += factor;
+          b += factor;
+      } else if (elevation < -2) {
+          // Craters and low areas slightly darker
+          const factor = Math.min((-elevation - 2) / 5, 0.2);
+          r -= factor;
+          g -= factor;
+          b -= factor;
+      }
+      
+      // Add subtle random variation
+      const variation = (Math.random() - 0.5) * 0.05;
+      r += variation;
+      g += variation;
+      b += variation;
+      
+      // Set the colors
+      colors[i * 3] = r;
+      colors[i * 3 + 1] = g;
+      colors[i * 3 + 2] = b;
+  }
+
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  material.vertexColors = true;
   
   return terrain;
 }
@@ -1997,9 +2163,9 @@ function createMarsEnvironment() {
         // Reduce the color brightness by making it darker
         color: new THREE.Color(0xaa5533), // Darker reddish-brown
         // Reduce metalness if it's too reflective
-        metalness: 0.1, 
+        metalness: 0.3, 
         // Increase roughness to reduce specular highlights
-        roughness: 0.9
+        roughness: 1.5
     });
     
     // ... existing code ...
@@ -2020,6 +2186,7 @@ function setupLighting() {
     // ... existing code ...
 }
 
+<<<<<<< HEAD
 // Mission system to provide goals and progression
 const missionSystem = {
   missions: [
@@ -2599,10 +2766,584 @@ const pointsOfInterest = {
           poi.model.position.y = 5 + Math.sin(time * 0.001 + poi.model.userData.animationOffset) * 2;
           poi.model.rotation.y += 0.01;
         }
+=======
+// ===== MARS EXPLORER GAME =====
+// Create a more visible game interface
+window.MarsExplorer = {
+  initialized: false,
+  gameState: {
+    score: 0,
+    fuel: 100,
+    samplesCollected: 0,
+    missionComplete: false,
+    gameOver: false,
+    gameStarted: false
+  },
+  controls: {
+    forward: false,
+    backward: false,
+    left: false,
+    right: false,
+    speed: 0,
+    rotationSpeed: 0,
+    maxSpeed: 0.3,
+    acceleration: 0.01,
+    deceleration: 0.005,
+    maxRotationSpeed: 0.03
+  },
+  rover: null,
+  wheels: [],
+  samples: [],
+  hudElements: null,
+  
+  // Initialize the game
+  init: function() {
+    console.log("Initializing Mars Explorer game...");
+    
+    // Create start screen
+    this.createStartScreen();
+    
+    // Set up key listeners
+    this.setupControls();
+    
+    // Create game objects
+    this.createRover();
+    this.createSamples(10);
+    this.createHUD();
+    
+    // Start game loop
+    this.initialized = true;
+    this.gameLoop();
+    
+    console.log("Mars Explorer initialized with", this.samples.length, "samples");
+  },
+  
+  // Create start screen with instructions
+  createStartScreen: function() {
+    const startScreen = document.createElement('div');
+    startScreen.id = 'mars-explorer-start';
+    startScreen.style.position = 'absolute';
+    startScreen.style.top = '0';
+    startScreen.style.left = '0';
+    startScreen.style.width = '100%';
+    startScreen.style.height = '100%';
+    startScreen.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    startScreen.style.color = 'white';
+    startScreen.style.display = 'flex';
+    startScreen.style.flexDirection = 'column';
+    startScreen.style.justifyContent = 'center';
+    startScreen.style.alignItems = 'center';
+    startScreen.style.zIndex = '1000';
+    startScreen.style.fontFamily = 'Arial, sans-serif';
+    
+    const title = document.createElement('h1');
+    title.textContent = 'MARS EXPLORER';
+    title.style.fontSize = '48px';
+    title.style.marginBottom = '20px';
+    title.style.color = '#ff6b35';
+    startScreen.appendChild(title);
+    
+    const instructions = document.createElement('div');
+    instructions.innerHTML = `
+      <p style="font-size: 24px; margin-bottom: 30px;">Explore Mars and collect all samples before your fuel runs out!</p>
+      <div style="background-color: rgba(0,0,0,0.5); padding: 20px; border-radius: 10px; margin-bottom: 30px;">
+        <h2 style="margin-top: 0;">CONTROLS:</h2>
+        <p><strong>W</strong> - Move Forward</p>
+        <p><strong>S</strong> - Move Backward</p>
+        <p><strong>A</strong> - Turn Left</p>
+        <p><strong>D</strong> - Turn Right</p>
+        <p><strong>R</strong> - Restart Game</p>
+      </div>
+    `;
+    startScreen.appendChild(instructions);
+    
+    const startButton = document.createElement('button');
+    startButton.textContent = 'START MISSION';
+    startButton.style.padding = '15px 30px';
+    startButton.style.fontSize = '24px';
+    startButton.style.backgroundColor = '#22ffaa';
+    startButton.style.border = 'none';
+    startButton.style.borderRadius = '5px';
+    startButton.style.cursor = 'pointer';
+    startButton.onclick = () => {
+      startScreen.style.display = 'none';
+      this.gameState.gameStarted = true;
+    };
+    startScreen.appendChild(startButton);
+    
+    document.body.appendChild(startScreen);
+    this.startScreen = startScreen;
+  },
+  
+  // Set up keyboard controls
+  setupControls: function() {
+    const game = this;
+    
+    document.addEventListener('keydown', function(e) {
+      if (!game.gameState.gameStarted) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          game.startScreen.style.display = 'none';
+          game.gameState.gameStarted = true;
+        }
+        return;
+      }
+      
+      switch(e.key.toLowerCase()) {
+        case 'w': game.controls.forward = true; break;
+        case 's': game.controls.backward = true; break;
+        case 'a': game.controls.left = true; break;
+        case 'd': game.controls.right = true; break;
+        case 'r': game.restartGame(); break;
+      }
+    });
+    
+    document.addEventListener('keyup', function(e) {
+      switch(e.key.toLowerCase()) {
+        case 'w': game.controls.forward = false; break;
+        case 's': game.controls.backward = false; break;
+        case 'a': game.controls.left = false; break;
+        case 'd': game.controls.right = false; break;
       }
     });
   },
   
+  // Create rover vehicle with more visible design
+  createRover: function() {
+    // Simple rover body
+    const bodyGeometry = new THREE.BoxGeometry(2, 0.7, 3);
+    const bodyMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0xCCCCCC,
+      emissive: 0x333333,
+      emissiveIntensity: 0.2
+    });
+    const roverBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    roverBody.position.y = 1.2;
+    
+    // Create rover wheels
+    const wheelGeometry = new THREE.CylinderGeometry(0.5, 0.5, 0.3, 16);
+    const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
+    
+    const wheels = [];
+    const wheelPositions = [
+      [-0.8, 0.5, 1],  // front left
+      [0.8, 0.5, 1],   // front right
+      [-0.8, 0.5, -1], // back left
+      [0.8, 0.5, -1]   // back right
+    ];
+    
+    wheelPositions.forEach(pos => {
+      const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
+      wheel.position.set(...pos);
+      wheel.rotation.z = Math.PI / 2;
+      roverBody.add(wheel);
+      wheels.push(wheel);
+    });
+    
+    // Add solar panel with glow
+    const panelGeometry = new THREE.BoxGeometry(1.8, 0.1, 1.8);
+    const panelMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0x0055ff,
+      emissive: 0x0033aa,
+      emissiveIntensity: 0.5
+    });
+    const panel = new THREE.Mesh(panelGeometry, panelMaterial);
+    panel.position.y = 0.5;
+    roverBody.add(panel);
+    
+    // Add antenna
+    const antennaGeometry = new THREE.CylinderGeometry(0.05, 0.05, 1.5, 8);
+    const antennaMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
+    const antenna = new THREE.Mesh(antennaGeometry, antennaMaterial);
+    antenna.position.set(0, 1, -1);
+    roverBody.add(antenna);
+    
+    // Add headlights
+    const headlightGeometry = new THREE.SphereGeometry(0.2, 16, 16);
+    const headlightMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0xffffaa,
+      emissive: 0xffffaa,
+      emissiveIntensity: 1
+    });
+    
+    const headlightPositions = [[-0.6, 0.2, 1.5], [0.6, 0.2, 1.5]];
+    headlightPositions.forEach(pos => {
+      const headlight = new THREE.Mesh(headlightGeometry, headlightMaterial);
+      headlight.position.set(...pos);
+      headlight.scale.set(1, 0.7, 1);
+      roverBody.add(headlight);
+      
+      // Add actual light source
+      const light = new THREE.PointLight(0xffffaa, 1, 20);
+      light.position.set(...pos);
+      roverBody.add(light);
+    });
+    
+    // Create full rover group
+    const rover = new THREE.Group();
+    rover.add(roverBody);
+    
+    // Set initial position
+    rover.position.set(0, 2, 0);
+    
+    // Add to scene
+    scene.add(rover);
+    
+    this.rover = rover;
+    this.wheels = wheels;
+  },
+  
+  // Create more visible collectible samples
+  createSamples: function(count) {
+    const terrainMeshes = [];
+    
+    // Find all mesh objects in the scene to check for terrain
+    scene.traverse(object => {
+      if (object.isMesh && object.geometry) {
+        terrainMeshes.push(object);
+      }
+    });
+    
+    if (terrainMeshes.length === 0) {
+      console.error("No terrain meshes found in scene");
+      return;
+    }
+    
+    // Use the first mesh as our terrain
+    const terrainMesh = terrainMeshes[0];
+    
+    for (let i = 0; i < count; i++) {
+      // Random position within terrain
+      const x = (Math.random() * 2 - 1) * terrainSize * 0.7;
+      const z = (Math.random() * 2 - 1) * terrainSize * 0.7;
+      
+      // Find height at this position
+      const heightRay = new THREE.Raycaster(
+        new THREE.Vector3(x, 100, z),
+        new THREE.Vector3(0, -1, 0)
+      );
+      
+      const intersects = heightRay.intersectObject(terrainMesh);
+      
+      if (intersects.length > 0) {
+        const y = intersects[0].point.y + 1;
+        
+        // Create sample group
+        const sampleGroup = new THREE.Group();
+        sampleGroup.position.set(x, y, z);
+        
+        // Create glowing crystal
+        const sampleGeometry = new THREE.OctahedronGeometry(0.5, 1);
+        const sampleMaterial = new THREE.MeshStandardMaterial({
+          color: 0x22ffaa,
+          emissive: 0x22ffaa,
+          emissiveIntensity: 1,
+          transparent: true,
+          opacity: 0.9
+        });
+        
+        const sample = new THREE.Mesh(sampleGeometry, sampleMaterial);
+        sampleGroup.add(sample);
+        
+        // Add point light
+        const light = new THREE.PointLight(0x22ffaa, 1, 10);
+        light.position.set(0, 0, 0);
+        sampleGroup.add(light);
+        
+        // Add marker beam
+        const beamGeometry = new THREE.CylinderGeometry(0.1, 0.1, 20, 8);
+        const beamMaterial = new THREE.MeshBasicMaterial({
+          color: 0x22ffaa,
+          transparent: true,
+          opacity: 0.3
+        });
+        const beam = new THREE.Mesh(beamGeometry, beamMaterial);
+        beam.position.y = 10;
+        sampleGroup.add(beam);
+        
+        // Add animation data
+        sampleGroup.userData.rotSpeed = 0.01 + Math.random() * 0.01;
+        sampleGroup.userData.floatSpeed = 0.005 + Math.random() * 0.005;
+        sampleGroup.userData.floatHeight = 0.5;
+        sampleGroup.userData.initialY = y;
+        sampleGroup.userData.collected = false;
+        
+        scene.add(sampleGroup);
+        this.samples.push(sampleGroup);
+      }
+    }
+  },
+  
+  // Create improved HUD
+  createHUD: function() {
+    // Create HUD container
+    const hudContainer = document.createElement('div');
+    hudContainer.id = 'mars-explorer-hud';
+    hudContainer.style.position = 'absolute';
+    hudContainer.style.top = '20px';
+    hudContainer.style.left = '20px';
+    hudContainer.style.color = 'white';
+    hudContainer.style.fontFamily = 'Arial, sans-serif';
+    hudContainer.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.7)';
+    hudContainer.style.userSelect = 'none';
+    hudContainer.style.zIndex = '100';
+    
+    // Create fuel gauge
+    const fuelContainer = document.createElement('div');
+    fuelContainer.style.marginBottom = '15px';
+    
+    const fuelLabel = document.createElement('div');
+    fuelLabel.textContent = 'FUEL';
+    fuelLabel.style.fontSize = '16px';
+    fuelLabel.style.marginBottom = '5px';
+    fuelContainer.appendChild(fuelLabel);
+    
+    const fuelBarContainer = document.createElement('div');
+    fuelBarContainer.style.width = '200px';
+    fuelBarContainer.style.height = '20px';
+    fuelBarContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    fuelBarContainer.style.border = '2px solid white';
+    fuelBarContainer.style.borderRadius = '10px';
+    fuelBarContainer.style.overflow = 'hidden';
+    
+    const fuelBar = document.createElement('div');
+    fuelBar.style.width = '100%';
+    fuelBar.style.height = '100%';
+    fuelBar.style.backgroundColor = '#22ffaa';
+    fuelBar.style.transition = 'width 0.3s';
+    
+    fuelBarContainer.appendChild(fuelBar);
+    fuelContainer.appendChild(fuelBarContainer);
+    hudContainer.appendChild(fuelContainer);
+    
+    // Create samples counter
+    const samplesContainer = document.createElement('div');
+    samplesContainer.style.marginBottom = '15px';
+    
+    const samplesLabel = document.createElement('div');
+    samplesLabel.textContent = 'SAMPLES';
+    samplesLabel.style.fontSize = '16px';
+    samplesLabel.style.marginBottom = '5px';
+    samplesContainer.appendChild(samplesLabel);
+    
+    const samplesCounter = document.createElement('div');
+    samplesCounter.style.fontSize = '24px';
+    samplesCounter.style.fontWeight = 'bold';
+    samplesContainer.appendChild(samplesCounter);
+    
+    hudContainer.appendChild(samplesContainer);
+    
+    // Create message area
+    const messageArea = document.createElement('div');
+    messageArea.style.fontSize = '24px';
+    messageArea.style.fontWeight = 'bold';
+    messageArea.style.color = '#22ffaa';
+    messageArea.style.marginTop = '20px';
+    messageArea.style.padding = '10px';
+    messageArea.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    messageArea.style.borderRadius = '5px';
+    messageArea.style.display = 'none';
+    hudContainer.appendChild(messageArea);
+    
+    document.body.appendChild(hudContainer);
+    
+    this.hudElements = {
+      container: hudContainer,
+      fuelBar: fuelBar,
+      samplesCounter: samplesCounter,
+      messageArea: messageArea,
+      
+      updateHUD: () => {
+        // Update fuel bar
+        fuelBar.style.width = this.gameState.fuel + '%';
+        
+        // Change color based on fuel level
+        if (this.gameState.fuel > 60) {
+          fuelBar.style.backgroundColor = '#22ffaa';
+        } else if (this.gameState.fuel > 30) {
+          fuelBar.style.backgroundColor = '#ffaa22';
+        } else {
+          fuelBar.style.backgroundColor = '#ff4422';
+        }
+        
+        // Update samples counter
+        samplesCounter.textContent = this.gameState.samplesCollected + ' / ' + this.samples.length;
+        
+        // Show messages
+        if (this.gameState.missionComplete) {
+          messageArea.textContent = 'MISSION COMPLETE! Press R to restart';
+          messageArea.style.display = 'block';
+          messageArea.style.backgroundColor = 'rgba(34, 255, 170, 0.5)';
+        } else if (this.gameState.gameOver) {
+          messageArea.textContent = 'OUT OF FUEL! Press R to restart';
+          messageArea.style.display = 'block';
+          messageArea.style.backgroundColor = 'rgba(255, 68, 34, 0.5)';
+        } else {
+          messageArea.style.display = 'none';
+        }
+      }
+    };
+    
+    // Initial update
+    this.hudElements.updateHUD();
+  },
+  
+  // Update game state
+  update: function() {
+    if (!this.initialized || !this.gameState.gameStarted) return;
+    if (this.gameState.gameOver || this.gameState.missionComplete) return;
+    
+    // Update speed based on controls
+    if (this.controls.forward) {
+      this.controls.speed = Math.min(this.controls.speed + this.controls.acceleration, 
+                                 this.controls.maxSpeed);
+      this.gameState.fuel -= 0.05;
+    } else if (this.controls.backward) {
+      this.controls.speed = Math.max(this.controls.speed - this.controls.acceleration, 
+                                -this.controls.maxSpeed);
+      this.gameState.fuel -= 0.05;
+    } else {
+      // Apply deceleration
+      if (this.controls.speed > 0) {
+        this.controls.speed = Math.max(0, this.controls.speed - this.controls.deceleration);
+      } else if (this.controls.speed < 0) {
+        this.controls.speed = Math.min(0, this.controls.speed + this.controls.deceleration);
+      }
+    }
+    
+    // Update rotation based on controls
+    if (this.controls.left) {
+      this.controls.rotationSpeed = Math.min(this.controls.rotationSpeed + this.controls.acceleration * 0.5, 
+                                        this.controls.maxRotationSpeed);
+      this.gameState.fuel -= 0.01;
+    } else if (this.controls.right) {
+      this.controls.rotationSpeed = Math.max(this.controls.rotationSpeed - this.controls.acceleration * 0.5, 
+                                       -this.controls.maxRotationSpeed);
+      this.gameState.fuel -= 0.01;
+    } else {
+      // Gradually reduce rotation
+      if (this.controls.rotationSpeed > 0) {
+        this.controls.rotationSpeed = Math.max(0, this.controls.rotationSpeed - this.controls.deceleration * 0.5);
+      } else if (this.controls.rotationSpeed < 0) {
+        this.controls.rotationSpeed = Math.min(0, this.controls.rotationSpeed + this.controls.deceleration * 0.5);
+      }
+    }
+    
+    // Apply rotation
+    this.rover.rotation.y += this.controls.rotationSpeed;
+    
+    // Calculate movement direction based on rover's orientation
+    const direction = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), 
+                                                               this.rover.rotation.y);
+    
+    // Move rover
+    this.rover.position.x += direction.x * this.controls.speed;
+    this.rover.position.z += direction.z * this.controls.speed;
+    
+    // Animate wheels
+    this.wheels.forEach(wheel => {
+      wheel.rotation.x += this.controls.speed * 0.3;
+    });
+    
+    // Find terrain mesh
+    let terrainMesh = null;
+    scene.traverse(object => {
+      if (!terrainMesh && object.isMesh && object.geometry) {
+        terrainMesh = object;
+      }
+    });
+    
+    if (terrainMesh) {
+      // Raycasting for height adjustment
+      const raycaster = new THREE.Raycaster(
+        new THREE.Vector3(this.rover.position.x, 100, this.rover.position.z),
+        new THREE.Vector3(0, -1, 0)
+      );
+      
+      const intersects = raycaster.intersectObject(terrainMesh);
+      if (intersects.length > 0) {
+        this.rover.position.y = intersects[0].point.y + 1.2;
+        
+        // Add tire tracks if moving
+        if (Math.abs(this.controls.speed) > 0.01) {
+          try {
+            // Try to call addTireTrack if it exists
+            if (typeof addTireTrack === 'function') {
+              const wheelSpacing = 1.6;
+              addTireTrack(
+                this.rover.position.x - (direction.z * wheelSpacing/2),
+                this.rover.position.z + (direction.x * wheelSpacing/2),
+                1, 0.2
+              );
+              addTireTrack(
+                this.rover.position.x + (direction.z * wheelSpacing/2),
+                this.rover.position.z - (direction.x * wheelSpacing/2),
+                1, 0.2
+              );
+            }
+          } catch (e) {
+            // Ignore errors if function doesn't exist
+          }
+        }
+      }
+    }
+    
+    // Check for sample collection
+    this.samples.forEach(sample => {
+      if (!sample.userData.collected) {
+        const distance = this.rover.position.distanceTo(sample.position);
+        if (distance < 2) {
+          sample.userData.collected = true;
+          sample.visible = false;
+          this.gameState.samplesCollected++;
+          
+          // Play collection sound
+          try {
+            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2019/03/22/sfx-2019-03-22-18-50-42-371.mp3');
+            audio.volume = 0.3;
+            audio.play().catch(e => console.log("Audio play failed:", e));
+          } catch (e) {
+            console.log("Audio play failed:", e);
+          }
+        }
+      }
+    });
+    
+    // Check for mission complete
+    if (this.gameState.samplesCollected === this.samples.length && this.samples.length > 0) {
+      this.gameState.missionComplete = true;
+    }
+    
+    // Check for game over (out of fuel)
+    if (this.gameState.fuel <= 0) {
+      this.gameState.fuel = 0;
+      this.gameState.gameOver = true;
+    }
+    
+    // Update HUD
+    this.hudElements.updateHUD();
+    
+    // Update camera to follow rover
+    camera.position.x = this.rover.position.x - direction.x * 10;
+    camera.position.z = this.rover.position.z - direction.z * 10;
+    camera.position.y = this.rover.position.y + 5;
+    camera.lookAt(this.rover.position);
+  },
+  
+  // Animate samples
+  animateSamples: function() {
+    if (!this.initialized) return;
+    
+    this.samples.forEach(sample => {
+      if (!sample.userData.collected) {
+        sample.rotation.y += sample.userData.rotSpeed;
+        sample.position.y = sample.userData.initialY + 
+          Math.sin(Date.now() * sample.userData.floatSpeed) * sample.userData.floatHeight;
+>>>>>>> 57e38c978c34766de821fdbc92478e81651ac538
+      }
+    });
+  },
+  
+<<<<<<< HEAD
   discoverPOI(poi) {
     poi.discovered = true;
     
@@ -2954,3 +3695,49 @@ const soundSystem = {
     }
   }
 };
+=======
+  // Restart game
+  restartGame: function() {
+    // Reset game state
+    this.gameState.score = 0;
+    this.gameState.fuel = 100;
+    this.gameState.samplesCollected = 0;
+    this.gameState.missionComplete = false;
+    this.gameState.gameOver = false;
+    
+    // Reset rover position
+    this.rover.position.set(0, 2, 0);
+    this.rover.rotation.y = 0;
+    
+    // Reset controls
+    this.controls.speed = 0;
+    this.controls.rotationSpeed = 0;
+    
+    // Reset samples
+    this.samples.forEach(sample => {
+      sample.userData.collected = false;
+      sample.visible = true;
+    });
+    
+    // Update HUD
+    this.hudElements.updateHUD();
+  },
+  
+  // Game loop - completely separate from the main animation loop
+  gameLoop: function() {
+    if (!this.initialized) return;
+    
+    // Update game state
+    this.update();
+    this.animateSamples();
+    
+    // Continue loop
+    requestAnimationFrame(this.gameLoop.bind(this));
+  }
+};
+
+// Wait for scene to be ready before initializing
+setTimeout(function() {
+  window.MarsExplorer.init();
+}, 3000); // Wait 3 seconds to ensure scene is fully loaded
+>>>>>>> 57e38c978c34766de821fdbc92478e81651ac538
