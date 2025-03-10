@@ -2019,3 +2019,938 @@ function setupLighting() {
     
     // ... existing code ...
 }
+
+// Mission system to provide goals and progression
+const missionSystem = {
+  missions: [
+    {
+      id: 'sample_collection',
+      title: 'Collect Rock Samples',
+      description: 'Collect 5 rock samples from different locations',
+      objectives: [
+        { location: { x: 50, z: 30 }, collected: false },
+        { location: { x: -80, z: 60 }, collected: false },
+        // ... more sample locations
+      ],
+      complete: false
+    },
+    {
+      id: 'photograph_formation',
+      title: 'Photograph Ancient River Bed',
+      description: 'Take 3 photos of the dried river formations',
+      // ... mission details
+    }
+    // ... more missions
+  ],
+  
+  currentMission: 0,
+  
+  checkObjectiveProximity(roverPosition) {
+    // Check if rover is near any objective
+    const mission = this.missions[this.currentMission];
+    mission.objectives.forEach(objective => {
+      if (!objective.collected) {
+        const distance = Math.sqrt(
+          Math.pow(roverPosition.x - objective.location.x, 2) +
+          Math.pow(roverPosition.z - objective.location.z, 2)
+        );
+        
+        if (distance < 10) {
+          objective.collected = true;
+          this.showNotification(`Sample collected! (${this.getCompletedCount()}/${mission.objectives.length})`);
+          
+          // Create visual effect for collection
+          createCollectionEffect(objective.location);
+          
+          // Check if mission complete
+          if (this.getCompletedCount() === mission.objectives.length) {
+            mission.complete = true;
+            this.showNotification(`Mission Complete: ${mission.title}!`);
+            
+            // Advance to next mission if available
+            if (this.currentMission < this.missions.length - 1) {
+              setTimeout(() => {
+                this.currentMission++;
+                this.showNotification(`New Mission: ${this.missions[this.currentMission].title}`);
+              }, 3000);
+            }
+          }
+        }
+      }
+    });
+  },
+  
+  getCompletedCount() {
+    return this.missions[this.currentMission].objectives.filter(o => o.collected).length;
+  },
+  
+  showNotification(message) {
+    // Display message on HUD
+    const notification = document.createElement('div');
+    notification.className = 'mission-notification';
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    // Remove after animation
+    setTimeout(() => {
+      notification.classList.add('fade-out');
+      setTimeout(() => notification.remove(), 1000);
+    }, 3000);
+  }
+};
+
+// Power management system with solar charging
+const powerSystem = {
+  maxPower: 100,
+  currentPower: 100,
+  consumptionRate: 0.05,
+  chargingRate: 0.03,
+  
+  update(delta, isDaytime, isMoving) {
+    // Consume power when moving
+    if (isMoving) {
+      this.currentPower -= this.consumptionRate * delta/16.67;
+    }
+    
+    // Charge when in sunlight and not fully charged
+    if (isDaytime && this.currentPower < this.maxPower) {
+      this.currentPower += this.chargingRate * delta/16.67;
+    }
+    
+    // Cap power level
+    this.currentPower = Math.max(0, Math.min(this.maxPower, this.currentPower));
+    
+    // Update UI
+    this.updatePowerIndicator();
+    
+    // Check for power depletion
+    if (this.currentPower <= 0) {
+      this.triggerLowPowerMode();
+    }
+  },
+  
+  updatePowerIndicator() {
+    const powerIndicator = document.getElementById('power-indicator');
+    if (powerIndicator) {
+      powerIndicator.style.width = `${this.currentPower}%`;
+      
+      // Change color based on level
+      if (this.currentPower < 20) {
+        powerIndicator.style.backgroundColor = '#ff3333';
+      } else if (this.currentPower < 50) {
+        powerIndicator.style.backgroundColor = '#ffaa33';
+      } else {
+        powerIndicator.style.backgroundColor = '#33cc33';
+      }
+    }
+  },
+  
+  triggerLowPowerMode() {
+    // Slow down movement and trigger warning
+    speed = 0.05; // Reduced speed
+    document.getElementById('power-warning').classList.add('flashing');
+  }
+};
+
+// Create a rover dashboard UI
+function createRoverDashboard() {
+  // Create container
+  const dashboard = document.createElement('div');
+  dashboard.id = 'rover-dashboard';
+  dashboard.innerHTML = `
+    <div class="dash-section">
+      <div class="dash-label">POWER</div>
+      <div class="dash-gauge">
+        <div id="power-indicator" class="gauge-fill"></div>
+      </div>
+      <div id="power-warning" class="warning-light">LOW POWER</div>
+    </div>
+    
+    <div class="dash-section">
+      <div class="dash-label">SPEED</div>
+      <div id="speed-value">0.0 m/s</div>
+    </div>
+    
+    <div class="dash-section">
+      <div class="dash-label">COORDINATES</div>
+      <div id="coords-display">X: 0.0 Z: 0.0</div>
+    </div>
+    
+    <div class="dash-section">
+      <div class="dash-label">MISSION</div>
+      <div id="mission-objective">No Active Mission</div>
+      <div id="mission-progress">0/0</div>
+    </div>
+    
+    <div class="dash-section">
+      <div class="dash-label">TEMPERATURE</div>
+      <div id="temp-value">-60°C</div>
+      <div class="temp-indicator"></div>
+    </div>
+  `;
+  
+  // Add styles
+  const style = document.createElement('style');
+  style.textContent = `
+    #rover-dashboard {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 600px;
+      height: 120px;
+      background-color: rgba(20, 20, 30, 0.8);
+      border: 2px solid #555;
+      border-radius: 10px;
+      color: #eee;
+      font-family: 'Courier New', monospace;
+      display: flex;
+      padding: 10px;
+      z-index: 1000;
+    }
+    
+    .dash-section {
+      flex: 1;
+      padding: 0 10px;
+      border-right: 1px solid #555;
+    }
+    
+    .dash-section:last-child {
+      border-right: none;
+    }
+    
+    .dash-label {
+      font-size: 14px;
+      color: #aaa;
+      margin-bottom: 5px;
+    }
+    
+    .dash-gauge {
+      height: 15px;
+      background-color: #333;
+      border-radius: 7px;
+      overflow: hidden;
+      margin: 5px 0;
+    }
+    
+    .gauge-fill {
+      height: 100%;
+      width: 100%;
+      background-color: #33cc33;
+      transition: width 0.3s, background-color 0.3s;
+    }
+    
+    .warning-light {
+      color: #ff3333;
+      font-weight: bold;
+      opacity: 0;
+    }
+    
+    .warning-light.flashing {
+      animation: flash 1s infinite;
+    }
+    
+    @keyframes flash {
+      0%, 100% { opacity: 0; }
+      50% { opacity: 1; }
+    }
+    
+    .mission-notification {
+      position: fixed;
+      top: 30%;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: rgba(30, 30, 40, 0.8);
+      color: #fff;
+      padding: 15px 30px;
+      border-radius: 8px;
+      font-family: 'Arial', sans-serif;
+      font-size: 18px;
+      z-index: 1001;
+      transition: opacity 1s;
+    }
+    
+    .mission-notification.fade-out {
+      opacity: 0;
+    }
+  `;
+  
+  document.head.appendChild(style);
+  document.body.appendChild(dashboard);
+}
+
+// Weather system with dust storms
+const weatherSystem = {
+  currentWeather: 'clear',
+  stormIntensity: 0,
+  maxStormIntensity: 1.0,
+  stormDuration: 0,
+  stormProbability: 0.0005, // Chance per frame of storm starting
+  
+  // Create particle system for dust storms
+  createStormParticles() {
+    const particleCount = 2000;
+    const stormGeometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const sizes = new Float32Array(particleCount);
+    
+    for (let i = 0; i < particleCount; i++) {
+      // Initialize particles in random positions around the camera
+      positions[i * 3] = (Math.random() - 0.5) * 200;
+      positions[i * 3 + 1] = Math.random() * 30;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 200;
+      sizes[i] = Math.random() * 2 + 1;
+    }
+    
+    stormGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    stormGeometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+    
+    const stormMaterial = new THREE.PointsMaterial({
+      color: 0xaa7755,
+      size: 1.5,
+      transparent: true,
+      opacity: 0,
+      sizeAttenuation: true,
+      blending: THREE.AdditiveBlending
+    });
+    
+    this.stormParticles = new THREE.Points(stormGeometry, stormMaterial);
+    scene.add(this.stormParticles);
+  },
+  
+  update(delta, roverPosition) {
+    // Randomly start storms
+    if (this.currentWeather === 'clear' && Math.random() < this.stormProbability) {
+      this.startStorm();
+    }
+    
+    // Update active storm
+    if (this.currentWeather === 'storm') {
+      this.updateStorm(delta, roverPosition);
+    }
+  },
+  
+  startStorm() {
+    this.currentWeather = 'storm';
+    this.stormIntensity = 0;
+    this.stormDuration = Math.random() * 20000 + 10000; // 10-30 seconds
+    
+    // Notification
+    const notification = document.createElement('div');
+    notification.className = 'mission-notification';
+    notification.textContent = 'WARNING: Dust storm approaching!';
+    notification.style.backgroundColor = 'rgba(170, 80, 30, 0.8)';
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+      notification.classList.add('fade-out');
+      setTimeout(() => notification.remove(), 1000);
+    }, 3000);
+    
+    // Affect visuals
+    this.stormFog = new THREE.Fog(0xaa7744, 10, 50);
+    this.originalFog = scene.fog;
+  },
+  
+  updateStorm(delta, roverPosition) {
+    // Update storm duration
+    this.stormDuration -= delta;
+    
+    if (this.stormDuration <= 0) {
+      this.endStorm();
+      return;
+    }
+    
+    // Ramp up and down intensity
+    if (this.stormDuration > 15000) {
+      // Building up
+      this.stormIntensity = Math.min(this.maxStormIntensity, 
+                           this.stormIntensity + 0.002 * delta/16.67);
+    } else if (this.stormDuration < 5000) {
+      // Winding down
+      this.stormIntensity = Math.max(0, 
+                           this.stormIntensity - 0.002 * delta/16.67);
+    }
+    
+    // Apply visual effects
+    if (this.stormParticles) {
+      // Adjust particle opacity
+      this.stormParticles.material.opacity = this.stormIntensity * 0.6;
+      
+      // Move particles across the scene
+      const positions = this.stormParticles.geometry.attributes.position.array;
+      const windSpeed = this.stormIntensity * 0.5;
+      
+      for (let i = 0; i < positions.length; i += 3) {
+        positions[i] += windSpeed * delta/16.67; // X movement
+        positions[i+2] += (windSpeed * 0.5) * delta/16.67; // Z movement
+        
+        // Wrap particles around the rover
+        if (positions[i] > roverPosition.x + 100) positions[i] = roverPosition.x - 100;
+        if (positions[i+2] > roverPosition.z + 100) positions[i+2] = roverPosition.z - 100;
+      }
+      
+      this.stormParticles.geometry.attributes.position.needsUpdate = true;
+    }
+    
+    // Adjust fog based on intensity
+    scene.fog.near = Math.max(10, 200 * (1 - this.stormIntensity));
+    scene.fog.far = Math.max(50, 2000 * (1 - this.stormIntensity));
+    
+    // Affect rover speed
+    speed = 0.2 * (1 - this.stormIntensity * 0.7);
+  },
+  
+  endStorm() {
+    this.currentWeather = 'clear';
+    this.stormIntensity = 0;
+    
+    // Reset fog
+    scene.fog = this.originalFog;
+    
+    // Reset speed
+    speed = 0.2;
+    
+    // Notification
+    const notification = document.createElement('div');
+    notification.className = 'mission-notification';
+    notification.textContent = 'Dust storm subsiding';
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+      notification.classList.add('fade-out');
+      setTimeout(() => notification.remove(), 1000);
+    }, 3000);
+  }
+};
+
+// Points of interest system
+const pointsOfInterest = {
+  locations: [
+    {
+      id: 'ancient_riverbed',
+      name: 'Ancient Riverbed',
+      position: { x: 120, z: -80 },
+      radius: 20,
+      description: 'Evidence of flowing water from Mars\' ancient past.',
+      discovered: false,
+      model: null
+    },
+    {
+      id: 'impact_crater',
+      name: 'Meteorite Impact Site',
+      position: { x: -200, z: 150 },
+      radius: 30,
+      description: 'A recent impact crater with exposed subsurface materials.',
+      discovered: false,
+      model: null
+    },
+    {
+      id: 'cave_entrance',
+      name: 'Lava Tube Cave',
+      position: { x: 300, z: 200 },
+      radius: 15,
+      description: 'A natural cave formed by ancient lava flows.',
+      discovered: false,
+      model: null
+    },
+    // More POIs
+  ],
+  
+  // Create visual markers for points of interest
+  createMarkers() {
+    this.locations.forEach(poi => {
+      // Create a marker for each POI
+      const markerGeometry = new THREE.CylinderGeometry(0.5, 5, 15, 8);
+      const markerMaterial = new THREE.MeshStandardMaterial({
+        color: 0x33bbff,
+        transparent: true,
+        opacity: 0,
+        emissive: 0x3377ff,
+        emissiveIntensity: 0.5
+      });
+      
+      const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+      marker.position.set(poi.position.x, 5, poi.position.z);
+      
+      // Add animation for the marker
+      marker.userData.animationOffset = Math.random() * Math.PI * 2;
+      marker.userData.poiId = poi.id;
+      
+      scene.add(marker);
+      poi.model = marker;
+      
+      // Create a unique object for each POI
+      this.createPOIObject(poi);
+    });
+  },
+  
+  createPOIObject(poi) {
+    let object;
+    
+    switch(poi.id) {
+      case 'ancient_riverbed':
+        // Create a dried riverbed
+        const riverGeometry = new THREE.PlaneGeometry(40, 15, 20, 10);
+        // Apply undulating riverbed shape
+        const positions = riverGeometry.attributes.position.array;
+        for (let i = 0; i < positions.length; i += 3) {
+          positions[i + 1] = -0.5 - Math.sin(positions[i] * 0.1) * 0.3;
+        }
+        riverGeometry.rotateX(-Math.PI / 2);
+        riverGeometry.translate(poi.position.x, 0, poi.position.z);
+        
+        const riverMaterial = new THREE.MeshStandardMaterial({
+          color: 0x997766,
+          roughness: 0.9,
+          metalness: 0.1
+        });
+        
+        object = new THREE.Mesh(riverGeometry, riverMaterial);
+        break;
+        
+      case 'impact_crater':
+        // Create a crater with scattered rocks
+        const craterGeometry = new THREE.CircleGeometry(20, 32);
+        craterGeometry.rotateX(-Math.PI / 2);
+        
+        // Create a depression
+        const craterPositions = craterGeometry.attributes.position.array;
+        for (let i = 0; i < craterPositions.length; i += 3) {
+          const distFromCenter = Math.sqrt(
+            craterPositions[i] * craterPositions[i] + 
+            craterPositions[i+2] * craterPositions[i+2]
+          );
+          
+          if (distFromCenter < 20) {
+            // Create crater depression
+            let depth;
+            if (distFromCenter < 15) {
+              depth = -3 * (1 - distFromCenter/15);
+            } else {
+              depth = -1 * (20 - distFromCenter) / 5;
+            }
+            craterPositions[i+1] = depth;
+          }
+        }
+        
+        craterGeometry.translate(poi.position.x, 0, poi.position.z);
+        
+        const craterMaterial = new THREE.MeshStandardMaterial({
+          color: 0xaa8855,
+          roughness: 0.8,
+          metalness: 0.2
+        });
+        
+        object = new THREE.Mesh(craterGeometry, craterMaterial);
+        
+        // Add scattered rocks
+        for (let i = 0; i < 20; i++) {
+          const rockSize = Math.random() * 2 + 0.5;
+          const angle = Math.random() * Math.PI * 2;
+          const distance = Math.random() * 25;
+          const x = poi.position.x + Math.cos(angle) * distance;
+          const z = poi.position.z + Math.sin(angle) * distance;
+          
+          const rockGeometry = new THREE.DodecahedronGeometry(rockSize, 0);
+          const rockMaterial = new THREE.MeshStandardMaterial({
+            color: 0x886644,
+            roughness: 0.9
+          });
+          
+          const rock = new THREE.Mesh(rockGeometry, rockMaterial);
+          rock.position.set(x, 0, z);
+          rock.rotation.set(
+            Math.random() * Math.PI,
+            Math.random() * Math.PI,
+            Math.random() * Math.PI
+          );
+          
+          scene.add(rock);
+        }
+        break;
+        
+      // More POI types...
+    }
+    
+    if (object) {
+      scene.add(object);
+      poi.objectModel = object;
+    }
+  },
+  
+  update(time, roverPosition) {
+    // Check for POI discovery
+    this.locations.forEach(poi => {
+      if (!poi.discovered) {
+        const distance = Math.sqrt(
+          Math.pow(roverPosition.x - poi.position.x, 2) +
+          Math.pow(roverPosition.z - poi.position.z, 2)
+        );
+        
+        if (distance < poi.radius) {
+          this.discoverPOI(poi);
+        }
+      }
+      
+      // Animate markers
+      if (poi.model) {
+        if (poi.discovered) {
+          poi.model.position.y = 5 + Math.sin(time * 0.001 + poi.model.userData.animationOffset) * 2;
+          poi.model.rotation.y += 0.01;
+        }
+      }
+    });
+  },
+  
+  discoverPOI(poi) {
+    poi.discovered = true;
+    
+    // Make marker visible
+    if (poi.model) {
+      poi.model.material.opacity = 0.6;
+    }
+    
+    // Show discovery notification
+    const notification = document.createElement('div');
+    notification.className = 'mission-notification';
+    notification.innerHTML = `<h3>New Discovery: ${poi.name}</h3>
+                            <p>${poi.description}</p>`;
+    notification.style.padding = '20px';
+    notification.style.width = '300px';
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+      notification.classList.add('fade-out');
+      setTimeout(() => notification.remove(), 1000);
+    }, 6000);
+    
+    // Add to discoveries list
+    this.updateDiscoveriesList(poi);
+  },
+  
+  updateDiscoveriesList(poi) {
+    let discoveriesList = document.getElementById('discoveries-list');
+    
+    if (!discoveriesList) {
+      // Create discoveries panel if it doesn't exist
+      const panel = document.createElement('div');
+      panel.id = 'discoveries-panel';
+      panel.innerHTML = `
+        <h3>Discoveries</h3>
+        <ul id="discoveries-list"></ul>
+      `;
+      
+      panel.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background-color: rgba(20, 20, 30, 0.8);
+        color: white;
+        padding: 15px;
+        border-radius: 10px;
+        font-family: Arial, sans-serif;
+        max-width: 250px;
+      `;
+      
+      document.body.appendChild(panel);
+      discoveriesList = document.getElementById('discoveries-list');
+    }
+    
+    // Add discovery to list
+    const listItem = document.createElement('li');
+    listItem.textContent = poi.name;
+    discoveriesList.appendChild(listItem);
+  }
+};
+
+// Rover damage and obstacle system
+const damageSystem = {
+  maxHealth: 100,
+  currentHealth: 100,
+  repairRate: 0.01,
+  
+  // Create dangerous obstacles
+  createObstacles() {
+    this.obstacles = [];
+    
+    // Create sharp rocks that can damage the rover
+    for (let i = 0; i < 50; i++) {
+      const x = (Math.random() - 0.5) * 1000;
+      const z = (Math.random() - 0.5) * 1000;
+      
+      const rockGeometry = new THREE.ConeGeometry(2, 4, 5);
+      const rockMaterial = new THREE.MeshStandardMaterial({
+        color: 0x665544,
+        roughness: 0.9,
+        metalness: 0.1
+      });
+      
+      const rock = new THREE.Mesh(rockGeometry, rockMaterial);
+      rock.position.set(x, 0, z);
+      rock.rotation.x = Math.PI; // Point upward
+      
+      // Position on terrain
+      const raycaster = new THREE.Raycaster();
+      raycaster.set(
+        new THREE.Vector3(x, 20, z),
+        new THREE.Vector3(0, -1, 0)
+      );
+      
+      const intersects = raycaster.intersectObject(marsSurface);
+      if (intersects.length > 0) {
+        rock.position.y = intersects[0].point.y;
+      }
+      
+      scene.add(rock);
+      
+      this.obstacles.push({
+        type: 'sharp_rock',
+        position: {x, z},
+        radius: 4,
+        damage: 10,
+        model: rock
+      });
+    }
+    
+    // Create sand pits that slow the rover
+    for (let i = 0; i < 30; i++) {
+      const x = (Math.random() - 0.5) * 1000;
+      const z = (Math.random() - 0.5) * 1000;
+      const radius = Math.random() * 15 + 10;
+      
+      const sandGeometry = new THREE.CircleGeometry(radius, 32);
+      sandGeometry.rotateX(-Math.PI / 2);
+      
+      const sandMaterial = new THREE.MeshStandardMaterial({
+        color: 0xddbb88,
+        roughness: 1.0,
+        metalness: 0.0
+      });
+      
+      const sandPit = new THREE.Mesh(sandGeometry, sandMaterial);
+      sandPit.position.set(x, 0.1, z);
+      
+      // Position on terrain
+      const raycaster = new THREE.Raycaster();
+      raycaster.set(
+        new THREE.Vector3(x, 20, z),
+        new THREE.Vector3(0, -1, 0)
+      );
+      
+      const intersects = raycaster.intersectObject(marsSurface);
+      if (intersects.length > 0) {
+        sandPit.position.y = intersects[0].point.y + 0.1;
+      }
+      
+      scene.add(sandPit);
+      
+      this.obstacles.push({
+        type: 'sand_pit',
+        position: {x, z},
+        radius: radius,
+        slowFactor: 0.3,
+        model: sandPit
+      });
+    }
+  },
+  
+  checkCollisions(roverPosition, delta) {
+    let inSandPit = false;
+    let speedModifier = 1.0;
+    
+    this.obstacles.forEach(obstacle => {
+      const distance = Math.sqrt(
+        Math.pow(roverPosition.x - obstacle.position.x, 2) +
+        Math.pow(roverPosition.z - obstacle.position.z, 2)
+      );
+      
+      if (distance < obstacle.radius) {
+        if (obstacle.type === 'sharp_rock') {
+          // Damage the rover when hitting rocks
+          this.takeDamage(obstacle.damage * delta/1000);
+          
+          // Bounce effect
+          const angle = Math.atan2(
+            roverPosition.z - obstacle.position.z,
+            roverPosition.x - obstacle.position.x
+          );
+          
+          rover.position.x += Math.cos(angle) * 0.5;
+          rover.position.z += Math.sin(angle) * 0.5;
+          
+          // Visual feedback
+          if (obstacle.model) {
+            obstacle.model.material.emissive.set(0xff0000);
+            setTimeout(() => {
+              obstacle.model.material.emissive.set(0x000000);
+            }, 200);
+          }
+        }
+        else if (obstacle.type === 'sand_pit') {
+          // Slow down in sand
+          inSandPit = true;
+          speedModifier = Math.min(speedModifier, 1 - obstacle.slowFactor);
+          
+          // Sink effect - lower rover position slightly
+          rover.position.y -= 0.05 * delta/16.67;
+          
+          // Visual feedback - ripple effect in sand
+          if (!obstacle.rippleEffect) {
+            createSandRipple(obstacle.position.x, obstacle.position.z);
+            obstacle.rippleEffect = true;
+            
+            // Reset ripple effect after a delay
+            setTimeout(() => {
+              obstacle.rippleEffect = false;
+            }, 2000);
+          }
+        }
+      }
+    });
+    
+    return {inSandPit, speedModifier};
+  },
+  
+  takeDamage(amount) {
+    this.currentHealth = Math.max(0, this.currentHealth - amount);
+    
+    // Update UI
+    this.updateHealthIndicator();
+    
+    // Check for critical damage
+    if (this.currentHealth < 20) {
+      document.getElementById('damage-warning').classList.add('flashing');
+    }
+    
+    // Play damage sound
+    if (amount > 1) {
+      playSound('damage');
+    }
+    
+    // Visual effect on rover
+    if (amount > 5) {
+      createDamageEffect();
+    }
+  },
+  
+  repair(delta) {
+    // Auto-repair when not taking damage
+    if (this.currentHealth < this.maxHealth) {
+      this.currentHealth = Math.min(
+        this.maxHealth, 
+        this.currentHealth + this.repairRate * delta/16.67
+      );
+      this.updateHealthIndicator();
+      
+      // Remove warning when health improves
+      if (this.currentHealth >= 20) {
+        document.getElementById('damage-warning').classList.remove('flashing');
+      }
+    }
+  },
+  
+  updateHealthIndicator() {
+    const healthIndicator = document.getElementById('health-indicator');
+    if (healthIndicator) {
+      healthIndicator.style.width = `${this.currentHealth}%`;
+      
+      // Change color based on health level
+      if (this.currentHealth < 30) {
+        healthIndicator.style.backgroundColor = '#ff3333';
+      } else if (this.currentHealth < 60) {
+        healthIndicator.style.backgroundColor = '#ffaa33';
+      } else {
+        healthIndicator.style.backgroundColor = '#33cc33';
+      }
+    }
+  }
+};
+
+// Sound effects system
+const soundSystem = {
+  sounds: {},
+  
+  initialize() {
+    // Load sounds
+    this.loadSound('engine', 'sounds/rover_engine.mp3', true);
+    this.loadSound('damage', 'sounds/damage.mp3', false);
+    this.loadSound('alert', 'sounds/alert.mp3', false);
+    this.loadSound('collect', 'sounds/collect.mp3', false);
+    this.loadSound('storm', 'sounds/dust_storm.mp3', true);
+    this.loadSound('sand', 'sounds/sand.mp3', true);
+    this.loadSound('discovery', 'sounds/discovery.mp3', false);
+    
+    // Create audio listeners
+    const listener = new THREE.AudioListener();
+    camera.add(listener);
+    
+    // Add ambient Martian wind
+    this.loadAmbientSound('wind', 'sounds/mars_wind.mp3', listener);
+  },
+  
+  loadSound(name, url, loop) {
+    const audio = new Audio(url);
+    audio.loop = loop;
+    this.sounds[name] = audio;
+  },
+  
+  loadAmbientSound(name, url, listener) {
+    const sound = new THREE.Audio(listener);
+    const audioLoader = new THREE.AudioLoader();
+    
+    audioLoader.load(url, function(buffer) {
+      sound.setBuffer(buffer);
+      sound.setLoop(true);
+      sound.setVolume(0.5);
+      sound.play();
+    });
+    
+    this.sounds[name] = sound;
+  },
+  
+  play(name) {
+    if (this.sounds[name]) {
+      // For non-loop sounds, play from beginning
+      if (!this.sounds[name].loop) {
+        this.sounds[name].currentTime = 0;
+      }
+      this.sounds[name].play();
+    }
+  },
+  
+  stop(name) {
+    if (this.sounds[name]) {
+      this.sounds[name].pause();
+      if (!this.sounds[name].loop) {
+        this.sounds[name].currentTime = 0;
+      }
+    }
+  },
+  
+  updateEngine(speed, inSandPit) {
+    // Engine sound changes with speed
+    if (this.sounds.engine) {
+      if (speed > 0) {
+        if (this.sounds.engine.paused) {
+          this.sounds.engine.play();
+        }
+        this.sounds.engine.volume = 0.3 + speed * 1.5;
+        this.sounds.engine.playbackRate = 0.8 + speed * 2;
+      } else {
+        this.sounds.engine.pause();
+      }
+    }
+    
+    // Sand sound
+    if (this.sounds.sand) {
+      if (inSandPit) {
+        if (this.sounds.sand.paused) {
+          this.sounds.sand.play();
+        }
+      } else {
+        this.sounds.sand.pause();
+      }
+    }
+  }
+};
