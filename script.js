@@ -514,6 +514,12 @@ const keys = { w: false, a: false, s: false, d: false };
 const speed = 0.2;
 const rotationSpeed = 0.03;
 let isMoving = false;
+let currentSpeed = 0; // Track the current speed of the rover
+
+// Distance tracking variables
+let distanceTraveled = 0;
+let lastUpdateTime = 0;
+const DISTANCE_SCALE_FACTOR = 50; // Increased scale factor to make distance more visible
 
 window.addEventListener('keydown', (event) => {
   keys[event.key.toLowerCase()] = true;
@@ -565,7 +571,7 @@ let frameCount = 0;
 let lastTime = 0;
 const FRAME_THROTTLE = 3; // Only perform heavy operations every N frames
 
-// Modify the animate function to use the separate yaw tracking and implement performance optimizations
+// Modify the animate function
 function animate(time) {
   requestAnimationFrame(animate);
   
@@ -585,28 +591,22 @@ function animate(time) {
 
   // Rover Movement
   isMoving = false;
-  let wheelRotationSpeed = 0;
+  currentSpeed = 0; // Reset current speed
   
-  // Store previous position for collision detection
-  const previousPosition = {
-    x: rover.position.x,
-    z: rover.position.z
-  };
-  
-  // Movement calculations
   if (keys.w || keys.s) {
-    const direction = keys.w ? -1 : 1;
-    
-    // Calculate new position
-    const newX = rover.position.x + Math.sin(roverYaw) * speed * direction;
-    const newZ = rover.position.z + Math.cos(roverYaw) * speed * direction;
-    
-    // Apply movement
-    rover.position.x = newX;
-    rover.position.z = newZ;
-    
     isMoving = true;
-    wheelRotationSpeed = keys.w ? -0.1 : 0.1;
+    const direction = keys.w ? -1 : 1; // Forward is negative Z in three.js
+    
+    // Calculate movement vector based on rover's rotation
+    const moveX = Math.sin(roverYaw) * speed * direction;
+    const moveZ = Math.cos(roverYaw) * speed * direction;
+    
+    // Update rover position
+    rover.position.x += moveX;
+    rover.position.z += moveZ;
+    
+    // Set current speed based on direction - FIXED: positive for forward (w key)
+    currentSpeed = speed * (keys.w ? 1 : -1); // Positive for forward, negative for backward
   }
   
   // Update terrain system with current rover position
@@ -639,14 +639,14 @@ function animate(time) {
     // Differential wheel rotation for turning - only update if moving
     if (isMoving) {
       // Optimize wheel rotation updates
-      updateWheelRotation(wheels, wheelRotationSpeed, turnDirection);
+      updateWheelRotation(wheels, currentSpeed, turnDirection);
     }
   } else if (isMoving) {
     // Straight movement, all wheels rotate at the same speed
     // Only update every other frame for performance
     if (frameCount % 2 === 0) {
       wheels.forEach(wheel => {
-        wheel.rotation.x += wheelRotationSpeed;
+        wheel.rotation.x += currentSpeed * 0.3;
       });
     }
   }
@@ -676,6 +676,28 @@ function animate(time) {
   
   // Render scene
   renderer.render(scene, camera);
+
+  // Update distance traveled
+  if (lastUpdateTime === 0) {
+    lastUpdateTime = time;
+  } else {
+    const deltaTime = (time - lastUpdateTime) / 1000; // Convert to seconds
+    lastUpdateTime = time;
+
+    // Calculate distance based on current speed with scaling factor
+    // Only add distance when moving forward (positive speed)
+    if (currentSpeed > 0) {
+      // Apply a scaling factor to make the distance more noticeable
+      const scaledSpeed = currentSpeed * DISTANCE_SCALE_FACTOR;
+      const speedInMilesPerSecond = scaledSpeed * 0.000621371;
+      distanceTraveled += speedInMilesPerSecond * deltaTime;
+    }
+
+    // Update the HUD with the distance traveled
+    if (distanceText) {
+      distanceText.innerHTML = `Distance Traveled: ${distanceTraveled.toFixed(2)} miles`;
+    }
+  }
 }
 
 // Helper function to optimize wheel rotation updates
@@ -871,6 +893,22 @@ function createHUD() {
   hudElement.id = 'cameraHUD';
   hudElement.innerHTML = 'Camera: Third Person Mode (Press C to change)';
   document.body.appendChild(hudElement);
+  
+  // Create a text element for distance traveled
+  distanceText = document.createElement('div');
+  distanceText.style.position = 'absolute';
+  distanceText.style.top = '20px';
+  distanceText.style.left = '20px';
+  distanceText.style.color = 'white';
+  distanceText.style.fontSize = '16px';
+  distanceText.style.fontFamily = 'Arial, sans-serif';
+  distanceText.style.padding = '10px';
+  distanceText.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+  distanceText.style.borderRadius = '5px';
+  distanceText.style.pointerEvents = 'none';
+  distanceText.id = 'distanceHUD';
+  distanceText.innerHTML = 'Distance Traveled: 0.00 miles';
+  document.body.appendChild(distanceText);
   
   // Update HUD when camera mode changes
   window.addEventListener('keydown', (event) => {
@@ -2041,13 +2079,49 @@ function initializeScene() {
   terrainSystem.init();
   console.log("Terrain system initialized");
   
+  // Create the sun directional light
+  sun = new THREE.DirectionalLight(0xffffff, 1);
+  sun.position.set(10, 100, 10);
+  scene.add(sun);
+  console.log("Sun light added to scene");
+  
+  // Create a visible sun sphere
+  const sunGeometry = new THREE.SphereGeometry(50, 32, 32);
+  const sunMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffee66,
+    transparent: true,
+    opacity: 0.9
+  });
+  sunSphere = new THREE.Mesh(sunGeometry, sunMaterial);
+  sunSphere.position.set(500, 300, -1000);
+  scene.add(sunSphere);
+  
+  // Add a glow effect to the sun
+  const sunGlowGeometry = new THREE.SphereGeometry(60, 32, 32);
+  const sunGlowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffdd44,
+    transparent: true,
+    opacity: 0.4,
+    side: THREE.BackSide
+  });
+  const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
+  sunSphere.add(sunGlow);
+  
+  console.log("Sun sphere added to scene");
+  
   // Start the animation loop with timestamp - ONLY CALL THIS ONCE
   console.log("Starting animation loop");
   animate(0);
 }
 
 // Add a day/night toggle and cycle
-let isDaytime = false; // Start with night scene
+let isDaytime = true;
+
+function startDayNightCycle() {
+  setInterval(() => {
+    toggleDayNight();
+  }, 30000); // 30 seconds for each cycle
+}
 
 function toggleDayNight() {
   isDaytime = !isDaytime;
@@ -2059,23 +2133,54 @@ function updateSkyAppearance() {
     // Create Martian daytime sky
     scene.fog = new THREE.Fog(0xd09060, 200, 2000); // Dusty orange-tan fog
     scene.background = createMarsDaySkyTexture();
+    
+    // Remove night skybox if it exists
+    if (scene.getObjectById(spaceSkybox.id)) {
+      scene.remove(spaceSkybox);
+    }
+    
     // Adjust lighting
     sunLight.intensity = 0.9;
     sunLight.position.set(10, 100, 10); // Sun overhead
     ambientLight.intensity = 0.7;
     ambientLight.color.set(0xff9966); // Warm ambient light
+    
+    // Show the sun sphere
+    if (sunSphere) {
+      sunSphere.visible = true;
+      // Position the sun in the sky
+      sunSphere.position.set(500, 300, -1000);
+    }
+    
+    // Show the sun light
+    sun.visible = true;
   } else {
     // Revert to night sky
     scene.fog = new THREE.Fog(0xb77c5a, 500, 5000);
-    // Restore night skybox
-    scene.add(spaceSkybox);
+    
+    // Add night skybox if not already in scene
+    if (!scene.getObjectById(spaceSkybox.id)) {
+      scene.add(spaceSkybox);
+    }
+    
     // Adjust lighting
     sunLight.intensity = 0.3;
     sunLight.position.set(-10, -5, 10); // Low sun angle
     ambientLight.intensity = 0.4;
     ambientLight.color.set(0xff8866);
+    
+    // Hide the sun sphere
+    if (sunSphere) {
+      sunSphere.visible = false;
+    }
+    
+    // Hide the sun light
+    sun.visible = false;
   }
 }
+
+// Start the day/night cycle
+startDayNightCycle();
 
 // Add a keypress handler for toggling
 document.addEventListener('keydown', function(event) {
@@ -2101,13 +2206,34 @@ function createMarsDaySkyTexture() {
   context.fillRect(0, 0, canvasSize, canvasSize);
   
   // Add atmospheric haze/dust
-  addMarsDust(context, canvasSize);
+  context.fillStyle = 'rgba(210, 170, 130, 0.2)';
+  for (let i = 0; i < 100; i++) {
+    const x = Math.random() * canvasSize;
+    const y = Math.random() * canvasSize * 0.6 + canvasSize * 0.4; // More dust near horizon
+    const size = Math.random() * 100 + 50;
+    context.beginPath();
+    context.arc(x, y, size, 0, Math.PI * 2);
+    context.fill();
+  }
   
-  // Add sun
-  addMarsSun(context, canvasSize);
-  
-  // Add Phobos and Deimos (Mars' moons)
-  addMarsMoons(context, canvasSize);
+  // Add subtle clouds
+  context.fillStyle = 'rgba(230, 200, 180, 0.15)';
+  for (let i = 0; i < 20; i++) {
+    const x = Math.random() * canvasSize;
+    const y = Math.random() * canvasSize * 0.3 + canvasSize * 0.2; // Clouds in middle of sky
+    const width = Math.random() * 300 + 200;
+    const height = Math.random() * 100 + 50;
+    
+    // Draw cloud as a series of circles for a fluffy appearance
+    for (let j = 0; j < 8; j++) {
+      const cloudX = x + (Math.random() - 0.5) * width * 0.8;
+      const cloudY = y + (Math.random() - 0.5) * height * 0.8;
+      const cloudSize = Math.random() * 80 + 40;
+      context.beginPath();
+      context.arc(cloudX, cloudY, cloudSize, 0, Math.PI * 2);
+      context.fill();
+    }
+  }
   
   // Create texture from canvas
   const texture = new THREE.CanvasTexture(canvas);
@@ -3152,6 +3278,43 @@ const soundSystem = {
 //     requestAnimationFrame(this.gameLoop.bind(this));
 //   }
 // };
+  
+//   // Restart game
+//   restartGame: function() {
+//     // Reset game state
+//     this.gameState.score = 0;
+//     this.gameState.fuel = 100;
+//     this.gameState.samplesCollected = 0;
+//     this.gameState.missionComplete = false;
+//     this.gameState.gameOver = false;
+    
+//     // Reset rover position
+//     this.rover.position.set(0, 2, 0);
+//     this.rover.rotation.y = 0;
+    
+//     // Reset controls
+//     this.controls.speed = 0;
+//     this.controls.rotationSpeed = 0;
+    
+//     // Reset samples
+//     this.samples.forEach(sample => {
+//       sample.userData.collected = false;
+//       sample.visible = true;
+//     });
+    
+//     // Update HUD
+//     this.hudElements.updateHUD();
+//   },
+  
+//   // Game loop - completely separate from the main animation loop
+//   gameLoop: function() {
+//     if (!this.initialized) return;
+    
+//     // Update game state
+    
+//     requestAnimationFrame(this.gameLoop.bind(this));
+//   }
+// };
 
 // // Wait for scene to be ready before initializing
 // setTimeout(function() {
@@ -3193,3 +3356,203 @@ const soundSystem = {
 // };
 
 // ... existing code ...
+
+function updateDistanceTraveled(currentTime) {
+  if (lastUpdateTime === 0) {
+    lastUpdateTime = currentTime;
+    return;
+  }
+  const deltaTime = (currentTime - lastUpdateTime) / 1000; // Convert to seconds
+  lastUpdateTime = currentTime;
+
+  // Assuming speed is in meters per second, convert to miles
+  const speedInMilesPerSecond = roverSpeed * 0.000621371;
+  distanceTraveled += speedInMilesPerSecond * deltaTime;
+
+  // Update the HUD or console with the distance traveled
+  console.log(`Distance Traveled: ${distanceTraveled.toFixed(2)} miles`);
+}
+
+// Create a visible sun sphere
+let sunSphere;
+
+function createSunSphere() {
+  // Create a glowing sun sphere
+  const sunGeometry = new THREE.SphereGeometry(50, 32, 32);
+  const sunMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffee66,
+    transparent: true,
+    opacity: 0.9
+  });
+  sunSphere = new THREE.Mesh(sunGeometry, sunMaterial);
+  sunSphere.position.set(500, 300, -1000);
+  scene.add(sunSphere);
+  
+  // Add a glow effect
+  const sunGlowGeometry = new THREE.SphereGeometry(60, 32, 32);
+  const sunGlowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffdd44,
+    transparent: true,
+    opacity: 0.4,
+    side: THREE.BackSide
+  });
+  const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
+  sunSphere.add(sunGlow);
+  
+  return sunSphere;
+}
+
+function initializeScene() {
+  console.log("Initializing scene elements...");
+  
+  // Create the HUD
+  createHUD();
+  console.log("HUD created");
+  
+  // Create the skybox first and make it globally accessible
+  window.spaceSkybox = createSpaceSkybox();
+  scene.add(window.spaceSkybox);
+  console.log("Skybox added to scene");
+  
+  // Initialize the terrain system
+  terrainSystem.init();
+  console.log("Terrain system initialized");
+  
+  // Create the sun directional light
+  sun = new THREE.DirectionalLight(0xffffff, 1);
+  sun.position.set(10, 100, 10);
+  scene.add(sun);
+  console.log("Sun light added to scene");
+  
+  // Create a visible sun sphere
+  const sunGeometry = new THREE.SphereGeometry(50, 32, 32);
+  const sunMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffee66,
+    transparent: true,
+    opacity: 0.9
+  });
+  sunSphere = new THREE.Mesh(sunGeometry, sunMaterial);
+  sunSphere.position.set(500, 300, -1000);
+  scene.add(sunSphere);
+  
+  // Add a glow effect to the sun
+  const sunGlowGeometry = new THREE.SphereGeometry(60, 32, 32);
+  const sunGlowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffdd44,
+    transparent: true,
+    opacity: 0.4,
+    side: THREE.BackSide
+  });
+  const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
+  sunSphere.add(sunGlow);
+  
+  console.log("Sun sphere added to scene");
+  
+  // Start the animation loop with timestamp - ONLY CALL THIS ONCE
+  console.log("Starting animation loop");
+  animate(0);
+}
+
+function updateSkyAppearance() {
+  if (isDaytime) {
+    // Create Martian daytime sky
+    scene.fog = new THREE.Fog(0xd09060, 200, 2000); // Dusty orange-tan fog
+    scene.background = createMarsDaySkyTexture();
+    
+    // Remove night skybox if it exists
+    if (scene.getObjectById(spaceSkybox.id)) {
+      scene.remove(spaceSkybox);
+    }
+    
+    // Adjust lighting
+    sunLight.intensity = 0.9;
+    sunLight.position.set(10, 100, 10); // Sun overhead
+    ambientLight.intensity = 0.7;
+    ambientLight.color.set(0xff9966); // Warm ambient light
+    
+    // Show the sun sphere
+    if (sunSphere) {
+      sunSphere.visible = true;
+      // Position the sun in the sky
+      sunSphere.position.set(500, 300, -1000);
+    }
+    
+    // Show the sun light
+    sun.visible = true;
+  } else {
+    // Revert to night sky
+    scene.fog = new THREE.Fog(0xb77c5a, 500, 5000);
+    
+    // Add night skybox if not already in scene
+    if (!scene.getObjectById(spaceSkybox.id)) {
+      scene.add(spaceSkybox);
+    }
+    
+    // Adjust lighting
+    sunLight.intensity = 0.3;
+    sunLight.position.set(-10, -5, 10); // Low sun angle
+    ambientLight.intensity = 0.4;
+    ambientLight.color.set(0xff8866);
+    
+    // Hide the sun sphere
+    if (sunSphere) {
+      sunSphere.visible = false;
+    }
+    
+    // Hide the sun light
+    sun.visible = false;
+  }
+}
+
+function createMarsDaySkyTexture() {
+  const canvas = document.createElement('canvas');
+  const canvasSize = 2048;
+  canvas.width = canvasSize;
+  canvas.height = canvasSize;
+  const context = canvas.getContext('2d');
+  
+  // Create gradient from horizon to zenith
+  const gradient = context.createLinearGradient(0, canvasSize, 0, 0);
+  gradient.addColorStop(0, '#c27e54'); // Dusty orange-brown at horizon
+  gradient.addColorStop(0.5, '#d7a28b'); // Pinkish in middle
+  gradient.addColorStop(1, '#e6b499'); // Lighter at zenith
+  
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvasSize, canvasSize);
+  
+  // Add atmospheric haze/dust
+  context.fillStyle = 'rgba(210, 170, 130, 0.2)';
+  for (let i = 0; i < 100; i++) {
+    const x = Math.random() * canvasSize;
+    const y = Math.random() * canvasSize * 0.6 + canvasSize * 0.4; // More dust near horizon
+    const size = Math.random() * 100 + 50;
+    context.beginPath();
+    context.arc(x, y, size, 0, Math.PI * 2);
+    context.fill();
+  }
+  
+  // Add subtle clouds
+  context.fillStyle = 'rgba(230, 200, 180, 0.15)';
+  for (let i = 0; i < 20; i++) {
+    const x = Math.random() * canvasSize;
+    const y = Math.random() * canvasSize * 0.3 + canvasSize * 0.2; // Clouds in middle of sky
+    const width = Math.random() * 300 + 200;
+    const height = Math.random() * 100 + 50;
+    
+    // Draw cloud as a series of circles for a fluffy appearance
+    for (let j = 0; j < 8; j++) {
+      const cloudX = x + (Math.random() - 0.5) * width * 0.8;
+      const cloudY = y + (Math.random() - 0.5) * height * 0.8;
+      const cloudSize = Math.random() * 80 + 40;
+      context.beginPath();
+      context.arc(cloudX, cloudY, cloudSize, 0, Math.PI * 2);
+      context.fill();
+    }
+  }
+  
+  // Create texture from canvas
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  
+  return texture;
+}
