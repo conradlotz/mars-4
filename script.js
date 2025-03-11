@@ -2124,9 +2124,33 @@ function initializeScene() {
 let isDaytime = true;
 
 function startDayNightCycle() {
+  // Use a 1-minute cycle duration
   setInterval(() => {
     toggleDayNight();
-  }, 30000); // 30 seconds for each cycle
+  }, 60000); // 1 minute for each cycle
+  
+  // Add a manual toggle button for testing
+  const toggleButton = document.createElement('button');
+  toggleButton.textContent = 'Toggle Day/Night';
+  toggleButton.style.position = 'absolute';
+  toggleButton.style.bottom = '20px';
+  toggleButton.style.right = '20px';
+  toggleButton.style.padding = '10px';
+  toggleButton.style.backgroundColor = '#444';
+  toggleButton.style.color = 'white';
+  toggleButton.style.border = 'none';
+  toggleButton.style.borderRadius = '5px';
+  toggleButton.style.cursor = 'pointer';
+  toggleButton.style.zIndex = '1000';
+  
+  toggleButton.addEventListener('click', () => {
+    // Only toggle if not already transitioning
+    if (!isTransitioning) {
+      toggleDayNight();
+    }
+  });
+  
+  document.body.appendChild(toggleButton);
 }
 
 function toggleDayNight() {
