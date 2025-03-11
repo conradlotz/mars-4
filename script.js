@@ -2311,9 +2311,8 @@ function updateSkyAppearance(transitionProgress = null) {
   }
   
   // If we're not transitioning, use the current state
-  const isDay = transitionProgress === null ? isDaytime : 
+  const isDay = transitionProgress === null ? (isDaytime ? 1 : 0) : 
                 (transitionStartState === 'day' ? 1 - transitionProgress : transitionProgress);
-  
   console.log("isDay value:", isDay);
   
   // Create or update fog based on time of day
@@ -4581,4 +4580,854 @@ setTimeout(() => {
 
 // Also expose the function globally for console access
 window.forceMarsDayMode = forceMarsDayMode;
+
+// Add a more sophisticated day/night cycle with smooth transitions
+let currentTimeOfDay = 0.5; // 0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk, 1 = midnight
+let dayNightCycleSpeed = 0.0001; // Speed of day/night cycle (smaller = slower)
+let isManualTransition = false;
+let manualTransitionTarget = null;
+let manualTransitionSpeed = 0.005;
+let lastTransitionUpdate = 0;
+
+// Create a function to get the current sky state based on time of day
+function getSkyState(timeOfDay) {
+  // Convert time to a 0-1 value where 0 and 1 are midnight
+  const normalizedTime = timeOfDay % 1;
+  
+  // Calculate if it's day or night
+  // Day is roughly between 0.25 (dawn) and 0.75 (dusk)
+  const isDaytime = normalizedTime > 0.25 && normalizedTime < 0.75;
+  
+  // Calculate transition factors for dawn and dusk
+  // Dawn transition: 0.15 to 0.35
+  // Dusk transition: 0.65 to 0.85
+  let dawnFactor = 0;
+  let duskFactor = 0;
+  
+  if (normalizedTime >= 0.15 && normalizedTime <= 0.35) {
+    // Dawn transition (0 to 1)
+    dawnFactor = (normalizedTime - 0.15) / 0.2;
+  } else if (normalizedTime >= 0.65 && normalizedTime <= 0.85) {
+    // Dusk transition (1 to 0)
+    duskFactor = 1 - ((normalizedTime - 0.65) / 0.2);
+  }
+  
+  // Calculate day factor (how deep into day we are)
+  let dayFactor = 0;
+  if (normalizedTime > 0.35 && normalizedTime < 0.65) {
+    // Full day
+    dayFactor = 1;
+  } else if (normalizedTime >= 0.25 && normalizedTime <= 0.35) {
+    // Dawn to full day
+    dayFactor = (normalizedTime - 0.25) / 0.1;
+  } else if (normalizedTime >= 0.65 && normalizedTime <= 0.75) {
+    // Full day to dusk
+    dayFactor = 1 - ((normalizedTime - 0.65) / 0.1);
+  }
+  
+  // Calculate night factor (how deep into night we are)
+  let nightFactor = 0;
+  if (normalizedTime < 0.15 || normalizedTime > 0.85) {
+    // Full night
+    nightFactor = 1;
+  } else if (normalizedTime >= 0.75 && normalizedTime <= 0.85) {
+    // Dusk to full night
+    nightFactor = (normalizedTime - 0.75) / 0.1;
+  } else if (normalizedTime >= 0.15 && normalizedTime <= 0.25) {
+    // Full night to dawn
+    nightFactor = 1 - ((normalizedTime - 0.15) / 0.1);
+  }
+  
+  return {
+    timeOfDay: normalizedTime,
+    isDaytime,
+    dawnFactor,
+    duskFactor,
+    dayFactor,
+    nightFactor
+  };
+}
+
+// Function to update the sky appearance based on time of day
+function updateSkyForTimeOfDay(timeOfDay) {
+  const skyState = getSkyState(timeOfDay);
+  
+  // Log the current state
+  console.log("Sky state:", skyState);
+  
+  // Create the appropriate sky texture based on time of day
+  let skyTexture;
+  
+  if (skyState.dawnFactor > 0) {
+    // Dawn transition
+    skyTexture = createDawnSkyTexture(skyState.dawnFactor);
+  } else if (skyState.duskFactor > 0) {
+    // Dusk transition
+    skyTexture = createDuskSkyTexture(skyState.duskFactor);
+  } else if (skyState.dayFactor > 0) {
+    // Day (with potential partial intensity)
+    skyTexture = createDaySkyTexture(skyState.dayFactor);
+  } else {
+    // Night (with potential partial intensity)
+    // For night, we'll use the existing skybox but adjust its opacity
+    skyTexture = null;
+  }
+  
+  // Apply the sky texture if we created one
+  if (skyTexture) {
+    scene.background = skyTexture;
+    
+    // Remove night skybox if it exists
+    if (typeof spaceSkybox !== 'undefined' && spaceSkybox && scene.getObjectById(spaceSkybox.id)) {
+      scene.remove(spaceSkybox);
+    }
+  } else {
+    // Add night skybox if not already in scene
+    if (typeof spaceSkybox !== 'undefined' && spaceSkybox && !scene.getObjectById(spaceSkybox.id)) {
+      scene.add(spaceSkybox);
+    }
+  }
+  
+  // Update fog based on time of day
+  updateFogForTimeOfDay(skyState);
+  
+  // Update lighting based on time of day
+  updateLightingForTimeOfDay(skyState);
+  
+  // Update sun position and appearance
+  updateSunForTimeOfDay(skyState);
+}
+
+// Create a dawn sky texture with beautiful sunrise colors
+function createDawnSkyTexture(dawnFactor) {
+  const canvas = document.createElement('canvas');
+  const size = 2048;
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  
+  // Create gradient from horizon to zenith
+  const gradient = context.createLinearGradient(0, size, 0, 0);
+  
+  // Dawn colors - beautiful sunrise palette
+  // Horizon: Deep orange to bright gold
+  gradient.addColorStop(0, lerpColor('#8a3a2d', '#ff7e45', dawnFactor)); // Horizon
+  gradient.addColorStop(0.2, lerpColor('#a85a3d', '#ffb06a', dawnFactor)); // Low sky
+  gradient.addColorStop(0.4, lerpColor('#b06a55', '#ffc090', dawnFactor)); // Mid-low sky
+  gradient.addColorStop(0.6, lerpColor('#9a6a7a', '#ffd0b0', dawnFactor)); // Mid-high sky
+  gradient.addColorStop(0.8, lerpColor('#7a6a8a', '#e0d0c0', dawnFactor)); // High sky
+  gradient.addColorStop(1, lerpColor('#5a5a7a', '#c0c0d0', dawnFactor)); // Zenith
+  
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, size, size);
+  
+  // Add atmospheric glow near horizon
+  const glowGradient = context.createRadialGradient(
+    size / 2, size, 0,
+    size / 2, size, size * 0.7
+  );
+  glowGradient.addColorStop(0, `rgba(255, 150, 50, ${0.3 * dawnFactor})`);
+  glowGradient.addColorStop(1, 'rgba(255, 150, 50, 0)');
+  
+  context.fillStyle = glowGradient;
+  context.fillRect(0, 0, size, size);
+  
+  // Add subtle clouds if it's more than halfway through dawn
+  if (dawnFactor > 0.5) {
+    const cloudOpacity = (dawnFactor - 0.5) * 2 * 0.15; // Max 15% opacity
+    context.fillStyle = `rgba(255, 230, 210, ${cloudOpacity})`;
+    
+    for (let i = 0; i < 10; i++) {
+      const x = Math.random() * size;
+      const y = size * 0.3 + Math.random() * size * 0.3;
+      const cloudWidth = Math.random() * 300 + 200;
+      const cloudHeight = Math.random() * 100 + 50;
+      
+      // Create fluffy cloud with multiple circles
+      for (let j = 0; j < 8; j++) {
+        const cloudX = x + (Math.random() - 0.5) * cloudWidth * 0.8;
+        const cloudY = y + (Math.random() - 0.5) * cloudHeight * 0.8;
+        const cloudSize = Math.random() * 100 + 50;
+        
+        context.beginPath();
+        context.arc(cloudX, cloudY, cloudSize, 0, Math.PI * 2);
+        context.fill();
+      }
+    }
+  }
+  
+  // Create texture from canvas
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  
+  return texture;
+}
+
+// Create a dusk sky texture with beautiful sunset colors
+function createDuskSkyTexture(duskFactor) {
+  const canvas = document.createElement('canvas');
+  const size = 2048;
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  
+  // Create gradient from horizon to zenith
+  const gradient = context.createLinearGradient(0, size, 0, 0);
+  
+  // Dusk colors - beautiful sunset palette
+  // Horizon: Bright gold to deep red
+  gradient.addColorStop(0, lerpColor('#ff7e45', '#8a3a2d', 1 - duskFactor)); // Horizon
+  gradient.addColorStop(0.2, lerpColor('#ffb06a', '#a85a3d', 1 - duskFactor)); // Low sky
+  gradient.addColorStop(0.4, lerpColor('#ffc090', '#b06a55', 1 - duskFactor)); // Mid-low sky
+  gradient.addColorStop(0.6, lerpColor('#ffd0b0', '#9a6a7a', 1 - duskFactor)); // Mid-high sky
+  gradient.addColorStop(0.8, lerpColor('#e0d0c0', '#7a6a8a', 1 - duskFactor)); // High sky
+  gradient.addColorStop(1, lerpColor('#c0c0d0', '#5a5a7a', 1 - duskFactor)); // Zenith
+  
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, size, size);
+  
+  // Add atmospheric glow near horizon - stronger at dusk
+  const glowGradient = context.createRadialGradient(
+    size / 2, size, 0,
+    size / 2, size, size * 0.7
+  );
+  glowGradient.addColorStop(0, `rgba(255, 100, 50, ${0.4 * duskFactor})`);
+  glowGradient.addColorStop(1, 'rgba(255, 100, 50, 0)');
+  
+  context.fillStyle = glowGradient;
+  context.fillRect(0, 0, size, size);
+  
+  // Add subtle clouds if it's more than halfway through dusk
+  if (duskFactor > 0.5) {
+    const cloudOpacity = (duskFactor - 0.5) * 2 * 0.15; // Max 15% opacity
+    context.fillStyle = `rgba(255, 200, 180, ${cloudOpacity})`;
+    
+    for (let i = 0; i < 10; i++) {
+      const x = Math.random() * size;
+      const y = size * 0.3 + Math.random() * size * 0.3;
+      const cloudWidth = Math.random() * 300 + 200;
+      const cloudHeight = Math.random() * 100 + 50;
+      
+      // Create fluffy cloud with multiple circles
+      for (let j = 0; j < 8; j++) {
+        const cloudX = x + (Math.random() - 0.5) * cloudWidth * 0.8;
+        const cloudY = y + (Math.random() - 0.5) * cloudHeight * 0.8;
+        const cloudSize = Math.random() * 100 + 50;
+        
+        context.beginPath();
+        context.arc(cloudX, cloudY, cloudSize, 0, Math.PI * 2);
+        context.fill();
+      }
+    }
+  }
+  
+  // Create texture from canvas
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  
+  return texture;
+}
+
+// Create a day sky texture with intensity factor
+function createDaySkyTexture(intensityFactor) {
+  const canvas = document.createElement('canvas');
+  const size = 2048;
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  
+  // Create gradient from horizon to zenith
+  const gradient = context.createLinearGradient(0, size, 0, 0);
+  
+  // Day colors - Mars daytime
+  gradient.addColorStop(0, lerpColor('#c27e54', '#e8b090', intensityFactor)); // Horizon
+  gradient.addColorStop(0.5, lerpColor('#d7a28b', '#f0c0a0', intensityFactor)); // Middle
+  gradient.addColorStop(1, lerpColor('#e6b499', '#f8d0b0', intensityFactor)); // Zenith
+  
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, size, size);
+  
+  // Add atmospheric haze/dust
+  context.fillStyle = `rgba(210, 170, 130, ${0.2 * intensityFactor})`;
+  for (let i = 0; i < 100; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size * 0.6 + size * 0.4; // More dust near horizon
+    const dustSize = Math.random() * 100 + 50;
+    
+    context.beginPath();
+    context.arc(x, y, dustSize, 0, Math.PI * 2);
+    context.fill();
+  }
+  
+  // Add subtle clouds
+  context.fillStyle = `rgba(230, 200, 180, ${0.15 * intensityFactor})`;
+  for (let i = 0; i < 20; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size * 0.3 + size * 0.2; // Clouds in middle of sky
+    const cloudWidth = Math.random() * 300 + 200;
+    const cloudHeight = Math.random() * 100 + 50;
+    
+    // Create fluffy cloud with multiple circles
+    for (let j = 0; j < 8; j++) {
+      const cloudX = x + (Math.random() - 0.5) * cloudWidth * 0.8;
+      const cloudY = y + (Math.random() - 0.5) * cloudHeight * 0.8;
+      const cloudSize = Math.random() * 100 + 50;
+      
+      context.beginPath();
+      context.arc(cloudX, cloudY, cloudSize, 0, Math.PI * 2);
+      context.fill();
+    }
+  }
+  
+  // Create texture from canvas
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  
+  return texture;
+}
+
+// Update fog based on time of day
+function updateFogForTimeOfDay(skyState) {
+  // Define fog colors for different times of day
+  const nightFogColor = new THREE.Color(0x553322);
+  const dawnFogColor = new THREE.Color(0xaa6644);
+  const dayFogColor = new THREE.Color(0xd8a282);
+  const duskFogColor = new THREE.Color(0xaa5533);
+  
+  // Define fog distances
+  const nightFogNear = 500;
+  const nightFogFar = 5000;
+  const dayFogNear = 200;
+  const dayFogFar = 2000;
+  
+  // Calculate fog color based on time of day
+  const fogColor = new THREE.Color();
+  
+  if (skyState.dawnFactor > 0) {
+    // Dawn transition
+    fogColor.lerpColors(nightFogColor, dawnFogColor, skyState.dawnFactor);
+    const fogNear = nightFogNear + (dayFogNear - nightFogNear) * skyState.dawnFactor;
+    const fogFar = nightFogFar + (dayFogFar - nightFogFar) * skyState.dawnFactor;
+    scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
+  } else if (skyState.duskFactor > 0) {
+    // Dusk transition
+    fogColor.lerpColors(duskFogColor, nightFogColor, 1 - skyState.duskFactor);
+    const fogNear = dayFogNear + (nightFogNear - dayFogNear) * (1 - skyState.duskFactor);
+    const fogFar = dayFogFar + (nightFogFar - dayFogFar) * (1 - skyState.duskFactor);
+    scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
+  } else if (skyState.dayFactor > 0) {
+    // Day
+    fogColor.lerpColors(dawnFogColor, dayFogColor, skyState.dayFactor);
+    scene.fog = new THREE.Fog(fogColor, dayFogNear, dayFogFar);
+  } else {
+    // Night
+    scene.fog = new THREE.Fog(nightFogColor, nightFogNear, nightFogFar);
+  }
+}
+
+// Update lighting based on time of day
+function updateLightingForTimeOfDay(skyState) {
+  // Define light intensities for different times of day
+  const nightSunIntensity = 0.1;
+  const dawnSunIntensity = 0.6;
+  const daySunIntensity = 1.0;
+  const duskSunIntensity = 0.6;
+  
+  const nightAmbientIntensity = 0.3;
+  const dawnAmbientIntensity = 0.5;
+  const dayAmbientIntensity = 0.7;
+  const duskAmbientIntensity = 0.5;
+  
+  // Define light colors
+  const nightSunColor = new THREE.Color(0xaa5522);
+  const dawnSunColor = new THREE.Color(0xff8844);
+  const daySunColor = new THREE.Color(0xffffff);
+  const duskSunColor = new THREE.Color(0xff6622);
+  
+  const nightAmbientColor = new THREE.Color(0x334455);
+  const dawnAmbientColor = new THREE.Color(0x775544);
+  const dayAmbientColor = new THREE.Color(0xd8a282);
+  const duskAmbientColor = new THREE.Color(0x995533);
+  
+  // Calculate light intensities and colors based on time of day
+  let sunIntensity, ambientIntensity;
+  const sunColor = new THREE.Color();
+  const ambientColor = new THREE.Color();
+  
+  if (skyState.dawnFactor > 0) {
+    // Dawn transition
+    sunIntensity = nightSunIntensity + (dawnSunIntensity - nightSunIntensity) * skyState.dawnFactor;
+    ambientIntensity = nightAmbientIntensity + (dawnAmbientIntensity - nightAmbientIntensity) * skyState.dawnFactor;
+    sunColor.lerpColors(nightSunColor, dawnSunColor, skyState.dawnFactor);
+    ambientColor.lerpColors(nightAmbientColor, dawnAmbientColor, skyState.dawnFactor);
+  } else if (skyState.dayFactor > 0 && skyState.dawnFactor === 0 && skyState.duskFactor === 0) {
+    // Full day
+    sunIntensity = dawnSunIntensity + (daySunIntensity - dawnSunIntensity) * skyState.dayFactor;
+    ambientIntensity = dawnAmbientIntensity + (dayAmbientIntensity - dawnAmbientIntensity) * skyState.dayFactor;
+    sunColor.lerpColors(dawnSunColor, daySunColor, skyState.dayFactor);
+    ambientColor.lerpColors(dawnAmbientColor, dayAmbientColor, skyState.dayFactor);
+  } else if (skyState.duskFactor > 0) {
+    // Dusk transition
+    sunIntensity = duskSunIntensity - (duskSunIntensity - nightSunIntensity) * (1 - skyState.duskFactor);
+    ambientIntensity = duskAmbientIntensity - (duskAmbientIntensity - nightAmbientIntensity) * (1 - skyState.duskFactor);
+    sunColor.lerpColors(duskSunColor, nightSunColor, 1 - skyState.duskFactor);
+    ambientColor.lerpColors(duskAmbientColor, nightAmbientColor, 1 - skyState.duskFactor);
+  } else {
+    // Night
+    sunIntensity = nightSunIntensity;
+    ambientIntensity = nightAmbientIntensity;
+    sunColor.copy(nightSunColor);
+    ambientColor.copy(nightAmbientColor);
+  }
+  
+  // Apply light intensities and colors
+  if (typeof sunLight !== 'undefined' && sunLight) {
+    sunLight.intensity = sunIntensity;
+    sunLight.color.copy(sunColor);
+  }
+  
+  if (typeof ambientLight !== 'undefined' && ambientLight) {
+    ambientLight.intensity = ambientIntensity;
+    ambientLight.color.copy(ambientColor);
+  }
+}
+
+// Update sun position and appearance based on time of day
+function updateSunForTimeOfDay(skyState) {
+  if (typeof sunSphere === 'undefined' || !sunSphere) return;
+  
+  // Calculate sun position based on time of day
+  // Full circle around the scene
+  const angle = (skyState.timeOfDay * Math.PI * 2) - Math.PI / 2;
+  const radius = 1000;
+  const height = Math.sin(angle) * 500;
+  
+  const x = Math.cos(angle) * radius;
+  const y = height;
+  const z = Math.sin(angle) * radius;
+  
+  sunSphere.position.set(x, y, z);
+  
+  // Make sun visible during day, dawn and dusk
+  sunSphere.visible = skyState.dayFactor > 0 || skyState.dawnFactor > 0 || skyState.duskFactor > 0;
+  
+  // Adjust sun appearance based on time of day
+  if (sunSphere.material) {
+    // Adjust sun color
+    if (skyState.dawnFactor > 0) {
+      // Dawn - orange-red sun
+      sunSphere.material.color.setHex(0xff7733);
+      sunSphere.material.opacity = 0.9 * skyState.dawnFactor;
+    } else if (skyState.duskFactor > 0) {
+      // Dusk - deep orange sun
+      sunSphere.material.color.setHex(0xff5522);
+      sunSphere.material.opacity = 0.9 * skyState.duskFactor;
+    } else if (skyState.dayFactor > 0) {
+      // Day - bright white-yellow sun
+      sunSphere.material.color.setHex(0xffffaa);
+      sunSphere.material.opacity = 0.9 * skyState.dayFactor;
+    }
+    
+    // Adjust sun size based on height (larger near horizon)
+    const baseSunSize = 50;
+    const horizonFactor = 1 - Math.abs(height) / 500;
+    const sunScale = 1 + horizonFactor * 0.5; // Up to 50% larger at horizon
+    
+    sunSphere.scale.set(sunScale, sunScale, sunScale);
+  }
+  
+  // Update sun light position to match sun position
+  if (typeof sunLight !== 'undefined' && sunLight) {
+    sunLight.position.copy(sunSphere.position).normalize().multiplyScalar(10);
+  }
+}
+
+// Helper function to interpolate between two colors
+function lerpColor(color1, color2, factor) {
+  // Convert hex colors to RGB
+  const c1 = new THREE.Color(color1);
+  const c2 = new THREE.Color(color2);
+  
+  // Interpolate
+  const result = new THREE.Color();
+  result.r = c1.r + (c2.r - c1.r) * factor;
+  result.g = c1.g + (c2.g - c1.g) * factor;
+  result.b = c1.b + (c2.b - c1.b) * factor;
+  
+  return '#' + result.getHexString();
+}
+
+// Function to update the day/night cycle
+function updateDayNightCycle(currentTime) {
+  // Calculate time delta
+  const delta = currentTime - lastTransitionUpdate;
+  lastTransitionUpdate = currentTime;
+  
+  if (isManualTransition && manualTransitionTarget !== null) {
+    // Handle manual transition to a specific time
+    const diff = manualTransitionTarget - currentTimeOfDay;
+    
+    // If we're close enough to the target, end the transition
+    if (Math.abs(diff) < manualTransitionSpeed) {
+      currentTimeOfDay = manualTransitionTarget;
+      isManualTransition = false;
+      manualTransitionTarget = null;
+    } else {
+      // Move toward the target
+      const direction = diff > 0 ? 1 : -1;
+      currentTimeOfDay += direction * manualTransitionSpeed;
+      
+      // Ensure we stay within 0-1 range
+      currentTimeOfDay = (currentTimeOfDay + 1) % 1;
+    }
+  } else {
+    // Normal cycle progression
+    currentTimeOfDay = (currentTimeOfDay + dayNightCycleSpeed * delta) % 1;
+  }
+  
+  // Update the sky based on current time
+  updateSkyForTimeOfDay(currentTimeOfDay);
+  
+  // Update UI if we have a time indicator
+  updateTimeIndicator(currentTimeOfDay);
+}
+
+// Function to update the time indicator UI
+function updateTimeIndicator(timeOfDay) {
+  const timeIndicator = document.getElementById('time-indicator');
+  if (!timeIndicator) return;
+  
+  // Convert time of day to hours (0-24)
+  const hours = (timeOfDay * 24) % 24;
+  const minutes = (hours % 1) * 60;
+  
+  // Format as HH:MM
+  const formattedTime = `${Math.floor(hours).toString().padStart(2, '0')}:${Math.floor(minutes).toString().padStart(2, '0')}`;
+  
+  // Update the indicator
+  timeIndicator.textContent = formattedTime;
+  
+  // Update the indicator color based on time of day
+  const skyState = getSkyState(timeOfDay);
+  if (skyState.dayFactor > 0.5) {
+    timeIndicator.style.color = '#ffffff';
+    timeIndicator.style.textShadow = '0 0 5px rgba(0,0,0,0.5)';
+  } else if (skyState.dawnFactor > 0.5 || skyState.duskFactor > 0.5) {
+    timeIndicator.style.color = '#ffcc99';
+    timeIndicator.style.textShadow = '0 0 5px rgba(0,0,0,0.5)';
+  } else {
+    timeIndicator.style.color = '#aaccff';
+    timeIndicator.style.textShadow = '0 0 5px rgba(0,0,0,0.7)';
+  }
+}
+
+// Function to transition to a specific time of day
+function transitionToTimeOfDay(targetTime, speed = 0.005) {
+  isManualTransition = true;
+  manualTransitionTarget = targetTime;
+  manualTransitionSpeed = speed;
+  console.log(`Transitioning to time: ${targetTime}`);
+}
+
+// Add time controls to the UI
+function addTimeControls() {
+  // Create container
+  const container = document.createElement('div');
+  container.style.position = 'absolute';
+  container.style.bottom = '100px';
+  container.style.right = '20px';
+  container.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+  container.style.padding = '10px';
+  container.style.borderRadius = '5px';
+  container.style.zIndex = '1000';
+  container.style.display = 'flex';
+  container.style.flexDirection = 'column';
+  container.style.gap = '10px';
+  
+  // Add time indicator
+  const timeIndicator = document.createElement('div');
+  timeIndicator.id = 'time-indicator';
+  timeIndicator.style.fontFamily = 'monospace';
+  timeIndicator.style.fontSize = '24px';
+  timeIndicator.style.color = 'white';
+  timeIndicator.style.textAlign = 'center';
+  timeIndicator.textContent = '12:00';
+  container.appendChild(timeIndicator);
+  
+  // Add time buttons
+  const buttonContainer = document.createElement('div');
+  buttonContainer.style.display = 'flex';
+  buttonContainer.style.justifyContent = 'space-between';
+  buttonContainer.style.gap = '5px';
+  
+  // Time presets
+  const timePresets = [
+    { label: '🌙 Night', time: 0 },
+    { label: '🌅 Dawn', time: 0.25 },
+    { label: '☀️ Noon', time: 0.5 },
+    { label: '🌇 Dusk', time: 0.75 }
+  ];
+  
+  timePresets.forEach(preset => {
+    const button = document.createElement('button');
+    button.textContent = preset.label;
+    button.style.flex = '1';
+    button.style.padding = '8px';
+    button.style.backgroundColor = '#444';
+    button.style.color = 'white';
+    button.style.border = 'none';
+    button.style.borderRadius = '4px';
+    button.style.cursor = 'pointer';
+    
+    button.addEventListener('click', () => {
+      transitionToTimeOfDay(preset.time);
+    });
+    
+    buttonContainer.appendChild(button);
+  });
+  
+  container.appendChild(buttonContainer);
+  
+  document.body.appendChild(container);
+}
+
+// ===== DAY/NIGHT CYCLE =====
+// Add a day/night toggle and cycle
+
+console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
+
+function startDayNightCycle() {
+  // Use a 1-minute cycle duration
+  setInterval(() => {
+    toggleDayNight();
+  }, 30000); // 30 seconds for each cycle
+  
+  // Add a manual toggle button for testing
+  const toggleButton = document.createElement('button');
+  toggleButton.textContent = isDaytime ? 'Switch to Night' : 'Switch to Day';
+  toggleButton.style.position = 'absolute';
+  toggleButton.style.bottom = '20px';
+  toggleButton.style.right = '20px';
+  toggleButton.style.padding = '10px';
+  toggleButton.style.backgroundColor = '#444';
+  toggleButton.style.color = 'white';
+  toggleButton.style.border = 'none';
+  toggleButton.style.borderRadius = '5px';
+  toggleButton.style.cursor = 'pointer';
+  toggleButton.style.zIndex = '1000';
+  
+  toggleButton.addEventListener('click', () => {
+    // Only toggle if not already transitioning
+    if (!isTransitioning) {
+      toggleDayNight();
+      toggleButton.textContent = isDaytime ? 'Switch to Night' : 'Switch to Day';
+    }
+  });
+  
+  document.body.appendChild(toggleButton);
+}
+
+function toggleDayNight() {
+  console.log("Before toggle - isDaytime:", isDaytime);
+  isDaytime = !isDaytime;
+  console.log("After toggle - isDaytime:", isDaytime);
+  updateSkyAppearance();
+}
+
+// Add a function to force day mode
+function forceDayMode() {
+  console.log("Forcing day mode...");
+  isDaytime = true;
+  isRealisticMode = true;
+  console.log("isDaytime set to:", isDaytime);
+  console.log("isRealisticMode set to:", isRealisticMode);
+  updateSkyAppearance();
+  console.log("Day mode forced!");
+}
+
+// Expose the function globally for debugging
+window.forceDayMode = forceDayMode;
+
+// Call forceDayMode after a short delay to ensure everything is initialized
+setTimeout(() => {
+  console.log("Auto-forcing day mode after initialization");
+  forceDayMode();
+}, 2000);
+
+function updateSkyAppearance(transitionProgress = null) {
+  console.log("Updating sky appearance - isDaytime:", isDaytime);
+  
+  // Define sunSphere if it is not already defined
+  if (typeof sunSphere === 'undefined') {
+    console.log('Defining sunSphere...');
+    sunSphere = new THREE.Mesh(
+      new THREE.SphereGeometry(50, 32, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffffff })
+    );
+    sunSphere.position.set(500, 300, -1000);
+    scene.add(sunSphere);
+  }
+  
+  // If we're not transitioning, use the current state
+  const isDay = transitionProgress === null ? isDaytime : 
+                (transitionStartState === 'day' ? 1 - transitionProgress : transitionProgress);
+  
+  console.log("isDay value:", isDay);
+  
+  // Create or update fog based on time of day
+  // Use more realistic Mars fog colors when in realistic mode
+  const dayFog = isRealisticMode 
+    ? new THREE.Fog(0xd8a282, 200, 2000) // Realistic dusty orange-tan fog based on NASA imagery
+    : new THREE.Fog(0xd09060, 200, 2000); // Original stylized fog
+    
+  const nightFog = new THREE.Fog(0xb77c5a, 500, 5000);
+  
+  if (transitionProgress === null) {
+    // No transition, just set the fog directly
+    scene.fog = isDaytime ? dayFog : nightFog;
+    console.log("Setting fog for:", isDaytime ? "DAY" : "NIGHT");
+  } else {
+    // Interpolate fog color and near/far values
+    const fogColor = new THREE.Color();
+    fogColor.r = dayFog.color.r * isDay + nightFog.color.r * (1 - isDay);
+    fogColor.g = dayFog.color.g * isDay + nightFog.color.g * (1 - isDay);
+    fogColor.b = dayFog.color.b * isDay + nightFog.color.b * (1 - isDay);
+    
+    const fogNear = dayFog.near * isDay + nightFog.near * (1 - isDay);
+    const fogFar = dayFog.far * isDay + nightFog.far * (1 - isDay);
+    
+    scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
+    console.log("Setting transitional fog - isDay:", isDay);
+  }
+  
+  // Handle skybox and background
+  if (transitionProgress !== null) {
+    // During transition, create a blended sky texture
+    if (isDay > 0.01 && isDay < 0.99) {
+      // Create a blended sky texture during transition
+      console.log("Creating blended sky texture - isDay:", isDay);
+      scene.background = createBlendedSkyTexture(isDay);
+    }
+  } else {
+    // Not transitioning, use appropriate sky
+    if (isDaytime) {
+      // Use realistic or stylized sky texture based on mode
+      console.log("Setting DAY sky texture - isRealisticMode:", isRealisticMode);
+      try {
+        const skyTexture = isRealisticMode ? createRealisticMarsDaySkyTexture() : createMarsDaySkyTexture();
+        scene.background = skyTexture;
+        console.log("Day sky texture created and set successfully");
+      } catch (error) {
+        console.error("Error creating day sky texture:", error);
+      }
+      
+      // Remove night skybox if it exists
+      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && scene.getObjectById(spaceSkybox.id)) {
+        console.log("Removing night skybox");
+        scene.remove(spaceSkybox);
+      }
+    } else {
+      // Add night skybox if not already in scene
+      console.log("Setting NIGHT sky");
+      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && !scene.getObjectById(spaceSkybox.id)) {
+        console.log("Adding night skybox to scene");
+        scene.add(spaceSkybox);
+      }
+    }
+  }
+  
+  // Adjust lighting based on time of day or transition progress
+  // Use more realistic lighting values when in realistic mode
+  const daySunIntensity = isRealisticMode ? 0.8 : 0.9; // Slightly dimmer in realistic mode (Mars is further from sun)
+  const nightSunIntensity = 0.3;
+  const dayAmbientIntensity = isRealisticMode ? 0.6 : 0.7; // Slightly dimmer ambient in realistic mode
+  const nightAmbientIntensity = 0.4;
+  
+  // Interpolate light intensities
+  sunLight.intensity = daySunIntensity * isDay + nightSunIntensity * (1 - isDay);
+  ambientLight.intensity = dayAmbientIntensity * isDay + nightAmbientIntensity * (1 - isDay);
+  
+  console.log("Sun light intensity set to:", sunLight.intensity);
+  console.log("Ambient light intensity set to:", ambientLight.intensity);
+  
+  // Interpolate sun position
+  const daySunPosition = new THREE.Vector3(10, 100, 10);
+  const nightSunPosition = new THREE.Vector3(-10, -5, 10);
+  sunLight.position.set(
+    daySunPosition.x * isDay + nightSunPosition.x * (1 - isDay),
+    daySunPosition.y * isDay + nightSunPosition.y * (1 - isDay),
+    daySunPosition.z * isDay + nightSunPosition.z * (1 - isDay)
+  );
+  
+  // Interpolate ambient light color
+  // Use more realistic Mars ambient light color in realistic mode
+  const dayAmbientColor = isRealisticMode 
+    ? new THREE.Color(0xd8a282) // Realistic dusty orange ambient light
+    : new THREE.Color(0xff9966); // Original stylized ambient light
+  const nightAmbientColor = new THREE.Color(0xff8866);
+  ambientLight.color.set(
+    dayAmbientColor.r * isDay + nightAmbientColor.r * (1 - isDay),
+    dayAmbientColor.g * isDay + nightAmbientColor.g * (1 - isDay),
+    dayAmbientColor.b * isDay + nightAmbientColor.b * (1 - isDay)
+  );
+  
+  // Handle sun visibility with opacity for smooth transition
+  if (typeof sunSphere !== 'undefined' && sunSphere) {
+    sunSphere.visible = true;
+    sunSphere.material.opacity = isDay * 0.9; // Fade out when transitioning to night
+    
+    // Also move the sun position during transition
+    const daySunSpherePosition = new THREE.Vector3(500, 300, -1000);
+    const nightSunSpherePosition = new THREE.Vector3(500, -300, -1000);
+    sunSphere.position.set(
+      daySunSpherePosition.x * isDay + nightSunSpherePosition.x * (1 - isDay),
+      daySunSpherePosition.y * isDay + nightSunSpherePosition.y * (1 - isDay),
+      daySunSpherePosition.z * isDay + nightSunSpherePosition.z * (1 - isDay)
+    );
+    
+    // Adjust sun color in realistic mode
+    if (isRealisticMode && isDay > 0.5) {
+      // More pale, dusty sun appearance as seen through Mars atmosphere
+      sunSphere.material.color.setHex(0xfff0e0);
+    } else {
+      // Original sun color
+      sunSphere.material.color.setHex(0xffffff);
+    }
+  }
+  
+  // Handle night skybox opacity for smooth transition
+  if (typeof spaceSkybox !== 'undefined' && spaceSkybox) {
+    if (isDay < 0.5) {
+      // Show night skybox when transitioning to night
+      if (!scene.getObjectById(spaceSkybox.id)) {
+        scene.add(spaceSkybox);
+      }
+      // Set opacity based on transition
+      spaceSkybox.traverse(obj => {
+        if (obj.isMesh && obj.material) {
+          obj.material.transparent = true;
+          obj.material.opacity = 1 - isDay * 2; // Fade in as day transitions to night
+        }
+      });
+    } else if (isDay >= 0.5 && scene.getObjectById(spaceSkybox.id)) {
+      // Fade out night skybox when transitioning to day
+      spaceSkybox.traverse(obj => {
+        if (obj.isMesh && obj.material) {
+          obj.material.transparent = true;
+          obj.material.opacity = (1 - isDay) * 2; // Fade out as night transitions to day
+        }
+      });
+    }
+  }
+}
+
+// Start the day/night cycle
+startDayNightCycle();
+
+// Add a keypress handler for toggling
+document.addEventListener('keydown', function(event) {
+  if (event.key === 'l' || event.key === 'L') { // 'L' for Light cycle
+    toggleDayNight();
+  }
+});
 
