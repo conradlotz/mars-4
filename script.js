@@ -646,6 +646,7 @@ function animate(time) {
     if (isMoving) {
       // Optimize wheel rotation updates
       updateWheelRotation(wheels, currentSpeed, turnDirection);
+      //createRoverTireTracks(); 
     }
   } else if (isMoving) {
     // Straight movement, all wheels rotate at the same speed
@@ -717,6 +718,53 @@ function updateWheelRotation(wheels, baseSpeed, turnDirection) {
     const multiplier = i % 2 === 0 ? leftMultiplier : rightMultiplier;
     wheels[i].rotation.x += baseSpeed * multiplier;
   }
+}
+
+function createRoverTireTracks() {
+  // Function to add tire tracks at the wheel positions
+  const addTireTrack = (x, z, width, depth, color) => {
+    const trackGeometry = new THREE.PlaneGeometry(width, depth);
+    const trackMaterial = new THREE.MeshBasicMaterial({
+      color: color,
+      transparent: true,
+      opacity: 0.5,
+      side: THREE.DoubleSide
+    });
+    const trackMesh = new THREE.Mesh(trackGeometry, trackMaterial);
+    trackMesh.rotation.x = -Math.PI / 2; // Rotate to lie flat on the ground
+    trackMesh.position.set(x, 0.01, z); // Slightly above the ground to avoid z-fighting
+    scene.add(trackMesh);
+  };
+
+  // Get the color from the Mars terrain
+  const marsTerrainColor = marsSurface.material.color;
+
+  // Add tire tracks for each set of wheels
+  // Line 747 is likely here, trying to use .forEach on something that's undefined
+  // Make sure 'wheels' is defined and accessible in this scope
+  if (!wheels || !Array.isArray(wheels)) {
+    console.warn('Wheels array is not defined or not an array');
+    return; // Exit the function if wheels is not available
+  }
+  
+  // Now safely use forEach on the wheels array
+  wheels.forEach(wheel => {
+    // Your tire track creation logic
+    const wheelPos = wheel.getWorldPosition(new THREE.Vector3());
+    addTireTrack(wheelPos.x, wheelPos.z, 0.3, 1.5, marsTerrainColor.clone().multiplyScalar(0.8));
+  });
+
+  const tireTrackGeometry = new THREE.BufferGeometry();
+  const tireTrackMaterial = new THREE.MeshBasicMaterial({
+    color: marsTerrainColor,
+    transparent: true,
+    opacity: 0.5
+  });
+
+  const tireTrackMesh = new THREE.Mesh(tireTrackGeometry, tireTrackMaterial);
+  scene.add(tireTrackMesh);
+
+  return tireTrackMesh;
 }
 
 // Optimize the positionRoverOnTerrain function
@@ -897,7 +945,7 @@ function createHUD() {
   hudElement.style.borderRadius = '5px';
   hudElement.style.pointerEvents = 'none'; // Don't interfere with mouse events
   hudElement.id = 'cameraHUD';
-  hudElement.innerHTML = 'Camera: Third Person Mode (Press C to change)';
+  hudElement.innerHTML = '<p>Camera: Third Person Mode (Press C to change)<br /><br />Controls: W/A/S/D to move, Arrow keys to rotate camera</p>';
   document.body.appendChild(hudElement);
   
   // Create a text element for distance traveled
@@ -913,7 +961,7 @@ function createHUD() {
   distanceText.style.borderRadius = '5px';
   distanceText.style.pointerEvents = 'none';
   distanceText.id = 'distanceHUD';
-  distanceText.innerHTML = 'Distance Traveled: 0.00 miles';
+  //distanceText.innerHTML = 'Distance Traveled: 0.00 miles';
   document.body.appendChild(distanceText);
   
   // Update HUD when camera mode changes
@@ -1482,80 +1530,77 @@ function createMarsRoughnessMap() {
 function createSpaceSkybox() {
   console.log("Creating skybox...");
   
-  // Use a sphere instead of a cube for a dome-like appearance without corners
-  // Increased size for proper placement but lower segments for performance
-  const skyboxGeometry = new THREE.SphereGeometry(4000, 64, 64);
+  // Use a higher-resolution sphere for smoother appearance
+  const skyboxGeometry = new THREE.SphereGeometry(6000, 256, 256);
   
-  // Create a single material for the entire skybox sphere
-  const texture = createSphericalSkyTexture();
+  // Create a higher resolution texture
+  const texture = createSphericalSkyTexture(8192); // Increase texture size to 4096x4096
+  
+  // Apply advanced texture filtering for smoother appearance
+  texture.minFilter = THREE.LinearMipmapLinearFilter; // Use trilinear filtering
+  texture.magFilter = THREE.LinearFilter;
+  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  texture.generateMipmaps = true; // Enable mipmaps for better distance rendering
   
   const skyboxMaterial = new THREE.MeshBasicMaterial({
     map: texture,
     side: THREE.BackSide,
     fog: false,
     transparent: true,
-    opacity: 1.0
+    opacity: 1.0,
+    depthWrite: false
   });
   
   // Create the skybox mesh
   const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
   
   // Ensure skybox is visible by explicitly setting these properties
-  skybox.renderOrder = -1000; // Render before other objects
-  skybox.frustumCulled = false; // Prevent frustum culling
+  skybox.renderOrder = -1000;
+  skybox.frustumCulled = false;
   
-  console.log("Skybox created successfully"); // Debug log
+  console.log("Skybox created successfully");
   
   return skybox;
 }
 
 // Create a single spherical texture for the dome-like skybox
-function createSphericalSkyTexture() {
-  // Create a new texture every time to avoid caching issues
-  
-  // Create a large canvas for the spherical map
+function createSphericalSkyTexture(size = 8192) {
+  // Create a high-resolution canvas
   const canvas = document.createElement('canvas');
-  const canvasSize = 4096; // High resolution for better quality
-  canvas.width = canvasSize;
-  canvas.height = canvasSize;
+  canvas.width = size;
+  canvas.height = size;
   const context = canvas.getContext('2d');
   
-  // Fill with dark but not completely black background
-  context.fillStyle = '#010114'; // Very dark blue instead of pure black
+  // Fill with deep space black
+  context.fillStyle = '#000005';
   context.fillRect(0, 0, canvas.width, canvas.height);
   
-  // Make stars more visible by increasing their brightness and quantity
-  addBrighterBackgroundStars(context, canvasSize);
+  // Add stars and other elements with higher quality
+  addBrighterBackgroundStars(context, size);
+  addBrighterMidLayerStars(context, size);
+  addBrighterForegroundStars(context, size);
+  addBrighterMilkyWay(context, size);
   
-  // Add a brighter Milky Way band
-  addBrighterMilkyWay(context, canvasSize);
+  // Add atmospheric glow for realism
+  addAtmosphericGlow(context, size);
   
-  // Add more prominent mid-layer stars
-  addBrighterMidLayerStars(context, canvasSize);
+  // Add some distant planets
+  addPlanetToCanvas(context, size * 0.8, size * 0.2, size * 0.03, '#A67B5B');
+  addPlanetToCanvas(context, size * 0.15, size * 0.75, size * 0.02, '#C8A080', true);
   
-  // Add atmospheric glow at the horizon
-  addAtmosphericGlow(context, canvasSize);
+  // Apply a subtle blur to reduce pixelation
+  context.filter = 'blur(0px)';
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = size;
+  tempCanvas.height = size;
+  const tempContext = tempCanvas.getContext('2d');
+  tempContext.drawImage(canvas, 0, 0);
+  context.clearRect(0, 0, size, size);
+  context.drawImage(tempCanvas, 0, 0);
+  context.filter = 'none';
   
-  // Add more prominent foreground stars
-  addBrighterForegroundStars(context, canvasSize);
-  
-  // Add a few planets - made slightly larger for visibility
-  // Mars-like planet
-  addPlanetToCanvas(context, canvasSize * 0.7, canvasSize * 0.3, canvasSize * 0.06, '#A67C52');
-  
-  // Earth-like planet
-  addPlanetToCanvas(context, canvasSize * 0.2, canvasSize * 0.6, canvasSize * 0.05, '#C9E3F5');
-  
-  // Saturn-like planet with rings
-  addPlanetToCanvas(context, canvasSize * 0.8, canvasSize * 0.8, canvasSize * 0.07, '#E0B568', true);
-  
-  // Create texture from canvas
+  // Create texture with proper settings
   const texture = new THREE.CanvasTexture(canvas);
-  
-  // Set texture mapping for a sphere
-  texture.mapping = THREE.EquirectangularReflectionMapping;
-  
-  console.log("Sky texture created successfully"); // Debug log
   
   return texture;
 }
@@ -2127,7 +2172,7 @@ function startDayNightCycle() {
   // Use a 1-minute cycle duration
   setInterval(() => {
     toggleDayNight();
-  }, 60000); // 1 minute for each cycle
+  }, 30000); // 1 minute for each cycle
   
   // Add a manual toggle button for testing
   const toggleButton = document.createElement('button');
@@ -2154,58 +2199,145 @@ function startDayNightCycle() {
 }
 
 function toggleDayNight() {
+  console.log(isDaytime)
+  console.log("Toggling day/night");
   isDaytime = !isDaytime;
   updateSkyAppearance();
 }
 
-function updateSkyAppearance() {
-  if (isDaytime) {
-    // Create Martian daytime sky
-    scene.fog = new THREE.Fog(0xd09060, 200, 2000); // Dusty orange-tan fog
-    scene.background = createMarsDaySkyTexture();
-    
-    // Remove night skybox if it exists
-    if (scene.getObjectById(spaceSkybox.id)) {
-      scene.remove(spaceSkybox);
-    }
-    
-    // Adjust lighting
-    sunLight.intensity = 0.9;
-    sunLight.position.set(10, 100, 10); // Sun overhead
-    ambientLight.intensity = 0.7;
-    ambientLight.color.set(0xff9966); // Warm ambient light
-    
-    // Show the sun sphere
-    if (sunSphere) {
-      sunSphere.visible = true;
-      // Position the sun in the sky
-      sunSphere.position.set(500, 300, -1000);
-    }
-    
-    // Show the sun light
-    sun.visible = true;
+function updateSkyAppearance(transitionProgress = null) {
+  console.log("Updating sky appearance");
+  console.log(sunSphere);
+  // Ensure sunSphere is defined before accessing it
+  if (typeof sunSphere === 'undefined') {
+    console.warn('sunSphere is not defined yet.');
+    return;
+  }
+  
+  // If we're not transitioning, use the current state
+  const isDay = transitionProgress === null ? isDaytime : 
+                (transitionStartState === 'day' ? 1 - transitionProgress : transitionProgress);
+  
+  // Create or update fog based on time of day
+  const dayFog = new THREE.Fog(0xd09060, 200, 2000); // Dusty orange-tan fog
+  const nightFog = new THREE.Fog(0xb77c5a, 500, 5000);
+  
+  if (transitionProgress === null) {
+    // No transition, just set the fog directly
+    scene.fog = isDaytime ? dayFog : nightFog;
   } else {
-    // Revert to night sky
-    scene.fog = new THREE.Fog(0xb77c5a, 500, 5000);
+    // Interpolate fog color and near/far values
+    const fogColor = new THREE.Color();
+    fogColor.r = dayFog.color.r * isDay + nightFog.color.r * (1 - isDay);
+    fogColor.g = dayFog.color.g * isDay + nightFog.color.g * (1 - isDay);
+    fogColor.b = dayFog.color.b * isDay + nightFog.color.b * (1 - isDay);
     
-    // Add night skybox if not already in scene
-    if (!scene.getObjectById(spaceSkybox.id)) {
-      scene.add(spaceSkybox);
+    const fogNear = dayFog.near * isDay + nightFog.near * (1 - isDay);
+    const fogFar = dayFog.far * isDay + nightFog.far * (1 - isDay);
+    
+    scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
+  }
+  
+  // Handle skybox and background
+  if (transitionProgress !== null) {
+    // During transition, create a blended sky texture
+    if (isDay > 0.01 && isDay < 0.99) {
+      // Create a blended sky texture during transition
+      scene.background = createBlendedSkyTexture(isDay);
     }
-    
-    // Adjust lighting
-    sunLight.intensity = 0.3;
-    sunLight.position.set(-10, -5, 10); // Low sun angle
-    ambientLight.intensity = 0.4;
-    ambientLight.color.set(0xff8866);
-    
-    // Hide the sun sphere
-    if (sunSphere) {
-      sunSphere.visible = false;
+  } else {
+    // Not transitioning, use appropriate sky
+    if (isDaytime) {
+      scene.background = createMarsDaySkyTexture();
+      
+      // Remove night skybox if it exists
+      if (scene.getObjectById(spaceSkybox.id)) {
+        scene.remove(spaceSkybox);
+      }
+    } else {
+      // Add night skybox if not already in scene
+      if (!scene.getObjectById(spaceSkybox.id)) {
+        scene.add(spaceSkybox);
+      }
     }
+  }
+  
+  // Adjust lighting based on time of day or transition progress
+  const daySunIntensity = 0.9;
+  const nightSunIntensity = 0.3;
+  const dayAmbientIntensity = 0.7;
+  const nightAmbientIntensity = 0.4;
+  
+  // Interpolate light intensities
+  sunLight.intensity = daySunIntensity * isDay + nightSunIntensity * (1 - isDay);
+  ambientLight.intensity = dayAmbientIntensity * isDay + nightAmbientIntensity * (1 - isDay);
+  
+  // Interpolate sun position
+  const daySunPosition = new THREE.Vector3(10, 100, 10);
+  const nightSunPosition = new THREE.Vector3(-10, -5, 10);
+  sunLight.position.set(
+    daySunPosition.x * isDay + nightSunPosition.x * (1 - isDay),
+    daySunPosition.y * isDay + nightSunPosition.y * (1 - isDay),
+    daySunPosition.z * isDay + nightSunPosition.z * (1 - isDay)
+  );
+  
+  // Interpolate ambient light color
+  const dayAmbientColor = new THREE.Color(0xff9966);
+  const nightAmbientColor = new THREE.Color(0xff8866);
+  ambientLight.color.set(
+    dayAmbientColor.r * isDay + nightAmbientColor.r * (1 - isDay),
+    dayAmbientColor.g * isDay + nightAmbientColor.g * (1 - isDay),
+    dayAmbientColor.b * isDay + nightAmbientColor.b * (1 - isDay)
+  );
+  
+  // Handle sun visibility with opacity for smooth transition
+  if (typeof sunSphere !== 'undefined' && sunSphere) {
+    sunSphere.visible = true;
+    sunSphere.material.opacity = isDay * 0.9; // Fade out when transitioning to night
     
-    // Hide the sun light
-    sun.visible = false;
+    // Also move the sun position during transition
+    const daySunSpherePosition = new THREE.Vector3(500, 300, -1000);
+    const nightSunSpherePosition = new THREE.Vector3(500, -300, -1000);
+    sunSphere.position.set(
+      daySunSpherePosition.x * isDay + nightSunSpherePosition.x * (1 - isDay),
+      daySunSpherePosition.y * isDay + nightSunSpherePosition.y * (1 - isDay),
+      daySunSpherePosition.z * isDay + nightSunSpherePosition.z * (1 - isDay)
+    );
+  }
+  
+  // Handle sun light visibility
+  if (typeof sun !== 'undefined' && sun) {
+    sun.visible = isDay > 0.1; // Keep visible until almost night
+  }
+  
+  // Handle night skybox opacity for smooth transition
+  if (typeof spaceSkybox !== 'undefined' && spaceSkybox) {
+    if (isDay < 0.5) {
+      // Show night skybox when transitioning to night
+      if (!scene.getObjectById(spaceSkybox.id)) {
+        scene.add(spaceSkybox);
+      }
+      // Set opacity based on transition
+      spaceSkybox.traverse(obj => {
+        if (obj.isMesh && obj.material) {
+          obj.material.transparent = true;
+          obj.material.opacity = 1 - isDay * 2; // Fade in as day transitions to night
+        }
+      });
+    } else if (isDay >= 0.5 && scene.getObjectById(spaceSkybox.id)) {
+      // Fade out night skybox when transitioning to day
+      spaceSkybox.traverse(obj => {
+        if (obj.isMesh && obj.material) {
+          obj.material.transparent = true;
+          obj.material.opacity = (1 - isDay) * 2; // Fade out as night transitions to day
+        }
+      });
+      
+      // Remove skybox when fully transparent
+      if (isDay >= 0.99) {
+        scene.remove(spaceSkybox);
+      }
+    }
   }
 }
 
@@ -2612,7 +2744,7 @@ window.MarsExplorer = {
           color: 0x22ffaa,
           emissive: 0x22ffaa,
           emissiveIntensity: 1,
-          transparent: true,
+    transparent: true,
           opacity: 0.9
         });
         
@@ -3269,123 +3401,6 @@ const soundSystem = {
   }
 };
 
-//   // Restart game
-//   restartGame: function() {
-//     // Reset game state
-//     this.gameState.score = 0;
-//     this.gameState.fuel = 100;
-//     this.gameState.samplesCollected = 0;
-//     this.gameState.missionComplete = false;
-//     this.gameState.gameOver = false;
-    
-//     // Reset rover position
-//     this.rover.position.set(0, 2, 0);
-//     this.rover.rotation.y = 0;
-    
-//     // Reset controls
-//     this.controls.speed = 0;
-//     this.controls.rotationSpeed = 0;
-    
-//     // Reset samples
-//     this.samples.forEach(sample => {
-//       sample.userData.collected = false;
-//       sample.visible = true;
-//     });
-    
-//     // Update HUD
-//     this.hudElements.updateHUD();
-//   },
-  
-//   // Game loop - completely separate from the main animation loop
-//   gameLoop: function() {
-//     if (!this.initialized) return;
-    
-//     // Update game state
-//     this.update();
-//     this.animateSamples();
-    
-//     // Continue loop
-//     requestAnimationFrame(this.gameLoop.bind(this));
-//   }
-// };
-  
-//   // Restart game
-//   restartGame: function() {
-//     // Reset game state
-//     this.gameState.score = 0;
-//     this.gameState.fuel = 100;
-//     this.gameState.samplesCollected = 0;
-//     this.gameState.missionComplete = false;
-//     this.gameState.gameOver = false;
-    
-//     // Reset rover position
-//     this.rover.position.set(0, 2, 0);
-//     this.rover.rotation.y = 0;
-    
-//     // Reset controls
-//     this.controls.speed = 0;
-//     this.controls.rotationSpeed = 0;
-    
-//     // Reset samples
-//     this.samples.forEach(sample => {
-//       sample.userData.collected = false;
-//       sample.visible = true;
-//     });
-    
-//     // Update HUD
-//     this.hudElements.updateHUD();
-//   },
-  
-//   // Game loop - completely separate from the main animation loop
-//   gameLoop: function() {
-//     if (!this.initialized) return;
-    
-//     // Update game state
-    
-//     requestAnimationFrame(this.gameLoop.bind(this));
-//   }
-// };
-
-// // Wait for scene to be ready before initializing
-// setTimeout(function() {
-//   window.MarsExplorer.init();
-// }, 3000); // Wait 3 seconds to ensure scene is fully loaded
-
-// // Game system object
-// const gameSystem = {
-//   initialized: false,
-//   gameState: {
-//     score: 0,
-//     fuel: 100,
-//     health: 100,
-//     missionActive: false,
-//     samplesCollected: 0,
-//     missionComplete: false
-//   },
-  
-//   // Restart game
-//   restartGame: function() {
-//     // Reset game state
-//     this.gameState.score = 0;
-//     this.gameState.fuel = 100;
-//     this.gameState.samplesCollected = 0;
-//     this.gameState.missionComplete = false;
-    
-//     // Update HUD
-//     this.hudElements.updateHUD();
-//   },
-  
-//   // Game loop - completely separate from the main animation loop
-//   gameLoop: function() {
-//     if (!this.initialized) return;
-    
-//     // Update game state
-    
-//     requestAnimationFrame(this.gameLoop.bind(this));
-//   }
-// };
-
-// ... existing code ...
 
 function updateDistanceTraveled(currentTime) {
   if (lastUpdateTime === 0) {
@@ -3404,7 +3419,7 @@ function updateDistanceTraveled(currentTime) {
 }
 
 // Create a visible sun sphere
-let sunSphere;
+var sunSphere;
 
 function createSunSphere() {
   // Create a glowing sun sphere
@@ -3483,54 +3498,137 @@ function initializeScene() {
   animate(0);
 }
 
-function updateSkyAppearance() {
-  if (isDaytime) {
-    // Create Martian daytime sky
-    scene.fog = new THREE.Fog(0xd09060, 200, 2000); // Dusty orange-tan fog
-    scene.background = createMarsDaySkyTexture();
-    
-    // Remove night skybox if it exists
-    if (scene.getObjectById(spaceSkybox.id)) {
-      scene.remove(spaceSkybox);
-    }
-    
-    // Adjust lighting
-    sunLight.intensity = 0.9;
-    sunLight.position.set(10, 100, 10); // Sun overhead
-    ambientLight.intensity = 0.7;
-    ambientLight.color.set(0xff9966); // Warm ambient light
-    
-    // Show the sun sphere
-    if (sunSphere) {
-      sunSphere.visible = true;
-      // Position the sun in the sky
-      sunSphere.position.set(500, 300, -1000);
-    }
-    
-    // Show the sun light
-    sun.visible = true;
+function updateSkyAppearance(transitionProgress = null) {
+  // Ensure sunSphere is defined before accessing it
+  if (typeof sunSphere === 'undefined') {
+    console.warn('sunSphere is not defined yet.');
+    return;
+  }
+  
+  // If we're not transitioning, use the current state
+  const isDay = transitionProgress === null ? isDaytime : 
+                (transitionStartState === 'day' ? 1 - transitionProgress : transitionProgress);
+  
+  // Create or update fog based on time of day
+  const dayFog = new THREE.Fog(0xd09060, 200, 2000); // Dusty orange-tan fog
+  const nightFog = new THREE.Fog(0xb77c5a, 500, 5000);
+  
+  if (transitionProgress === null) {
+    // No transition, just set the fog directly
+    scene.fog = isDaytime ? dayFog : nightFog;
   } else {
-    // Revert to night sky
-    scene.fog = new THREE.Fog(0xb77c5a, 500, 5000);
+    // Interpolate fog color and near/far values
+    const fogColor = new THREE.Color();
+    fogColor.r = dayFog.color.r * isDay + nightFog.color.r * (1 - isDay);
+    fogColor.g = dayFog.color.g * isDay + nightFog.color.g * (1 - isDay);
+    fogColor.b = dayFog.color.b * isDay + nightFog.color.b * (1 - isDay);
     
-    // Add night skybox if not already in scene
-    if (!scene.getObjectById(spaceSkybox.id)) {
-      scene.add(spaceSkybox);
+    const fogNear = dayFog.near * isDay + nightFog.near * (1 - isDay);
+    const fogFar = dayFog.far * isDay + nightFog.far * (1 - isDay);
+    
+    scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
+  }
+  
+  // Handle skybox and background
+  if (transitionProgress !== null) {
+    // During transition, create a blended sky texture
+    if (isDay > 0.01 && isDay < 0.99) {
+      // Create a blended sky texture during transition
+      scene.background = createBlendedSkyTexture(isDay);
     }
-    
-    // Adjust lighting
-    sunLight.intensity = 0.3;
-    sunLight.position.set(-10, -5, 10); // Low sun angle
-    ambientLight.intensity = 0.4;
-    ambientLight.color.set(0xff8866);
-    
-    // Hide the sun sphere
-    if (sunSphere) {
-      sunSphere.visible = false;
+  } else {
+    // Not transitioning, use appropriate sky
+    if (isDaytime) {
+      scene.background = createMarsDaySkyTexture();
+      
+      // Remove night skybox if it exists
+      if (scene.getObjectById(spaceSkybox.id)) {
+        scene.remove(spaceSkybox);
+      }
+    } else {
+      // Add night skybox if not already in scene
+      if (!scene.getObjectById(spaceSkybox.id)) {
+        scene.add(spaceSkybox);
+      }
     }
+  }
+  
+  // Adjust lighting based on time of day or transition progress
+  const daySunIntensity = 0.9;
+  const nightSunIntensity = 0.3;
+  const dayAmbientIntensity = 0.7;
+  const nightAmbientIntensity = 0.4;
+  
+  // Interpolate light intensities
+  sunLight.intensity = daySunIntensity * isDay + nightSunIntensity * (1 - isDay);
+  ambientLight.intensity = dayAmbientIntensity * isDay + nightAmbientIntensity * (1 - isDay);
+  
+  // Interpolate sun position
+  const daySunPosition = new THREE.Vector3(10, 100, 10);
+  const nightSunPosition = new THREE.Vector3(-10, -5, 10);
+  sunLight.position.set(
+    daySunPosition.x * isDay + nightSunPosition.x * (1 - isDay),
+    daySunPosition.y * isDay + nightSunPosition.y * (1 - isDay),
+    daySunPosition.z * isDay + nightSunPosition.z * (1 - isDay)
+  );
+  
+  // Interpolate ambient light color
+  const dayAmbientColor = new THREE.Color(0xff9966);
+  const nightAmbientColor = new THREE.Color(0xff8866);
+  ambientLight.color.set(
+    dayAmbientColor.r * isDay + nightAmbientColor.r * (1 - isDay),
+    dayAmbientColor.g * isDay + nightAmbientColor.g * (1 - isDay),
+    dayAmbientColor.b * isDay + nightAmbientColor.b * (1 - isDay)
+  );
+  
+  // Handle sun visibility with opacity for smooth transition
+  if (typeof sunSphere !== 'undefined' && sunSphere) {
+    sunSphere.visible = true;
+    sunSphere.material.opacity = isDay * 0.9; // Fade out when transitioning to night
     
-    // Hide the sun light
-    sun.visible = false;
+    // Also move the sun position during transition
+    const daySunSpherePosition = new THREE.Vector3(500, 300, -1000);
+    const nightSunSpherePosition = new THREE.Vector3(500, -300, -1000);
+    sunSphere.position.set(
+      daySunSpherePosition.x * isDay + nightSunSpherePosition.x * (1 - isDay),
+      daySunSpherePosition.y * isDay + nightSunSpherePosition.y * (1 - isDay),
+      daySunSpherePosition.z * isDay + nightSunSpherePosition.z * (1 - isDay)
+    );
+  }
+  
+  // Handle sun light visibility
+  if (typeof sun !== 'undefined' && sun) {
+    sun.visible = isDay > 0.1; // Keep visible until almost night
+  }
+  
+  // Handle night skybox opacity for smooth transition
+  if (typeof spaceSkybox !== 'undefined' && spaceSkybox) {
+    if (isDay < 0.5) {
+      // Show night skybox when transitioning to night
+      if (!scene.getObjectById(spaceSkybox.id)) {
+        scene.add(spaceSkybox);
+      }
+      // Set opacity based on transition
+      spaceSkybox.traverse(obj => {
+        if (obj.isMesh && obj.material) {
+          obj.material.transparent = true;
+          obj.material.opacity = 1 - isDay * 2; // Fade in as day transitions to night
+        }
+      });
+    } else if (isDay >= 0.5 && scene.getObjectById(spaceSkybox.id)) {
+      // Fade out night skybox when transitioning to day
+      spaceSkybox.traverse(obj => {
+        if (obj.isMesh && obj.material) {
+          obj.material.transparent = true;
+          obj.material.opacity = (1 - isDay) * 2; // Fade out as night transitions to day
+        }
+      });
+      
+      // Remove skybox when fully transparent
+      if (isDay >= 0.99) {
+        scene.remove(spaceSkybox);
+      }
+    }
   }
 }
 
