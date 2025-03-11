@@ -577,6 +577,16 @@ let transitionStartTime = 0;
 let transitionDuration = 10000; // 10 seconds in milliseconds
 let transitionStartState = 'day'; // or 'night'
 
+// Add a new state variable for realistic mode
+let isRealisticMode = true; // Default to realistic mode
+
+// Add a function to toggle between stylized and realistic mode
+function toggleRealisticMode() {
+  isRealisticMode = !isRealisticMode;
+  console.log(`Realistic mode: ${isRealisticMode ? 'ON' : 'OFF'}`);
+  updateSkyAppearance();
+}
+
 // Modify the animate function
 function animate(time) {
   requestAnimationFrame(animate);
@@ -2215,23 +2225,28 @@ function initializeScene() {
   soundSystem.initialize();
   console.log("Sound system initialized");
   
+  // Initialize UI elements including realistic mode toggle
+  initializeUI();
+  console.log("UI elements initialized");
+  
   // Start the animation loop with timestamp - ONLY CALL THIS ONCE
   console.log("Starting animation loop");
   animate(0);
 }
 
 // Add a day/night toggle and cycle
-let isDaytime = true;
+let isDaytime = true; // Ensure this is true by default
+console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
 
 function startDayNightCycle() {
   // Use a 1-minute cycle duration
   setInterval(() => {
     toggleDayNight();
-  }, 30000); // 1 minute for each cycle
+  }, 30000); // 30 seconds for each cycle
   
   // Add a manual toggle button for testing
   const toggleButton = document.createElement('button');
-  toggleButton.textContent = 'Toggle Day/Night';
+  toggleButton.textContent = isDaytime ? 'Switch to Night' : 'Switch to Day';
   toggleButton.style.position = 'absolute';
   toggleButton.style.bottom = '20px';
   toggleButton.style.right = '20px';
@@ -2247,6 +2262,7 @@ function startDayNightCycle() {
     // Only toggle if not already transitioning
     if (!isTransitioning) {
       toggleDayNight();
+      toggleButton.textContent = isDaytime ? 'Switch to Night' : 'Switch to Day';
     }
   });
   
@@ -2254,32 +2270,64 @@ function startDayNightCycle() {
 }
 
 function toggleDayNight() {
-  console.log(isDaytime)
-  console.log("Toggling day/night");
+  console.log("Before toggle - isDaytime:", isDaytime);
   isDaytime = !isDaytime;
+  console.log("After toggle - isDaytime:", isDaytime);
   updateSkyAppearance();
 }
 
+// Add a function to force day mode
+function forceDayMode() {
+  console.log("Forcing day mode...");
+  isDaytime = true;
+  isRealisticMode = true;
+  console.log("isDaytime set to:", isDaytime);
+  console.log("isRealisticMode set to:", isRealisticMode);
+  updateSkyAppearance();
+  console.log("Day mode forced!");
+}
+
+// Expose the function globally for debugging
+window.forceDayMode = forceDayMode;
+
+// Call forceDayMode after a short delay to ensure everything is initialized
+setTimeout(() => {
+  console.log("Auto-forcing day mode after initialization");
+  forceDayMode();
+}, 2000);
+
 function updateSkyAppearance(transitionProgress = null) {
-  console.log("Updating sky appearance");
-  console.log(sunSphere);
-  // Ensure sunSphere is defined before accessing it
+  console.log("Updating sky appearance - isDaytime:", isDaytime);
+  
+  // Define sunSphere if it is not already defined
   if (typeof sunSphere === 'undefined') {
-    console.warn('sunSphere is not defined yet.');
-    return;
+    console.log('Defining sunSphere...');
+    sunSphere = new THREE.Mesh(
+      new THREE.SphereGeometry(50, 32, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffffff })
+    );
+    sunSphere.position.set(500, 300, -1000);
+    scene.add(sunSphere);
   }
   
   // If we're not transitioning, use the current state
   const isDay = transitionProgress === null ? isDaytime : 
                 (transitionStartState === 'day' ? 1 - transitionProgress : transitionProgress);
   
+  console.log("isDay value:", isDay);
+  
   // Create or update fog based on time of day
-  const dayFog = new THREE.Fog(0xd09060, 200, 2000); // Dusty orange-tan fog
+  // Use more realistic Mars fog colors when in realistic mode
+  const dayFog = isRealisticMode 
+    ? new THREE.Fog(0xd8a282, 200, 2000) // Realistic dusty orange-tan fog based on NASA imagery
+    : new THREE.Fog(0xd09060, 200, 2000); // Original stylized fog
+    
   const nightFog = new THREE.Fog(0xb77c5a, 500, 5000);
   
   if (transitionProgress === null) {
     // No transition, just set the fog directly
     scene.fog = isDaytime ? dayFog : nightFog;
+    console.log("Setting fog for:", isDaytime ? "DAY" : "NIGHT");
   } else {
     // Interpolate fog color and near/far values
     const fogColor = new THREE.Color();
@@ -2291,6 +2339,7 @@ function updateSkyAppearance(transitionProgress = null) {
     const fogFar = dayFog.far * isDay + nightFog.far * (1 - isDay);
     
     scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
+    console.log("Setting transitional fog - isDay:", isDay);
   }
   
   // Handle skybox and background
@@ -2298,34 +2347,50 @@ function updateSkyAppearance(transitionProgress = null) {
     // During transition, create a blended sky texture
     if (isDay > 0.01 && isDay < 0.99) {
       // Create a blended sky texture during transition
+      console.log("Creating blended sky texture - isDay:", isDay);
       scene.background = createBlendedSkyTexture(isDay);
     }
   } else {
     // Not transitioning, use appropriate sky
     if (isDaytime) {
-      scene.background = createMarsDaySkyTexture();
+      // Use realistic or stylized sky texture based on mode
+      console.log("Setting DAY sky texture - isRealisticMode:", isRealisticMode);
+      try {
+        const skyTexture = isRealisticMode ? createRealisticMarsDaySkyTexture() : createMarsDaySkyTexture();
+        scene.background = skyTexture;
+        console.log("Day sky texture created and set successfully");
+      } catch (error) {
+        console.error("Error creating day sky texture:", error);
+      }
       
       // Remove night skybox if it exists
-      if (scene.getObjectById(spaceSkybox.id)) {
+      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && scene.getObjectById(spaceSkybox.id)) {
+        console.log("Removing night skybox");
         scene.remove(spaceSkybox);
       }
     } else {
       // Add night skybox if not already in scene
-      if (!scene.getObjectById(spaceSkybox.id)) {
+      console.log("Setting NIGHT sky");
+      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && !scene.getObjectById(spaceSkybox.id)) {
+        console.log("Adding night skybox to scene");
         scene.add(spaceSkybox);
       }
     }
   }
   
   // Adjust lighting based on time of day or transition progress
-  const daySunIntensity = 0.9;
+  // Use more realistic lighting values when in realistic mode
+  const daySunIntensity = isRealisticMode ? 0.8 : 0.9; // Slightly dimmer in realistic mode (Mars is further from sun)
   const nightSunIntensity = 0.3;
-  const dayAmbientIntensity = 0.7;
+  const dayAmbientIntensity = isRealisticMode ? 0.6 : 0.7; // Slightly dimmer ambient in realistic mode
   const nightAmbientIntensity = 0.4;
   
   // Interpolate light intensities
   sunLight.intensity = daySunIntensity * isDay + nightSunIntensity * (1 - isDay);
   ambientLight.intensity = dayAmbientIntensity * isDay + nightAmbientIntensity * (1 - isDay);
+  
+  console.log("Sun light intensity set to:", sunLight.intensity);
+  console.log("Ambient light intensity set to:", ambientLight.intensity);
   
   // Interpolate sun position
   const daySunPosition = new THREE.Vector3(10, 100, 10);
@@ -2337,7 +2402,10 @@ function updateSkyAppearance(transitionProgress = null) {
   );
   
   // Interpolate ambient light color
-  const dayAmbientColor = new THREE.Color(0xff9966);
+  // Use more realistic Mars ambient light color in realistic mode
+  const dayAmbientColor = isRealisticMode 
+    ? new THREE.Color(0xd8a282) // Realistic dusty orange ambient light
+    : new THREE.Color(0xff9966); // Original stylized ambient light
   const nightAmbientColor = new THREE.Color(0xff8866);
   ambientLight.color.set(
     dayAmbientColor.r * isDay + nightAmbientColor.r * (1 - isDay),
@@ -2358,11 +2426,15 @@ function updateSkyAppearance(transitionProgress = null) {
       daySunSpherePosition.y * isDay + nightSunSpherePosition.y * (1 - isDay),
       daySunSpherePosition.z * isDay + nightSunSpherePosition.z * (1 - isDay)
     );
-  }
-  
-  // Handle sun light visibility
-  if (typeof sun !== 'undefined' && sun) {
-    sun.visible = isDay > 0.1; // Keep visible until almost night
+    
+    // Adjust sun color in realistic mode
+    if (isRealisticMode && isDay > 0.5) {
+      // More pale, dusty sun appearance as seen through Mars atmosphere
+      sunSphere.material.color.setHex(0xfff0e0);
+    } else {
+      // Original sun color
+      sunSphere.material.color.setHex(0xffffff);
+    }
   }
   
   // Handle night skybox opacity for smooth transition
@@ -2387,11 +2459,6 @@ function updateSkyAppearance(transitionProgress = null) {
           obj.material.opacity = (1 - isDay) * 2; // Fade out as night transitions to day
         }
       });
-      
-      // Remove skybox when fully transparent
-      if (isDay >= 0.99) {
-        scene.remove(spaceSkybox);
-      }
     }
   }
 }
@@ -2408,25 +2475,25 @@ document.addEventListener('keydown', function(event) {
 
 function createMarsDaySkyTexture() {
   const canvas = document.createElement('canvas');
-  const canvasSize = 2048;
-  canvas.width = canvasSize;
-  canvas.height = canvasSize;
+  const size = 2048;
+  canvas.width = size;
+  canvas.height = size;
   const context = canvas.getContext('2d');
   
   // Create gradient from horizon to zenith
-  const gradient = context.createLinearGradient(0, canvasSize, 0, 0);
+  const gradient = context.createLinearGradient(0, size, 0, 0);
   gradient.addColorStop(0, '#c27e54'); // Dusty orange-brown at horizon
   gradient.addColorStop(0.5, '#d7a28b'); // Pinkish in middle
   gradient.addColorStop(1, '#e6b499'); // Lighter at zenith
   
   context.fillStyle = gradient;
-  context.fillRect(0, 0, canvasSize, canvasSize);
+  context.fillRect(0, 0, size, size);
   
   // Add atmospheric haze/dust
   context.fillStyle = 'rgba(210, 170, 130, 0.2)';
   for (let i = 0; i < 100; i++) {
-    const x = Math.random() * canvasSize;
-    const y = Math.random() * canvasSize * 0.6 + canvasSize * 0.4; // More dust near horizon
+    const x = Math.random() * size;
+    const y = Math.random() * size * 0.6 + size * 0.4; // More dust near horizon
     const size = Math.random() * 100 + 50;
     context.beginPath();
     context.arc(x, y, size, 0, Math.PI * 2);
@@ -2436,8 +2503,8 @@ function createMarsDaySkyTexture() {
   // Add subtle clouds
   context.fillStyle = 'rgba(230, 200, 180, 0.15)';
   for (let i = 0; i < 20; i++) {
-    const x = Math.random() * canvasSize;
-    const y = Math.random() * canvasSize * 0.3 + canvasSize * 0.2; // Clouds in middle of sky
+    const x = Math.random() * size;
+    const y = Math.random() * size * 0.3 + size * 0.2; // Clouds in middle of sky
     const width = Math.random() * 300 + 200;
     const height = Math.random() * 100 + 50;
     
@@ -3713,6 +3780,10 @@ function initializeScene() {
   soundSystem.initialize();
   console.log("Sound system initialized");
   
+  // Initialize UI elements including realistic mode toggle
+  initializeUI();
+  console.log("UI elements initialized");
+  
   // Start the animation loop with timestamp - ONLY CALL THIS ONCE
   console.log("Starting animation loop");
   animate(0);
@@ -3721,8 +3792,14 @@ function initializeScene() {
 function updateSkyAppearance(transitionProgress = null) {
   // Ensure sunSphere is defined before accessing it
   if (typeof sunSphere === 'undefined') {
-    console.warn('sunSphere is not defined yet.');
-    return;
+    console.warn('sunSphere is not defined yet. Defining sunSphere now...');
+    sunSphere = new THREE.Mesh(
+      new THREE.SphereGeometry(50, 32, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffee66, transparent: true, opacity: 0.9 })
+    );
+    sunSphere.position.set(500, 300, -1000);
+    scene.add(sunSphere);
+    console.log('sunSphere defined and added to scene.');
   }
   
   // If we're not transitioning, use the current state
@@ -3730,7 +3807,11 @@ function updateSkyAppearance(transitionProgress = null) {
                 (transitionStartState === 'day' ? 1 - transitionProgress : transitionProgress);
   
   // Create or update fog based on time of day
-  const dayFog = new THREE.Fog(0xd09060, 200, 2000); // Dusty orange-tan fog
+  // Use more realistic Mars fog colors when in realistic mode
+  const dayFog = isRealisticMode 
+    ? new THREE.Fog(0xd8a282, 200, 2000) // Realistic dusty orange-tan fog based on NASA imagery
+    : new THREE.Fog(0xd09060, 200, 2000); // Original stylized fog
+    
   const nightFog = new THREE.Fog(0xb77c5a, 500, 5000);
   
   if (transitionProgress === null) {
@@ -3754,34 +3835,50 @@ function updateSkyAppearance(transitionProgress = null) {
     // During transition, create a blended sky texture
     if (isDay > 0.01 && isDay < 0.99) {
       // Create a blended sky texture during transition
+      console.log("Creating blended sky texture - isDay:", isDay);
       scene.background = createBlendedSkyTexture(isDay);
     }
   } else {
     // Not transitioning, use appropriate sky
     if (isDaytime) {
-      scene.background = createMarsDaySkyTexture();
+      // Use realistic or stylized sky texture based on mode
+      console.log("Setting DAY sky texture - isRealisticMode:", isRealisticMode);
+      try {
+        const skyTexture = isRealisticMode ? createRealisticMarsDaySkyTexture() : createMarsDaySkyTexture();
+        scene.background = skyTexture;
+        console.log("Day sky texture created and set successfully");
+      } catch (error) {
+        console.error("Error creating day sky texture:", error);
+      }
       
       // Remove night skybox if it exists
-      if (scene.getObjectById(spaceSkybox.id)) {
+      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && scene.getObjectById(spaceSkybox.id)) {
+        console.log("Removing night skybox");
         scene.remove(spaceSkybox);
       }
     } else {
       // Add night skybox if not already in scene
-      if (!scene.getObjectById(spaceSkybox.id)) {
+      console.log("Setting NIGHT sky");
+      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && !scene.getObjectById(spaceSkybox.id)) {
+        console.log("Adding night skybox to scene");
         scene.add(spaceSkybox);
       }
     }
   }
   
   // Adjust lighting based on time of day or transition progress
-  const daySunIntensity = 0.9;
+  // Use more realistic lighting values when in realistic mode
+  const daySunIntensity = isRealisticMode ? 0.8 : 0.9; // Slightly dimmer in realistic mode (Mars is further from sun)
   const nightSunIntensity = 0.3;
-  const dayAmbientIntensity = 0.7;
+  const dayAmbientIntensity = isRealisticMode ? 0.6 : 0.7; // Slightly dimmer ambient in realistic mode
   const nightAmbientIntensity = 0.4;
   
   // Interpolate light intensities
   sunLight.intensity = daySunIntensity * isDay + nightSunIntensity * (1 - isDay);
   ambientLight.intensity = dayAmbientIntensity * isDay + nightAmbientIntensity * (1 - isDay);
+  
+  console.log("Sun light intensity set to:", sunLight.intensity);
+  console.log("Ambient light intensity set to:", ambientLight.intensity);
   
   // Interpolate sun position
   const daySunPosition = new THREE.Vector3(10, 100, 10);
@@ -3793,7 +3890,10 @@ function updateSkyAppearance(transitionProgress = null) {
   );
   
   // Interpolate ambient light color
-  const dayAmbientColor = new THREE.Color(0xff9966);
+  // Use more realistic Mars ambient light color in realistic mode
+  const dayAmbientColor = isRealisticMode 
+    ? new THREE.Color(0xd8a282) // Realistic dusty orange ambient light
+    : new THREE.Color(0xff9966); // Original stylized ambient light
   const nightAmbientColor = new THREE.Color(0xff8866);
   ambientLight.color.set(
     dayAmbientColor.r * isDay + nightAmbientColor.r * (1 - isDay),
@@ -3814,11 +3914,15 @@ function updateSkyAppearance(transitionProgress = null) {
       daySunSpherePosition.y * isDay + nightSunSpherePosition.y * (1 - isDay),
       daySunSpherePosition.z * isDay + nightSunSpherePosition.z * (1 - isDay)
     );
-  }
-  
-  // Handle sun light visibility
-  if (typeof sun !== 'undefined' && sun) {
-    sun.visible = isDay > 0.1; // Keep visible until almost night
+    
+    // Adjust sun color in realistic mode
+    if (isRealisticMode && isDay > 0.5) {
+      // More pale, dusty sun appearance as seen through Mars atmosphere
+      sunSphere.material.color.setHex(0xfff0e0);
+    } else {
+      // Original sun color
+      sunSphere.material.color.setHex(0xffffff);
+    }
   }
   
   // Handle night skybox opacity for smooth transition
@@ -3843,11 +3947,6 @@ function updateSkyAppearance(transitionProgress = null) {
           obj.material.opacity = (1 - isDay) * 2; // Fade out as night transitions to day
         }
       });
-      
-      // Remove skybox when fully transparent
-      if (isDay >= 0.99) {
-        scene.remove(spaceSkybox);
-      }
     }
   }
 }
@@ -4167,4 +4266,319 @@ class MeteorSystem {
     }
   }
 }
+
+// Create a realistic Mars day sky texture based on NASA imagery and scientific data
+function createRealisticMarsDaySkyTexture() {
+  const canvas = document.createElement('canvas');
+  const canvasSize = 2048;
+  canvas.width = canvasSize;
+  canvas.height = canvasSize;
+  const context = canvas.getContext('2d');
+  
+  // Create scientifically accurate gradient from horizon to zenith
+  // Based on NASA's Curiosity and Perseverance rover images
+  const gradient = context.createLinearGradient(0, canvasSize, 0, 0);
+  
+  // Mars sky colors based on NASA imagery
+  // Horizon: Butterscotch/light brown due to dust scattering
+  gradient.addColorStop(0, '#d8a282');
+  
+  // Mid-sky: Pale orange-brown transitioning to salmon pink
+  gradient.addColorStop(0.2, '#c79078');
+  gradient.addColorStop(0.4, '#b67c6e');
+  
+  // Upper sky: Transitions to a dusty pale blue-gray
+  gradient.addColorStop(0.7, '#a57a6c');
+  gradient.addColorStop(0.85, '#9a7a74');
+  
+  // Zenith: Darker blue-gray (Rayleigh scattering is much weaker on Mars)
+  gradient.addColorStop(1, '#8e7a7c');
+  
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvasSize, canvasSize);
+  
+  // Add realistic atmospheric haze/dust based on Martian conditions
+  // Mars has frequent dust in atmosphere that creates a hazy appearance
+  context.fillStyle = 'rgba(210, 170, 130, 0.15)';
+  for (let i = 0; i < 150; i++) {
+    const x = Math.random() * canvasSize;
+    // More dust near horizon, gradually decreasing with height
+    const heightFactor = Math.pow(Math.random(), 0.5); // More dust lower in sky
+    const y = canvasSize * (1 - heightFactor * 0.6);
+    const size = Math.random() * 150 + 100;
+    context.beginPath();
+    context.arc(x, y, size, 0, Math.PI * 2);
+    context.fill();
+  }
+  
+  // Add subtle dust storm effects in distance (occasional on Mars)
+  if (Math.random() < 0.3) { // 30% chance of dust storm
+    context.fillStyle = 'rgba(190, 150, 120, 0.2)';
+    const stormX = Math.random() * canvasSize;
+    const stormHeight = canvasSize * 0.3;
+    const stormWidth = canvasSize * 0.4;
+    
+    // Create dust storm shape
+    for (let i = 0; i < 30; i++) {
+      const x = stormX + (Math.random() - 0.5) * stormWidth;
+      const y = canvasSize - Math.random() * stormHeight;
+      const size = Math.random() * 200 + 100;
+      context.beginPath();
+      context.arc(x, y, size, 0, Math.PI * 2);
+      context.fill();
+    }
+  }
+  
+  // Add sun with realistic appearance
+  // The sun appears about 2/3 the size as seen from Earth
+  // and has a pale, dusty appearance due to atmospheric dust
+  const sunSize = canvasSize * 0.05; // Sun size as seen from Mars
+  const sunX = canvasSize * (0.3 + Math.random() * 0.4); // Random position in sky
+  const sunY = canvasSize * (0.2 + Math.random() * 0.3); // Higher in sky
+  
+  // Create sun glow (larger on Mars due to dust scattering)
+  const sunGlow = context.createRadialGradient(
+    sunX, sunY, 0,
+    sunX, sunY, sunSize * 4
+  );
+  sunGlow.addColorStop(0, 'rgba(255, 240, 230, 0.8)');
+  sunGlow.addColorStop(0.2, 'rgba(255, 210, 180, 0.4)');
+  sunGlow.addColorStop(0.5, 'rgba(255, 200, 170, 0.2)');
+  sunGlow.addColorStop(1, 'rgba(255, 190, 160, 0)');
+  
+  context.fillStyle = sunGlow;
+  context.beginPath();
+  context.arc(sunX, sunY, sunSize * 4, 0, Math.PI * 2);
+  context.fill();
+  
+  // Create sun disk (pale yellow-white due to dust filtering)
+  const sunDisk = context.createRadialGradient(
+    sunX, sunY, 0,
+    sunX, sunY, sunSize
+  );
+  sunDisk.addColorStop(0, 'rgba(255, 250, 240, 1)');
+  sunDisk.addColorStop(0.7, 'rgba(255, 240, 220, 1)');
+  sunDisk.addColorStop(1, 'rgba(255, 230, 200, 0.8)');
+  
+  context.fillStyle = sunDisk;
+  context.beginPath();
+  context.arc(sunX, sunY, sunSize, 0, Math.PI * 2);
+  context.fill();
+  
+  // Add Phobos and Deimos (Mars' moons) occasionally
+  if (Math.random() < 0.4) { // 40% chance to see a moon
+    // Phobos (larger, closer moon)
+    const phobosSize = canvasSize * 0.005; // Very small in sky
+    const phobosX = canvasSize * Math.random();
+    const phobosY = canvasSize * (0.1 + Math.random() * 0.3);
+    
+    context.fillStyle = 'rgba(180, 170, 160, 0.9)';
+    context.beginPath();
+    context.arc(phobosX, phobosY, phobosSize, 0, Math.PI * 2);
+    context.fill();
+    
+    // Deimos (smaller, further moon) - even rarer
+    if (Math.random() < 0.3) {
+      const deimosSize = canvasSize * 0.003; // Extremely small in sky
+      const deimosX = canvasSize * Math.random();
+      const deimosY = canvasSize * (0.05 + Math.random() * 0.2);
+      
+      context.fillStyle = 'rgba(170, 160, 150, 0.8)';
+      context.beginPath();
+      context.arc(deimosX, deimosY, deimosSize, 0, Math.PI * 2);
+      context.fill();
+    }
+  }
+  
+  // Create texture from canvas
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.mapping = THREE.EquirectangularReflectionMapping;
+  
+  return texture;
+}
+
+// Add UI button for toggling realistic mode
+function addRealisticModeToggle() {
+  const toggleButton = document.createElement('button');
+  toggleButton.textContent = isRealisticMode ? 'Switch to Stylized Mode' : 'Switch to Realistic Mode';
+  toggleButton.style.position = 'absolute';
+  toggleButton.style.bottom = '20px';
+  toggleButton.style.right = '180px'; // Position to the left of the day/night toggle
+  toggleButton.style.padding = '10px';
+  toggleButton.style.backgroundColor = '#444';
+  toggleButton.style.color = 'white';
+  toggleButton.style.border = 'none';
+  toggleButton.style.borderRadius = '5px';
+  toggleButton.style.cursor = 'pointer';
+  toggleButton.style.zIndex = '1000';
+  
+  // Add hover effect
+  toggleButton.addEventListener('mouseover', () => {
+    toggleButton.style.backgroundColor = '#666';
+  });
+  toggleButton.addEventListener('mouseout', () => {
+    toggleButton.style.backgroundColor = '#444';
+  });
+  
+  // Add click handler
+  toggleButton.addEventListener('click', () => {
+    toggleRealisticMode();
+    toggleButton.textContent = isRealisticMode ? 'Switch to Stylized Mode' : 'Switch to Realistic Mode';
+  });
+  
+  document.body.appendChild(toggleButton);
+  
+  // Add a Force Day Mode button
+  const forceDayButton = document.createElement('button');
+  forceDayButton.textContent = 'Force Day Mode';
+  forceDayButton.style.position = 'absolute';
+  forceDayButton.style.bottom = '60px';
+  forceDayButton.style.right = '20px';
+  forceDayButton.style.padding = '10px';
+  forceDayButton.style.backgroundColor = '#444';
+  forceDayButton.style.color = 'white';
+  forceDayButton.style.border = 'none';
+  forceDayButton.style.borderRadius = '5px';
+  forceDayButton.style.cursor = 'pointer';
+  forceDayButton.style.zIndex = '1000';
+  
+  // Add hover effect
+  forceDayButton.addEventListener('mouseover', () => {
+    forceDayButton.style.backgroundColor = '#666';
+  });
+  forceDayButton.addEventListener('mouseout', () => {
+    forceDayButton.style.backgroundColor = '#444';
+  });
+  
+  // Add click handler
+  forceDayButton.addEventListener('click', () => {
+    forceDayMode();
+  });
+  
+  document.body.appendChild(forceDayButton);
+}
+
+// Call this function after the scene is initialized
+function initializeUI() {
+  // ... existing UI initialization code ...
+  
+  // Add realistic mode toggle
+  addRealisticModeToggle();
+}
+
+// Create a completely new function to force day mode that doesn't rely on existing code
+function forceMarsDayMode() {
+  console.log("EMERGENCY: Forcing Mars day mode...");
+  
+  // 1. Set the state variables
+  isDaytime = true;
+  isRealisticMode = true;
+  isTransitioning = false;
+  
+  // 2. Create a new day sky texture directly
+  const canvas = document.createElement('canvas');
+  const size = 2048;
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext('2d');
+  
+  // Create a bright Mars day sky gradient
+  const gradient = context.createLinearGradient(0, size, 0, 0);
+  gradient.addColorStop(0, '#e8b090'); // Bright dusty orange at horizon
+  gradient.addColorStop(0.5, '#f0c0a0'); // Lighter in middle
+  gradient.addColorStop(1, '#f8d0b0'); // Very light at zenith
+  
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, size, size);
+  
+  // Create a texture from the canvas
+  const skyTexture = new THREE.CanvasTexture(canvas);
+  skyTexture.mapping = THREE.EquirectangularReflectionMapping;
+  
+  // 3. Apply the sky texture directly
+  scene.background = skyTexture;
+  
+  // 4. Create and apply a bright day fog
+  scene.fog = new THREE.Fog(0xe8b090, 200, 2000);
+  
+  // 5. Make sure the sun is visible and bright
+  if (typeof sunSphere !== 'undefined' && sunSphere) {
+    sunSphere.visible = true;
+    sunSphere.material.opacity = 1.0;
+    sunSphere.position.set(500, 300, -1000); // Position high in the sky
+    
+    // Make the sun brighter
+    if (sunSphere.material) {
+      sunSphere.material.color.setHex(0xffffff);
+    }
+  }
+  
+  // 6. Make sure the night skybox is removed
+  if (typeof spaceSkybox !== 'undefined' && spaceSkybox && scene.getObjectById(spaceSkybox.id)) {
+    scene.remove(spaceSkybox);
+  }
+  
+  // 7. Increase lighting intensity
+  if (typeof sunLight !== 'undefined' && sunLight) {
+    sunLight.intensity = 1.2;
+    sunLight.position.set(10, 100, 10);
+  }
+  
+  if (typeof ambientLight !== 'undefined' && ambientLight) {
+    ambientLight.intensity = 0.8;
+    ambientLight.color.set(0xffd0a0);
+  }
+  
+  console.log("Emergency day mode forced!");
+  
+  // 8. Update UI buttons to reflect current state
+  const buttons = document.querySelectorAll('button');
+  buttons.forEach(button => {
+    if (button.textContent.includes('Night') || button.textContent.includes('Day')) {
+      button.textContent = 'Switch to Night';
+    }
+  });
+  
+  // 9. Return true to confirm the function executed
+  return true;
+}
+
+// Add a highly visible emergency button
+function addEmergencyDayButton() {
+  const emergencyButton = document.createElement('button');
+  emergencyButton.textContent = '🔆 EMERGENCY DAY MODE 🔆';
+  emergencyButton.style.position = 'absolute';
+  emergencyButton.style.top = '20px';
+  emergencyButton.style.left = '20px';
+  emergencyButton.style.padding = '15px';
+  emergencyButton.style.backgroundColor = '#ff5500';
+  emergencyButton.style.color = 'white';
+  emergencyButton.style.border = '3px solid yellow';
+  emergencyButton.style.borderRadius = '5px';
+  emergencyButton.style.cursor = 'pointer';
+  emergencyButton.style.zIndex = '2000';
+  emergencyButton.style.fontWeight = 'bold';
+  emergencyButton.style.fontSize = '16px';
+  
+  emergencyButton.addEventListener('click', forceMarsDayMode);
+  
+  document.body.appendChild(emergencyButton);
+  
+  console.log("Emergency day button added");
+}
+
+// Call this immediately after the script loads
+setTimeout(() => {
+  console.log("Adding emergency day button...");
+  addEmergencyDayButton();
+  
+  // Also try to force day mode automatically
+  setTimeout(() => {
+    console.log("Auto-triggering emergency day mode...");
+    forceMarsDayMode();
+  }, 3000);
+}, 1000);
+
+// Also expose the function globally for console access
+window.forceMarsDayMode = forceMarsDayMode;
 
