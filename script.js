@@ -1180,8 +1180,50 @@ function createRealisticMarsTerrain() {
       }
     }
     
+    // 4.5 Add occasional very high mountains (rare and random)
+    const highMountainCount = 30; // Small number of high mountains
+    for (let hm = 0; hm < highMountainCount; hm++) {
+      // Random position for high mountains
+      const mountainX = Math.sin(hm * 7.3 + 2.1) * terrainSize * 0.4;
+      const mountainZ = Math.cos(hm * 8.7 + 1.5) * terrainSize * 0.4;
+      
+      // Make the mountain base wider than regular mountains
+      const mountainRadius = 420 + Math.random() * 100;
+      
+      // Calculate distance to mountain center
+      const distanceToMountain = Math.sqrt(Math.pow(x - mountainX, 2) + Math.pow(z - mountainZ, 2));
+      
+      // Only affect terrain within mountain radius
+      if (distanceToMountain < mountainRadius) {
+        // Normalized distance from center (0 at center, 1 at edge)
+        const normalizedDistance = distanceToMountain / mountainRadius;
+        
+        // Very high peak height (2-3 times higher than regular mountains)
+        const peakHeight = 30 + Math.random() * 15;
+        
+        // Steeper slope profile for dramatic mountains
+        const slopeProfile = Math.pow(1 - normalizedDistance, 2);
+        
+        // Calculate mountain height with steep profile
+        const highMountainHeight = peakHeight * slopeProfile;
+        
+        // Add some rocky detail to make it look more natural
+        const rockDetail = (
+          Math.sin(x * 0.05 + z * 0.06) * 
+          Math.cos(x * 0.06 - z * 0.05) * 
+          (1 - normalizedDistance) * 1.2
+        );
+        
+        // Only add the mountain with a low probability to make them rare
+        // This creates a 10% chance for each high mountain to actually appear
+        if (Math.random() < 0.1) {
+          elevation += highMountainHeight + rockDetail;
+        }
+      }
+    }
+    
     // 5. Add impact craters
-    const impactCraterCount = 15;
+    const impactCraterCount = 25;
     for (let c = 0; c < impactCraterCount; c++) {
       // Random crater position
       const craterX = (Math.random() * 2 - 1) * terrainSize * 0.8;
@@ -1200,7 +1242,7 @@ function createRealisticMarsTerrain() {
         
         if (normalizedDistance < 1) {
           // Inside the crater - very smooth depression
-          const craterDepth = -3.5 - craterSize * 0.08;
+          const craterDepth = -10.5 - craterSize * 0.18;
           
           // Crater shape: very smooth parabolic with subtle central peak for larger craters
           let craterProfile;
@@ -4126,4 +4168,3 @@ class MeteorSystem {
   }
 }
 
-// Create a single spherical texture for the dome-like skybox
