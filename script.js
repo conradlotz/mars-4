@@ -2160,6 +2160,10 @@ function initializeScene() {
   
   console.log("Sun sphere added to scene");
   
+  // Initialize sound system
+  soundSystem.initialize();
+  console.log("Sound system initialized");
+  
   // Start the animation loop with timestamp - ONLY CALL THIS ONCE
   console.log("Starting animation loop");
   animate(0);
@@ -3316,6 +3320,7 @@ const damageSystem = {
 // Sound effects system
 const soundSystem = {
   sounds: {},
+  youtubeAudio: null,
   
   initialize() {
     // Load sounds
@@ -3353,6 +3358,160 @@ const soundSystem = {
     });
     
     this.sounds[name] = sound;
+  },
+  
+  loadYoutubeAudio(videoId, options = {}) {
+    // Remove any existing YouTube player
+    if (this.youtubeAudio) {
+      const existingPlayer = document.getElementById('youtube-audio-player');
+      if (existingPlayer) {
+        existingPlayer.remove();
+      }
+    }
+    
+    // Create container for YouTube iframe
+    const container = document.createElement('div');
+    container.id = 'youtube-audio-container';
+    container.style.position = 'absolute';
+    container.style.bottom = '20px';
+    container.style.right = '20px';
+    container.style.zIndex = '1000';
+    container.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+    container.style.padding = '10px';
+    container.style.borderRadius = '5px';
+    container.style.color = 'white';
+    
+    // Create iframe for YouTube video (hidden visually but audio still plays)
+    const iframe = document.createElement('iframe');
+    iframe.id = 'youtube-audio-player';
+    iframe.width = '1';
+    iframe.height = '1';
+    iframe.style.opacity = '0.01'; // Almost invisible but still functional
+    iframe.style.pointerEvents = 'none'; // Prevent interaction with the iframe
+    iframe.allow = 'autoplay'; // Allow autoplay
+    
+    // Set YouTube parameters
+    const params = new URLSearchParams({
+      enablejsapi: '1',
+      autoplay: options.autoplay ? '1' : '0',
+      loop: options.loop ? '1' : '0',
+      playlist: options.loop ? videoId : '',
+      controls: '0',
+      showinfo: '0',
+      modestbranding: '1',
+      iv_load_policy: '3',
+      rel: '0'
+    });
+    
+    iframe.src = `https://www.youtube.com/embed/${videoId}?${params.toString()}`;
+    
+    // Create controls
+    const controls = document.createElement('div');
+    controls.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <button id="youtube-play-pause" style="padding: 5px 10px;">Play</button>
+        <div>
+          <label for="youtube-volume">Volume:</label>
+          <input type="range" id="youtube-volume" min="0" max="100" value="${options.volume || 50}" style="width: 100px;">
+        </div>
+        <div id="youtube-title" style="margin-left: 10px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+          YouTube Audio
+        </div>
+      </div>
+    `;
+    
+    // Add elements to the DOM
+    container.appendChild(iframe);
+    container.appendChild(controls);
+    document.body.appendChild(container);
+    
+    // Store reference to the YouTube player
+    this.youtubeAudio = {
+      iframe,
+      videoId,
+      player: null,
+      isPlaying: options.autoplay || false
+    };
+    
+    // Initialize YouTube API if not already loaded
+    if (!window.YT) {
+      const tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      const firstScriptTag = document.getElementsByTagName('script')[0];
+      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+      
+      window.onYouTubeIframeAPIReady = () => {
+        this._initializeYouTubePlayer();
+      };
+    } else {
+      this._initializeYouTubePlayer();
+    }
+    
+    // Set up event listeners for controls
+    document.getElementById('youtube-play-pause').addEventListener('click', () => {
+      this.toggleYoutubeAudio();
+    });
+    
+    document.getElementById('youtube-volume').addEventListener('input', (e) => {
+      if (this.youtubeAudio && this.youtubeAudio.player) {
+        this.youtubeAudio.player.setVolume(parseInt(e.target.value));
+      }
+    });
+    
+    return this.youtubeAudio;
+  },
+  
+  _initializeYouTubePlayer() {
+    if (!this.youtubeAudio) return;
+    
+    this.youtubeAudio.player = new YT.Player('youtube-audio-player', {
+      events: {
+        'onReady': (event) => {
+          // Set initial volume
+          const volumeSlider = document.getElementById('youtube-volume');
+          if (volumeSlider) {
+            event.target.setVolume(parseInt(volumeSlider.value));
+          }
+          
+          // Auto-play if specified
+          if (this.youtubeAudio.isPlaying) {
+            event.target.playVideo();
+            document.getElementById('youtube-play-pause').textContent = 'Pause';
+          }
+          
+          // Get video title
+          const videoTitle = event.target.getVideoData().title;
+          const titleElement = document.getElementById('youtube-title');
+          if (titleElement && videoTitle) {
+            titleElement.textContent = videoTitle;
+          }
+        },
+        'onStateChange': (event) => {
+          // Update play/pause button based on player state
+          if (event.data === YT.PlayerState.PLAYING) {
+            this.youtubeAudio.isPlaying = true;
+            document.getElementById('youtube-play-pause').textContent = 'Pause';
+          } else if (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) {
+            this.youtubeAudio.isPlaying = false;
+            document.getElementById('youtube-play-pause').textContent = 'Play';
+          }
+        }
+      }
+    });
+  },
+  
+  toggleYoutubeAudio() {
+    if (!this.youtubeAudio || !this.youtubeAudio.player) return;
+    
+    if (this.youtubeAudio.isPlaying) {
+      this.youtubeAudio.player.pauseVideo();
+      this.youtubeAudio.isPlaying = false;
+      document.getElementById('youtube-play-pause').textContent = 'Play';
+    } else {
+      this.youtubeAudio.player.playVideo();
+      this.youtubeAudio.isPlaying = true;
+      document.getElementById('youtube-play-pause').textContent = 'Pause';
+    }
   },
   
   play(name) {
@@ -3401,6 +3560,8 @@ const soundSystem = {
   }
 };
 
+// Make soundSystem globally accessible
+window.soundSystem = soundSystem;
 
 function updateDistanceTraveled(currentTime) {
   if (lastUpdateTime === 0) {
@@ -3492,6 +3653,10 @@ function initializeScene() {
   sunSphere.add(sunGlow);
   
   console.log("Sun sphere added to scene");
+  
+  // Initialize sound system
+  soundSystem.initialize();
+  console.log("Sound system initialized");
   
   // Start the animation loop with timestamp - ONLY CALL THIS ONCE
   console.log("Starting animation loop");

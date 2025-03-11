@@ -16,6 +16,44 @@
       padding: 10px;
       border-radius: 5px;
     }
+    .youtube-button {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background-color: rgba(0, 0, 0, 0.5);
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .youtube-button:hover {
+      background-color: rgba(0, 0, 0, 0.7);
+    }
+    #youtube-audio-container {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      background-color: rgba(0, 0, 0, 0.5);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 1000;
+      display: none;
+    }
+    #youtube-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    #youtube-title {
+      margin-left: 10px;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
   </style>
   <!-- Load Three.js libraries as regular scripts -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
@@ -26,6 +64,192 @@
   <div class="controls">
    
   </div>
+  <button id="load-youtube" class="youtube-button">Load YouTube Audio</button>
+  
+  <!-- YouTube Audio Container -->
+  <div id="youtube-audio-container">
+    <div id="youtube-player-wrapper"></div>
+    <div id="youtube-controls">
+      <button id="youtube-play-pause">Play</button>
+      <div>
+        <label for="youtube-volume">Volume:</label>
+        <input type="range" id="youtube-volume" min="0" max="100" value="30" style="width: 100px;">
+      </div>
+      <div id="youtube-title">YouTube Audio</div>
+    </div>
+  </div>
+  
   <script src="script.js"></script>
+  <script>
+    // Simple YouTube audio player implementation
+    const youtubePlayer = {
+      player: null,
+      videoId: null,
+      isPlaying: false,
+      
+      loadVideo: function(videoId, options = {}) {
+        this.videoId = videoId;
+        
+        // Show the container
+        document.getElementById('youtube-audio-container').style.display = 'block';
+        
+        // Create wrapper for the player if it doesn't exist
+        const wrapper = document.getElementById('youtube-player-wrapper');
+        
+        // Clear any existing player
+        wrapper.innerHTML = '';
+        
+        // Create iframe placeholder for the YouTube API to replace
+        const playerDiv = document.createElement('div');
+        playerDiv.id = 'youtube-iframe';
+        playerDiv.style.width = '1px';
+        playerDiv.style.height = '1px';
+        playerDiv.style.opacity = '0.01';
+        playerDiv.style.pointerEvents = 'none';
+        
+        // Add placeholder to the DOM
+        wrapper.appendChild(playerDiv);
+        
+        // Load YouTube API if not already loaded
+        if (typeof YT === 'undefined' || !YT.loaded) {
+          // Save reference to this object for the callback
+          window.youtubePlayerRef = this;
+          window.youtubePlayerOptions = options;
+          
+          const tag = document.createElement('script');
+          tag.src = 'https://www.youtube.com/iframe_api';
+          const firstScriptTag = document.getElementsByTagName('script')[0];
+          firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+          
+          // Define the callback function that YouTube API will call when ready
+          window.onYouTubeIframeAPIReady = function() {
+            window.youtubePlayerRef._initPlayer(window.youtubePlayerOptions);
+          };
+        } else {
+          // YouTube API already loaded, initialize player directly
+          this._initPlayer(options);
+        }
+        
+        // Set up event listeners
+        document.getElementById('youtube-play-pause').addEventListener('click', () => {
+          this.togglePlayback();
+        });
+        
+        document.getElementById('youtube-volume').addEventListener('input', (e) => {
+          if (this.player && typeof this.player.setVolume === 'function') {
+            this.player.setVolume(parseInt(e.target.value));
+          }
+        });
+      },
+      
+      _initPlayer: function(options) {
+        try {
+          console.log('Initializing YouTube player with video ID:', this.videoId);
+          
+          this.player = new YT.Player('youtube-iframe', {
+            height: '1',
+            width: '1',
+            videoId: this.videoId,
+            playerVars: {
+              autoplay: options.autoplay ? 1 : 0,
+              loop: options.loop ? 1 : 0,
+              playlist: options.loop ? this.videoId : '',
+              controls: 0,
+              showinfo: 0,
+              modestbranding: 1,
+              iv_load_policy: 3,
+              rel: 0
+            },
+            events: {
+              'onReady': (event) => {
+                console.log('YouTube player ready');
+                // Set initial volume
+                const volumeSlider = document.getElementById('youtube-volume');
+                if (volumeSlider && typeof event.target.setVolume === 'function') {
+                  event.target.setVolume(parseInt(volumeSlider.value));
+                }
+                
+                // Auto-play if specified
+                if (options.autoplay && typeof event.target.playVideo === 'function') {
+                  event.target.playVideo();
+                  this.isPlaying = true;
+                  document.getElementById('youtube-play-pause').textContent = 'Pause';
+                }
+                
+                // Get video title
+                if (typeof event.target.getVideoData === 'function') {
+                  const videoData = event.target.getVideoData();
+                  const titleElement = document.getElementById('youtube-title');
+                  if (titleElement && videoData && videoData.title) {
+                    titleElement.textContent = videoData.title;
+                  }
+                }
+              },
+              'onStateChange': (event) => {
+                console.log('YouTube player state changed:', event.data);
+                // Update play/pause button based on player state
+                if (event.data === YT.PlayerState.PLAYING) {
+                  this.isPlaying = true;
+                  document.getElementById('youtube-play-pause').textContent = 'Pause';
+                } else if (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) {
+                  this.isPlaying = false;
+                  document.getElementById('youtube-play-pause').textContent = 'Play';
+                }
+              },
+              'onError': (event) => {
+                console.error('YouTube player error:', event.data);
+              }
+            }
+          });
+          
+          console.log('YouTube player object created:', this.player);
+        } catch (error) {
+          console.error('Error initializing YouTube player:', error);
+        }
+      },
+      
+      togglePlayback: function() {
+        if (!this.player) {
+          console.error('YouTube player not initialized');
+          return;
+        }
+        
+        try {
+          if (this.isPlaying) {
+            if (typeof this.player.pauseVideo === 'function') {
+              this.player.pauseVideo();
+              this.isPlaying = false;
+              document.getElementById('youtube-play-pause').textContent = 'Play';
+            } else {
+              console.error('pauseVideo method not available on player object');
+            }
+          } else {
+            if (typeof this.player.playVideo === 'function') {
+              this.player.playVideo();
+              this.isPlaying = true;
+              document.getElementById('youtube-play-pause').textContent = 'Pause';
+            } else {
+              console.error('playVideo method not available on player object');
+            }
+          }
+        } catch (error) {
+          console.error('Error toggling YouTube playback:', error);
+        }
+      }
+    };
+    
+    // Add event listener for the YouTube button
+    document.getElementById('load-youtube').addEventListener('click', function() {
+      // Example YouTube video ID - replace with your desired video
+      const videoId = 'QGe0wLjJDqA'; // Mars Ambience Sound
+      
+      // Load the YouTube audio with options
+      youtubePlayer.loadVideo(videoId, {
+        autoplay: true,
+        loop: true,
+        volume: 30
+      });
+    });
+  </script>
 </body>
 </html>
