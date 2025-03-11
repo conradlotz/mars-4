@@ -2170,1841 +2170,6 @@ function darkenColor(color, percent) {
   return `#${(1 << 24 | R << 16 | G << 8 | B).toString(16).slice(1)}`;
 }
 
-// Initialize scene elements in the correct order
-function initializeScene() {
-  console.log("Initializing scene elements...");
-  
-  // Create the HUD
-  createHUD();
-  console.log("HUD created");
-  
-  // Create the skybox first and make it globally accessible
-  window.spaceSkybox = createSpaceSkybox();
-  scene.add(window.spaceSkybox);
-  console.log("Skybox added to scene");
-  
-  // Initialize meteor system
-  window.meteorSystem = new MeteorSystem(5000, 25);
-  console.log("Meteor system initialized");
-  
-  // Initialize the terrain system
-  terrainSystem.init();
-  console.log("Terrain system initialized");
-  
-  // Create the sun directional light
-  sun = new THREE.DirectionalLight(0xffffff, 1);
-  sun.position.set(10, 100, 10);
-  scene.add(sun);
-  console.log("Sun light added to scene");
-  
-  // Create a visible sun sphere
-  const sunGeometry = new THREE.SphereGeometry(50, 32, 32);
-  const sunMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffee66,
-    transparent: true,
-    opacity: 0.9
-  });
-  sunSphere = new THREE.Mesh(sunGeometry, sunMaterial);
-  sunSphere.position.set(500, 300, -1000);
-  scene.add(sunSphere);
-  
-  // Add a glow effect to the sun
-  const sunGlowGeometry = new THREE.SphereGeometry(60, 32, 32);
-  const sunGlowMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffdd44,
-    transparent: true,
-    opacity: 0.4,
-    side: THREE.BackSide
-  });
-  const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
-  sunSphere.add(sunGlow);
-  
-  console.log("Sun sphere added to scene");
-  
-  // Initialize sound system
-  soundSystem.initialize();
-  console.log("Sound system initialized");
-  
-  // Initialize UI elements including realistic mode toggle
-  initializeUI();
-  console.log("UI elements initialized");
-  
-  // Start the animation loop with timestamp - ONLY CALL THIS ONCE
-  console.log("Starting animation loop");
-  animate(0);
-}
-
-// Add a day/night toggle and cycle
-let isDaytime = true; // Ensure this is true by default
-console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
-
-function startDayNightCycle() {
-  // Use a 1-minute cycle duration
-  setInterval(() => {
-    toggleDayNight();
-  }, 30000); // 30 seconds for each cycle
-  
-  // Add a manual toggle button for testing
-  const toggleButton = document.createElement('button');
-  toggleButton.textContent = isDaytime ? 'Switch to Night' : 'Switch to Day';
-  toggleButton.style.position = 'absolute';
-  toggleButton.style.bottom = '20px';
-  toggleButton.style.right = '20px';
-  toggleButton.style.padding = '10px';
-  toggleButton.style.backgroundColor = '#444';
-  toggleButton.style.color = 'white';
-  toggleButton.style.border = 'none';
-  toggleButton.style.borderRadius = '5px';
-  toggleButton.style.cursor = 'pointer';
-  toggleButton.style.zIndex = '1000';
-  
-  toggleButton.addEventListener('click', () => {
-    // Only toggle if not already transitioning
-    if (!isTransitioning) {
-      toggleDayNight();
-      toggleButton.textContent = isDaytime ? 'Switch to Night' : 'Switch to Day';
-    }
-  });
-  
-  document.body.appendChild(toggleButton);
-}
-
-function toggleDayNight() {
-  console.log("Before toggle - isDaytime:", isDaytime);
-  isDaytime = !isDaytime;
-  console.log("After toggle - isDaytime:", isDaytime);
-  addRoverHeadlights();
-  updateSkyAppearance();
-}
-
-// Add a function to force day mode
-function forceDayMode() {
-  console.log("Forcing day mode...");
-  isDaytime = true;
-  isRealisticMode = true;
-  console.log("isDaytime set to:", isDaytime);
-  console.log("isRealisticMode set to:", isRealisticMode);
-  updateSkyAppearance();
-  console.log("Day mode forced!");
-}
-
-// Expose the function globally for debugging
-window.forceDayMode = forceDayMode;
-
-// Call forceDayMode after a short delay to ensure everything is initialized
-setTimeout(() => {
-  console.log("Auto-forcing day mode after initialization");
-  forceDayMode();
-}, 2000);
-
-function updateSkyAppearance(transitionProgress = null) {
-  console.log("Updating sky appearance - isDaytime:", isDaytime);
-  
-  // Define sunSphere if it is not already defined
-  if (typeof sunSphere === 'undefined') {
-    console.log('Defining sunSphere...');
-    sunSphere = new THREE.Mesh(
-      new THREE.SphereGeometry(50, 32, 32),
-      new THREE.MeshBasicMaterial({ color: 0xffffff })
-    );
-    sunSphere.position.set(500, 300, -1000);
-    scene.add(sunSphere);
-  }
-  
-  // If we're not transitioning, use the current state
-  const isDay = transitionProgress === null ? (isDaytime ? 1 : 0) : 
-                (transitionStartState === 'day' ? 1 - transitionProgress : transitionProgress);
-  console.log("isDay value:", isDay);
-  
-  // Create or update fog based on time of day
-  // Use more realistic Mars fog colors when in realistic mode
-  const dayFog = isRealisticMode 
-    ? new THREE.Fog(0xd8a282, 200, 2000) // Realistic dusty orange-tan fog based on NASA imagery
-    : new THREE.Fog(0xd09060, 200, 2000); // Original stylized fog
-    
-  const nightFog = new THREE.Fog(0xb77c5a, 500, 5000);
-  
-  if (transitionProgress === null) {
-    // No transition, just set the fog directly
-    scene.fog = isDaytime ? dayFog : nightFog;
-    console.log("Setting fog for:", isDaytime ? "DAY" : "NIGHT");
-  } else {
-    // Interpolate fog color and near/far values
-    const fogColor = new THREE.Color();
-    fogColor.r = dayFog.color.r * isDay + nightFog.color.r * (1 - isDay);
-    fogColor.g = dayFog.color.g * isDay + nightFog.color.g * (1 - isDay);
-    fogColor.b = dayFog.color.b * isDay + nightFog.color.b * (1 - isDay);
-    
-    const fogNear = dayFog.near * isDay + nightFog.near * (1 - isDay);
-    const fogFar = dayFog.far * isDay + nightFog.far * (1 - isDay);
-    
-    scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
-    console.log("Setting transitional fog - isDay:", isDay);
-  }
-  
-  // Handle skybox and background
-  if (transitionProgress !== null) {
-    // During transition, create a blended sky texture
-    if (isDay > 0.01 && isDay < 0.99) {
-      // Create a blended sky texture during transition
-      console.log("Creating blended sky texture - isDay:", isDay);
-      scene.background = createBlendedSkyTexture(isDay);
-    }
-  } else {
-    // Not transitioning, use appropriate sky
-    if (isDaytime) {
-      // Use realistic or stylized sky texture based on mode
-      console.log("Setting DAY sky texture - isRealisticMode:", isRealisticMode);
-      try {
-        const skyTexture = isRealisticMode ? createRealisticMarsDaySkyTexture() : createMarsDaySkyTexture();
-        scene.background = skyTexture;
-        console.log("Day sky texture created and set successfully");
-      } catch (error) {
-        console.error("Error creating day sky texture:", error);
-      }
-      
-      // Remove night skybox if it exists
-      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && scene.getObjectById(spaceSkybox.id)) {
-        console.log("Removing night skybox");
-        scene.remove(spaceSkybox);
-      }
-    } else {
-      // Add night skybox if not already in scene
-      console.log("Setting NIGHT sky");
-      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && !scene.getObjectById(spaceSkybox.id)) {
-        console.log("Adding night skybox to scene");
-        
-        scene.add(spaceSkybox);
-      }
-    }
-  }
-  
-  // Adjust lighting based on time of day or transition progress
-  // Use more realistic lighting values when in realistic mode
-  const daySunIntensity = isRealisticMode ? 0.8 : 0.9; // Slightly dimmer in realistic mode (Mars is further from sun)
-  const nightSunIntensity = 0.3;
-  const dayAmbientIntensity = isRealisticMode ? 0.6 : 0.7; // Slightly dimmer ambient in realistic mode
-  const nightAmbientIntensity = 0.4;
-  
-  // Interpolate light intensities
-  sunLight.intensity = daySunIntensity * isDay + nightSunIntensity * (1 - isDay);
-  ambientLight.intensity = dayAmbientIntensity * isDay + nightAmbientIntensity * (1 - isDay);
-  
-  console.log("Sun light intensity set to:", sunLight.intensity);
-  console.log("Ambient light intensity set to:", ambientLight.intensity);
-  
-  // Interpolate sun position
-  const daySunPosition = new THREE.Vector3(10, 100, 10);
-  const nightSunPosition = new THREE.Vector3(-10, -5, 10);
-  sunLight.position.set(
-    daySunPosition.x * isDay + nightSunPosition.x * (1 - isDay),
-    daySunPosition.y * isDay + nightSunPosition.y * (1 - isDay),
-    daySunPosition.z * isDay + nightSunPosition.z * (1 - isDay)
-  );
-  
-  // Interpolate ambient light color
-  // Use more realistic Mars ambient light color in realistic mode
-  const dayAmbientColor = isRealisticMode 
-    ? new THREE.Color(0xd8a282) // Realistic dusty orange ambient light
-    : new THREE.Color(0xff9966); // Original stylized ambient light
-  const nightAmbientColor = new THREE.Color(0xff8866);
-  ambientLight.color.set(
-    dayAmbientColor.r * isDay + nightAmbientColor.r * (1 - isDay),
-    dayAmbientColor.g * isDay + nightAmbientColor.g * (1 - isDay),
-    dayAmbientColor.b * isDay + nightAmbientColor.b * (1 - isDay)
-  );
-  
-  // Handle sun visibility with opacity for smooth transition
-  if (typeof sunSphere !== 'undefined' && sunSphere) {
-    sunSphere.visible = true;
-    sunSphere.material.opacity = isDay * 0.9; // Fade out when transitioning to night
-    
-    // Also move the sun position during transition
-    const daySunSpherePosition = new THREE.Vector3(500, 300, -1000);
-    const nightSunSpherePosition = new THREE.Vector3(500, -300, -1000);
-    sunSphere.position.set(
-      daySunSpherePosition.x * isDay + nightSunSpherePosition.x * (1 - isDay),
-      daySunSpherePosition.y * isDay + nightSunSpherePosition.y * (1 - isDay),
-      daySunSpherePosition.z * isDay + nightSunSpherePosition.z * (1 - isDay)
-    );
-    
-    // Adjust sun color in realistic mode
-    if (isRealisticMode && isDay > 0.5) {
-      // More pale, dusty sun appearance as seen through Mars atmosphere
-      sunSphere.material.color.setHex(0xfff0e0);
-    } else {
-      // Original sun color
-      sunSphere.material.color.setHex(0xffffff);
-    }
-  }
-  
-  // Handle night skybox opacity for smooth transition
-  if (typeof spaceSkybox !== 'undefined' && spaceSkybox) {
-    if (isDay < 0.5) {
-      // Show night skybox when transitioning to night
-      if (!scene.getObjectById(spaceSkybox.id)) {
-        scene.add(spaceSkybox);
-      }
-      // Set opacity based on transition
-      spaceSkybox.traverse(obj => {
-        if (obj.isMesh && obj.material) {
-          obj.material.transparent = true;
-          obj.material.opacity = 1 - isDay * 2; // Fade in as day transitions to night
-        }
-      });
-    } else if (isDay >= 0.5 && scene.getObjectById(spaceSkybox.id)) {
-      // Fade out night skybox when transitioning to day
-      spaceSkybox.traverse(obj => {
-        if (obj.isMesh && obj.material) {
-          obj.material.transparent = true;
-          obj.material.opacity = (1 - isDay) * 2; // Fade out as night transitions to day
-        }
-      });
-    }
-  }
-}
-
-// Start the day/night cycle
-startDayNightCycle();
-
-// Add a keypress handler for toggling
-document.addEventListener('keydown', function(event) {
-  if (event.key === 'l' || event.key === 'L') { // 'L' for Light cycle
-    toggleDayNight();
-  }
-});
-
-function createMarsDaySkyTexture() {
-  const canvas = document.createElement('canvas');
-  const size = 2048;
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext('2d');
-  
-  // Create gradient from horizon to zenith
-  const gradient = context.createLinearGradient(0, size, 0, 0);
-  gradient.addColorStop(0, '#c27e54'); // Dusty orange-brown at horizon
-  gradient.addColorStop(0.5, '#d7a28b'); // Pinkish in middle
-  gradient.addColorStop(1, '#e6b499'); // Lighter at zenith
-  
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, size, size);
-  
-  // Add atmospheric haze/dust
-  context.fillStyle = 'rgba(210, 170, 130, 0.2)';
-  for (let i = 0; i < 100; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size * 0.6 + size * 0.4; // More dust near horizon
-    const size = Math.random() * 100 + 50;
-    context.beginPath();
-    context.arc(x, y, size, 0, Math.PI * 2);
-    context.fill();
-  }
-  
-  // Add subtle clouds
-  context.fillStyle = 'rgba(230, 200, 180, 0.15)';
-  for (let i = 0; i < 20; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size * 0.3 + size * 0.2; // Clouds in middle of sky
-    const width = Math.random() * 300 + 200;
-    const height = Math.random() * 100 + 50;
-    
-    // Draw cloud as a series of circles for a fluffy appearance
-    for (let j = 0; j < 8; j++) {
-      const cloudX = x + (Math.random() - 0.5) * width * 0.8;
-      const cloudY = y + (Math.random() - 0.5) * height * 0.8;
-      const cloudSize = Math.random() * 80 + 40;
-      context.beginPath();
-      context.arc(cloudX, cloudY, cloudSize, 0, Math.PI * 2);
-      context.fill();
-    }
-  }
-  
-  // Create texture from canvas
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.mapping = THREE.EquirectangularReflectionMapping;
-  
-  return texture;
-}
-
-// Run the initialization in the correct order
-initializeScene();
-
-// Initialize the camera mode toggle
-document.addEventListener('keydown', function(event) {
-  if (event.key === 'c' || event.key === 'C') {
-    toggleCameraMode();
-  }
-});
-
-// Resize Window
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
-
-function initializeCamera() {
-    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
-    
-    // Adjust initial camera position to be higher and further back
-    camera.position.set(0, 15, 55); // Increased height and distance
-    
-    // Tilt the camera down slightly to see the rover and the skyline
-    camera.rotation.x = -0.2; // Add a slight downward tilt
-    
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.screenSpacePanning = false;
-    controls.minDistance = 1;
-    controls.maxDistance = 500;
-    controls.maxPolarAngle = Math.PI / 1.5; // Allow more upward view for the skyline
-}
-
-// Find where the Mars terrain material is defined and modify it
-function createMarsEnvironment() {
-    // ... existing code ...
-    
-    // If Mars terrain uses a MeshStandardMaterial or similar
-    const marsMaterial = new THREE.MeshStandardMaterial({
-        map: marsTexture,
-        normalMap: marsNormalMap,
-        roughnessMap: marsRoughnessMap,
-        // Reduce the color brightness by making it darker
-        color: new THREE.Color(0xaa5533), // Darker reddish-brown
-        // Reduce metalness if it's too reflective
-        metalness: 0.3, 
-        // Increase roughness to reduce specular highlights
-        roughness: 1.5
-    });
-    
-    // ... existing code ...
-}
-
-// Adjust lighting intensity
-function setupLighting() {
-    // ... existing code ...
-    
-    // Reduce the intensity of any sun/directional lights
-    sunLight.intensity = 0.8; // Reduced from whatever value it was (typically 1.0)
-    
-    // If there's ambient light, reduce that too
-    if (ambientLight) {
-        ambientLight.intensity = 0.3; // Reduced ambient light
-    }
-    
-    // ... existing code ...
-}
-
-// ===== MARS EXPLORER GAME =====
-// Create a more visible game interface
-window.MarsExplorer = {
-  initialized: false,
-  gameState: {
-    score: 0,
-    fuel: 100,
-    samplesCollected: 0,
-    missionComplete: false,
-    gameOver: false,
-    gameStarted: false
-  },
-  controls: {
-    forward: false,
-    backward: false,
-    left: false,
-    right: false,
-    speed: 0,
-    rotationSpeed: 0,
-    maxSpeed: 0.3,
-    acceleration: 0.01,
-    deceleration: 0.005,
-    maxRotationSpeed: 0.03
-  },
-  rover: null,
-  wheels: [],
-  samples: [],
-  hudElements: null,
-  
-  // Initialize the game
-  init: function() {
-    console.log("Initializing Mars Explorer game...");
-    
-    // Create start screen
-    this.createStartScreen();
-    
-    // Set up key listeners
-    this.setupControls();
-    
-    // Create game objects
-    this.createRover();
-    this.createSamples(10);
-    this.createHUD();
-    
-    // Start game loop
-    this.initialized = true;
-    this.gameLoop();
-    
-    console.log("Mars Explorer initialized with", this.samples.length, "samples");
-  },
-  
-  // Create start screen with instructions
-  createStartScreen: function() {
-    const startScreen = document.createElement('div');
-    startScreen.id = 'mars-explorer-start';
-    startScreen.style.position = 'absolute';
-    startScreen.style.top = '0';
-    startScreen.style.left = '0';
-    startScreen.style.width = '100%';
-    startScreen.style.height = '100%';
-    startScreen.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-    startScreen.style.color = 'white';
-    startScreen.style.display = 'flex';
-    startScreen.style.flexDirection = 'column';
-    startScreen.style.justifyContent = 'center';
-    startScreen.style.alignItems = 'center';
-    startScreen.style.zIndex = '1000';
-    startScreen.style.fontFamily = 'Arial, sans-serif';
-    
-    const title = document.createElement('h1');
-    title.textContent = 'MARS EXPLORER';
-    title.style.fontSize = '48px';
-    title.style.marginBottom = '20px';
-    title.style.color = '#ff6b35';
-    startScreen.appendChild(title);
-    
-    const instructions = document.createElement('div');
-    instructions.innerHTML = `
-      <p style="font-size: 24px; margin-bottom: 30px;">Explore Mars and collect all samples before your fuel runs out!</p>
-      <div style="background-color: rgba(0,0,0,0.5); padding: 20px; border-radius: 10px; margin-bottom: 30px;">
-        <h2 style="margin-top: 0;">CONTROLS:</h2>
-        <p><strong>W</strong> - Move Forward</p>
-        <p><strong>S</strong> - Move Backward</p>
-        <p><strong>A</strong> - Turn Left</p>
-        <p><strong>D</strong> - Turn Right</p>
-        <p><strong>R</strong> - Restart Game</p>
-      </div>
-    `;
-    startScreen.appendChild(instructions);
-    
-    const startButton = document.createElement('button');
-    startButton.textContent = 'START MISSION';
-    startButton.style.padding = '15px 30px';
-    startButton.style.fontSize = '24px';
-    startButton.style.backgroundColor = '#22ffaa';
-    startButton.style.border = 'none';
-    startButton.style.borderRadius = '5px';
-    startButton.style.cursor = 'pointer';
-    startButton.onclick = () => {
-      startScreen.style.display = 'none';
-      this.gameState.gameStarted = true;
-    };
-    startScreen.appendChild(startButton);
-    
-    document.body.appendChild(startScreen);
-    this.startScreen = startScreen;
-  },
-  
-  // Set up keyboard controls
-  setupControls: function() {
-    const game = this;
-    
-    document.addEventListener('keydown', function(e) {
-      if (!game.gameState.gameStarted) {
-        if (e.key === 'Enter' || e.key === ' ') {
-          game.startScreen.style.display = 'none';
-          game.gameState.gameStarted = true;
-        }
-        return;
-      }
-      
-      switch(e.key.toLowerCase()) {
-        case 'w': game.controls.forward = true; break;
-        case 's': game.controls.backward = true; break;
-        case 'a': game.controls.left = true; break;
-        case 'd': game.controls.right = true; break;
-        case 'r': game.restartGame(); break;
-      }
-    });
-    
-    document.addEventListener('keyup', function(e) {
-      switch(e.key.toLowerCase()) {
-        case 'w': game.controls.forward = false; break;
-        case 's': game.controls.backward = false; break;
-        case 'a': game.controls.left = false; break;
-        case 'd': game.controls.right = false; break;
-      }
-    });
-  },
-  
-  // Create rover vehicle with more visible design
-  createRover: function() {
-    // Simple rover body
-    const bodyGeometry = new THREE.BoxGeometry(2, 0.7, 3);
-    const bodyMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0xCCCCCC,
-      emissive: 0x333333,
-      emissiveIntensity: 0.2
-    });
-    const roverBody = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    roverBody.position.y = 1.2;
-    
-    // Create rover wheels
-    const wheelGeometry = new THREE.CylinderGeometry(0.5, 0.5, 0.3, 16);
-    const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x333333 });
-    
-    const wheels = [];
-    const wheelPositions = [
-      [-0.8, 0.5, 1],  // front left
-      [0.8, 0.5, 1],   // front right
-      [-0.8, 0.5, -1], // back left
-      [0.8, 0.5, -1]   // back right
-    ];
-    
-    wheelPositions.forEach(pos => {
-      const wheel = new THREE.Mesh(wheelGeometry, wheelMaterial);
-      wheel.position.set(...pos);
-      wheel.rotation.z = Math.PI / 2;
-      roverBody.add(wheel);
-      wheels.push(wheel);
-    });
-    
-    // Add solar panel with glow
-    const panelGeometry = new THREE.BoxGeometry(1.8, 0.1, 1.8);
-    const panelMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0x0055ff,
-      emissive: 0x0033aa,
-      emissiveIntensity: 0.5
-    });
-    const panel = new THREE.Mesh(panelGeometry, panelMaterial);
-    panel.position.y = 0.5;
-    roverBody.add(panel);
-    
-    // Add antenna
-    const antennaGeometry = new THREE.CylinderGeometry(0.05, 0.05, 1.5, 8);
-    const antennaMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
-    const antenna = new THREE.Mesh(antennaGeometry, antennaMaterial);
-    antenna.position.set(0, 1, -1);
-    roverBody.add(antenna);
-    
-    // Add headlights
-    const headlightGeometry = new THREE.SphereGeometry(0.2, 16, 16);
-    const headlightMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0xffffaa,
-      emissive: 0xffffaa,
-      emissiveIntensity: 1
-    });
-    
-    const headlightPositions = [[-0.6, 0.2, 1.5], [0.6, 0.2, 1.5]];
-    headlightPositions.forEach(pos => {
-      const headlight = new THREE.Mesh(headlightGeometry, headlightMaterial);
-      headlight.position.set(...pos);
-      headlight.scale.set(1, 0.7, 1);
-      roverBody.add(headlight);
-      
-      // Add actual light source
-      const light = new THREE.PointLight(0xffffaa, 1, 20);
-      light.position.set(...pos);
-      roverBody.add(light);
-    });
-    
-    // Create full rover group
-    const rover = new THREE.Group();
-    rover.add(roverBody);
-    
-    // Set initial position
-    rover.position.set(0, 2, 0);
-    
-    // Add to scene
-    scene.add(rover);
-    
-    this.rover = rover;
-    this.wheels = wheels;
-  },
-  
-  // Create more visible collectible samples
-  createSamples: function(count) {
-    const terrainMeshes = [];
-    
-    // Find all mesh objects in the scene to check for terrain
-    scene.traverse(object => {
-      if (object.isMesh && object.geometry) {
-        terrainMeshes.push(object);
-      }
-    });
-    
-    if (terrainMeshes.length === 0) {
-      console.error("No terrain meshes found in scene");
-      return;
-    }
-    
-    // Use the first mesh as our terrain
-    const terrainMesh = terrainMeshes[0];
-    
-    for (let i = 0; i < count; i++) {
-      // Random position within terrain
-      const x = (Math.random() * 2 - 1) * terrainSize * 0.7;
-      const z = (Math.random() * 2 - 1) * terrainSize * 0.7;
-      
-      // Find height at this position
-      const heightRay = new THREE.Raycaster(
-        new THREE.Vector3(x, 100, z),
-        new THREE.Vector3(0, -1, 0)
-      );
-      
-      const intersects = heightRay.intersectObject(terrainMesh);
-      
-      if (intersects.length > 0) {
-        const y = intersects[0].point.y + 1;
-        
-        // Create sample group
-        const sampleGroup = new THREE.Group();
-        sampleGroup.position.set(x, y, z);
-        
-        // Create glowing crystal
-        const sampleGeometry = new THREE.OctahedronGeometry(0.5, 1);
-        const sampleMaterial = new THREE.MeshStandardMaterial({
-          color: 0x22ffaa,
-          emissive: 0x22ffaa,
-          emissiveIntensity: 1,
-    transparent: true,
-          opacity: 0.9
-        });
-        
-        const sample = new THREE.Mesh(sampleGeometry, sampleMaterial);
-        sampleGroup.add(sample);
-        
-        // Add point light
-        const light = new THREE.PointLight(0x22ffaa, 1, 10);
-        light.position.set(0, 0, 0);
-        sampleGroup.add(light);
-        
-        // Add marker beam
-        const beamGeometry = new THREE.CylinderGeometry(0.1, 0.1, 20, 8);
-        const beamMaterial = new THREE.MeshBasicMaterial({
-          color: 0x22ffaa,
-          transparent: true,
-          opacity: 0.3
-        });
-        const beam = new THREE.Mesh(beamGeometry, beamMaterial);
-        beam.position.y = 10;
-        sampleGroup.add(beam);
-        
-        // Add animation data
-        sampleGroup.userData.rotSpeed = 0.01 + Math.random() * 0.01;
-        sampleGroup.userData.floatSpeed = 0.005 + Math.random() * 0.005;
-        sampleGroup.userData.floatHeight = 0.5;
-        sampleGroup.userData.initialY = y;
-        sampleGroup.userData.collected = false;
-        
-        scene.add(sampleGroup);
-        this.samples.push(sampleGroup);
-      }
-    }
-  },
-  
-  // Create improved HUD
-  createHUD: function() {
-    // Create HUD container
-    const hudContainer = document.createElement('div');
-    hudContainer.id = 'mars-explorer-hud';
-    hudContainer.style.position = 'absolute';
-    hudContainer.style.top = '20px';
-    hudContainer.style.left = '20px';
-    hudContainer.style.color = 'white';
-    hudContainer.style.fontFamily = 'Arial, sans-serif';
-    hudContainer.style.textShadow = '2px 2px 4px rgba(0, 0, 0, 0.7)';
-    hudContainer.style.userSelect = 'none';
-    hudContainer.style.zIndex = '100';
-    
-    // Create fuel gauge
-    const fuelContainer = document.createElement('div');
-    fuelContainer.style.marginBottom = '15px';
-    
-    const fuelLabel = document.createElement('div');
-    fuelLabel.textContent = 'FUEL';
-    fuelLabel.style.fontSize = '16px';
-    fuelLabel.style.marginBottom = '5px';
-    fuelContainer.appendChild(fuelLabel);
-    
-    const fuelBarContainer = document.createElement('div');
-    fuelBarContainer.style.width = '200px';
-    fuelBarContainer.style.height = '20px';
-    fuelBarContainer.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-    fuelBarContainer.style.border = '2px solid white';
-    fuelBarContainer.style.borderRadius = '10px';
-    fuelBarContainer.style.overflow = 'hidden';
-    
-    const fuelBar = document.createElement('div');
-    fuelBar.style.width = '100%';
-    fuelBar.style.height = '100%';
-    fuelBar.style.backgroundColor = '#22ffaa';
-    fuelBar.style.transition = 'width 0.3s';
-    
-    fuelBarContainer.appendChild(fuelBar);
-    fuelContainer.appendChild(fuelBarContainer);
-    hudContainer.appendChild(fuelContainer);
-    
-    // Create samples counter
-    const samplesContainer = document.createElement('div');
-    samplesContainer.style.marginBottom = '15px';
-    
-    const samplesLabel = document.createElement('div');
-    samplesLabel.textContent = 'SAMPLES';
-    samplesLabel.style.fontSize = '16px';
-    samplesLabel.style.marginBottom = '5px';
-    samplesContainer.appendChild(samplesLabel);
-    
-    const samplesCounter = document.createElement('div');
-    samplesCounter.style.fontSize = '24px';
-    samplesCounter.style.fontWeight = 'bold';
-    samplesContainer.appendChild(samplesCounter);
-    
-    hudContainer.appendChild(samplesContainer);
-    
-    // Create message area
-    const messageArea = document.createElement('div');
-    messageArea.style.fontSize = '24px';
-    messageArea.style.fontWeight = 'bold';
-    messageArea.style.color = '#22ffaa';
-    messageArea.style.marginTop = '20px';
-    messageArea.style.padding = '10px';
-    messageArea.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-    messageArea.style.borderRadius = '5px';
-    messageArea.style.display = 'none';
-    hudContainer.appendChild(messageArea);
-    
-    document.body.appendChild(hudContainer);
-    
-    this.hudElements = {
-      container: hudContainer,
-      fuelBar: fuelBar,
-      samplesCounter: samplesCounter,
-      messageArea: messageArea,
-      
-      updateHUD: () => {
-        // Update fuel bar
-        fuelBar.style.width = this.gameState.fuel + '%';
-        
-        // Change color based on fuel level
-        if (this.gameState.fuel > 60) {
-          fuelBar.style.backgroundColor = '#22ffaa';
-        } else if (this.gameState.fuel > 30) {
-          fuelBar.style.backgroundColor = '#ffaa22';
-        } else {
-          fuelBar.style.backgroundColor = '#ff4422';
-        }
-        
-        // Update samples counter
-        samplesCounter.textContent = this.gameState.samplesCollected + ' / ' + this.samples.length;
-        
-        // Show messages
-        if (this.gameState.missionComplete) {
-          messageArea.textContent = 'MISSION COMPLETE! Press R to restart';
-          messageArea.style.display = 'block';
-          messageArea.style.backgroundColor = 'rgba(34, 255, 170, 0.5)';
-        } else if (this.gameState.gameOver) {
-          messageArea.textContent = 'OUT OF FUEL! Press R to restart';
-          messageArea.style.display = 'block';
-          messageArea.style.backgroundColor = 'rgba(255, 68, 34, 0.5)';
-        } else {
-          messageArea.style.display = 'none';
-        }
-      }
-    };
-    
-    // Initial update
-    this.hudElements.updateHUD();
-  },
-  
-  // Update game state
-  update: function() {
-    if (!this.initialized || !this.gameState.gameStarted) return;
-    if (this.gameState.gameOver || this.gameState.missionComplete) return;
-    
-    // Update speed based on controls
-    if (this.controls.forward) {
-      this.controls.speed = Math.min(this.controls.speed + this.controls.acceleration, 
-                                 this.controls.maxSpeed);
-      this.gameState.fuel -= 0.05;
-    } else if (this.controls.backward) {
-      this.controls.speed = Math.max(this.controls.speed - this.controls.acceleration, 
-                                -this.controls.maxSpeed);
-      this.gameState.fuel -= 0.05;
-    } else {
-      // Apply deceleration
-      if (this.controls.speed > 0) {
-        this.controls.speed = Math.max(0, this.controls.speed - this.controls.deceleration);
-      } else if (this.controls.speed < 0) {
-        this.controls.speed = Math.min(0, this.controls.speed + this.controls.deceleration);
-      }
-    }
-    
-    // Update rotation based on controls
-    if (this.controls.left) {
-      this.controls.rotationSpeed = Math.min(this.controls.rotationSpeed + this.controls.acceleration * 0.5, 
-                                        this.controls.maxRotationSpeed);
-      this.gameState.fuel -= 0.01;
-    } else if (this.controls.right) {
-      this.controls.rotationSpeed = Math.max(this.controls.rotationSpeed - this.controls.acceleration * 0.5, 
-                                       -this.controls.maxRotationSpeed);
-      this.gameState.fuel -= 0.01;
-    } else {
-      // Gradually reduce rotation
-      if (this.controls.rotationSpeed > 0) {
-        this.controls.rotationSpeed = Math.max(0, this.controls.rotationSpeed - this.controls.deceleration * 0.5);
-      } else if (this.controls.rotationSpeed < 0) {
-        this.controls.rotationSpeed = Math.min(0, this.controls.rotationSpeed + this.controls.deceleration * 0.5);
-      }
-    }
-    
-    // Apply rotation
-    this.rover.rotation.y += this.controls.rotationSpeed;
-    
-    // Calculate movement direction based on rover's orientation
-    const direction = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), 
-                                                               this.rover.rotation.y);
-    
-    // Move rover
-    this.rover.position.x += direction.x * this.controls.speed;
-    this.rover.position.z += direction.z * this.controls.speed;
-    
-    // Animate wheels
-    this.wheels.forEach(wheel => {
-      wheel.rotation.x += this.controls.speed * 0.3;
-    });
-    
-    // Find terrain mesh
-    let terrainMesh = null;
-    scene.traverse(object => {
-      if (!terrainMesh && object.isMesh && object.geometry) {
-        terrainMesh = object;
-      }
-    });
-    
-    if (terrainMesh) {
-      // Raycasting for height adjustment
-      const raycaster = new THREE.Raycaster(
-        new THREE.Vector3(this.rover.position.x, 100, this.rover.position.z),
-        new THREE.Vector3(0, -1, 0)
-      );
-      
-      const intersects = raycaster.intersectObject(terrainMesh);
-      if (intersects.length > 0) {
-        this.rover.position.y = intersects[0].point.y + 1.2;
-        
-        // Add tire tracks if moving
-        if (Math.abs(this.controls.speed) > 0.01) {
-          try {
-            // Try to call addTireTrack if it exists
-            if (typeof addTireTrack === 'function') {
-              const wheelSpacing = 1.6;
-              addTireTrack(
-                this.rover.position.x - (direction.z * wheelSpacing/2),
-                this.rover.position.z + (direction.x * wheelSpacing/2),
-                1, 0.2
-              );
-              addTireTrack(
-                this.rover.position.x + (direction.z * wheelSpacing/2),
-                this.rover.position.z - (direction.x * wheelSpacing/2),
-                1, 0.2
-              );
-            }
-          } catch (e) {
-            // Ignore errors if function doesn't exist
-          }
-        }
-      }
-    }
-    
-    // Check for sample collection
-    this.samples.forEach(sample => {
-      if (!sample.userData.collected) {
-        const distance = this.rover.position.distanceTo(sample.position);
-        if (distance < 2) {
-          sample.userData.collected = true;
-          sample.visible = false;
-          this.gameState.samplesCollected++;
-          
-          // Play collection sound
-          try {
-            const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2019/03/22/sfx-2019-03-22-18-50-42-371.mp3');
-            audio.volume = 0.3;
-            audio.play().catch(e => console.log("Audio play failed:", e));
-          } catch (e) {
-            console.log("Audio play failed:", e);
-          }
-        }
-      }
-    });
-    
-    // Check for mission complete
-    if (this.gameState.samplesCollected === this.samples.length && this.samples.length > 0) {
-      this.gameState.missionComplete = true;
-    }
-    
-    // Check for game over (out of fuel)
-    if (this.gameState.fuel <= 0) {
-      this.gameState.fuel = 0;
-      this.gameState.gameOver = true;
-    }
-    
-    // Update HUD
-    this.hudElements.updateHUD();
-    
-    // Update camera to follow rover
-    camera.position.x = this.rover.position.x - direction.x * 10;
-    camera.position.z = this.rover.position.z - direction.z * 10;
-    camera.position.y = this.rover.position.y + 5;
-    camera.lookAt(this.rover.position);
-  },
-  
-  // Animate samples
-  animateSamples: function() {
-    if (!this.initialized) return;
-    
-    this.samples.forEach(sample => {
-      if (!sample.userData.collected) {
-        sample.rotation.y += sample.userData.rotSpeed;
-        sample.position.y = sample.userData.initialY + 
-          Math.sin(Date.now() * sample.userData.floatSpeed) * sample.userData.floatHeight;
-      }
-    });
-  },
-  
-  discoverPOI(poi) {
-    poi.discovered = true;
-    
-    // Make marker visible
-    if (poi.model) {
-      poi.model.material.opacity = 0.6;
-    }
-    
-    // Show discovery notification
-    const notification = document.createElement('div');
-    notification.className = 'mission-notification';
-    notification.innerHTML = `<h3>New Discovery: ${poi.name}</h3>
-                            <p>${poi.description}</p>`;
-    notification.style.padding = '20px';
-    notification.style.width = '300px';
-    document.body.appendChild(notification);
-    
-    setTimeout(() => {
-      notification.classList.add('fade-out');
-      setTimeout(() => notification.remove(), 1000);
-    }, 6000);
-    
-    // Add to discoveries list
-    this.updateDiscoveriesList(poi);
-  },
-  
-  updateDiscoveriesList(poi) {
-    let discoveriesList = document.getElementById('discoveries-list');
-    
-    if (!discoveriesList) {
-      // Create discoveries panel if it doesn't exist
-      const panel = document.createElement('div');
-      panel.id = 'discoveries-panel';
-      panel.innerHTML = `
-        <h3>Discoveries</h3>
-        <ul id="discoveries-list"></ul>
-      `;
-      
-      panel.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        background-color: rgba(20, 20, 30, 0.8);
-        color: white;
-        padding: 15px;
-        border-radius: 10px;
-        font-family: Arial, sans-serif;
-        max-width: 250px;
-      `;
-      
-      document.body.appendChild(panel);
-      discoveriesList = document.getElementById('discoveries-list');
-    }
-    
-    // Add discovery to list
-    const listItem = document.createElement('li');
-    listItem.textContent = poi.name;
-    discoveriesList.appendChild(listItem);
-  }
-};
-
-// Rover damage and obstacle system
-const damageSystem = {
-  maxHealth: 100,
-  currentHealth: 100,
-  repairRate: 0.01,
-  
-  // Create dangerous obstacles
-  createObstacles() {
-    this.obstacles = [];
-    
-    // Create sharp rocks that can damage the rover
-    for (let i = 0; i < 50; i++) {
-      const x = (Math.random() - 0.5) * 1000;
-      const z = (Math.random() - 0.5) * 1000;
-      
-      const rockGeometry = new THREE.ConeGeometry(2, 4, 5);
-      const rockMaterial = new THREE.MeshStandardMaterial({
-        color: 0x665544,
-        roughness: 0.9,
-        metalness: 0.1
-      });
-      
-      const rock = new THREE.Mesh(rockGeometry, rockMaterial);
-      rock.position.set(x, 0, z);
-      rock.rotation.x = Math.PI; // Point upward
-      
-      // Position on terrain
-      const raycaster = new THREE.Raycaster();
-      raycaster.set(
-        new THREE.Vector3(x, 20, z),
-        new THREE.Vector3(0, -1, 0)
-      );
-      
-      const intersects = raycaster.intersectObject(marsSurface);
-      if (intersects.length > 0) {
-        rock.position.y = intersects[0].point.y;
-      }
-      
-      scene.add(rock);
-      
-      this.obstacles.push({
-        type: 'sharp_rock',
-        position: {x, z},
-        radius: 4,
-        damage: 10,
-        model: rock
-      });
-    }
-    
-    // Create sand pits that slow the rover
-    for (let i = 0; i < 30; i++) {
-      const x = (Math.random() - 0.5) * 1000;
-      const z = (Math.random() - 0.5) * 1000;
-      const radius = Math.random() * 15 + 10;
-      
-      const sandGeometry = new THREE.CircleGeometry(radius, 32);
-      sandGeometry.rotateX(-Math.PI / 2);
-      
-      const sandMaterial = new THREE.MeshStandardMaterial({
-        color: 0xddbb88,
-        roughness: 1.0,
-        metalness: 0.0
-      });
-      
-      const sandPit = new THREE.Mesh(sandGeometry, sandMaterial);
-      sandPit.position.set(x, 0.1, z);
-      
-      // Position on terrain
-      const raycaster = new THREE.Raycaster();
-      raycaster.set(
-        new THREE.Vector3(x, 20, z),
-        new THREE.Vector3(0, -1, 0)
-      );
-      
-      const intersects = raycaster.intersectObject(marsSurface);
-      if (intersects.length > 0) {
-        sandPit.position.y = intersects[0].point.y + 0.1;
-      }
-      
-      scene.add(sandPit);
-      
-      this.obstacles.push({
-        type: 'sand_pit',
-        position: {x, z},
-        radius: radius,
-        slowFactor: 0.3,
-        model: sandPit
-      });
-    }
-  },
-  
-  checkCollisions(roverPosition, delta) {
-    let inSandPit = false;
-    let speedModifier = 1.0;
-    
-    this.obstacles.forEach(obstacle => {
-      const distance = Math.sqrt(
-        Math.pow(roverPosition.x - obstacle.position.x, 2) +
-        Math.pow(roverPosition.z - obstacle.position.z, 2)
-      );
-      
-      if (distance < obstacle.radius) {
-        if (obstacle.type === 'sharp_rock') {
-          // Damage the rover when hitting rocks
-          this.takeDamage(obstacle.damage * delta/1000);
-          
-          // Bounce effect
-          const angle = Math.atan2(
-            roverPosition.z - obstacle.position.z,
-            roverPosition.x - obstacle.position.x
-          );
-          
-          rover.position.x += Math.cos(angle) * 0.5;
-          rover.position.z += Math.sin(angle) * 0.5;
-          
-          // Visual feedback
-          if (obstacle.model) {
-            obstacle.model.material.emissive.set(0xff0000);
-            setTimeout(() => {
-              obstacle.model.material.emissive.set(0x000000);
-            }, 200);
-          }
-        }
-        else if (obstacle.type === 'sand_pit') {
-          // Slow down in sand
-          inSandPit = true;
-          speedModifier = Math.min(speedModifier, 1 - obstacle.slowFactor);
-          
-          // Sink effect - lower rover position slightly
-          rover.position.y -= 0.05 * delta/16.67;
-          
-          // Visual feedback - ripple effect in sand
-          if (!obstacle.rippleEffect) {
-            createSandRipple(obstacle.position.x, obstacle.position.z);
-            obstacle.rippleEffect = true;
-            
-            // Reset ripple effect after a delay
-            setTimeout(() => {
-              obstacle.rippleEffect = false;
-            }, 2000);
-          }
-        }
-      }
-    });
-    
-    return {inSandPit, speedModifier};
-  },
-  
-  takeDamage(amount) {
-    this.currentHealth = Math.max(0, this.currentHealth - amount);
-    
-    // Update UI
-    this.updateHealthIndicator();
-    
-    // Check for critical damage
-    if (this.currentHealth < 20) {
-      document.getElementById('damage-warning').classList.add('flashing');
-    }
-    
-    // Play damage sound
-    if (amount > 1) {
-      playSound('damage');
-    }
-    
-    // Visual effect on rover
-    if (amount > 5) {
-      createDamageEffect();
-    }
-  },
-  
-  repair(delta) {
-    // Auto-repair when not taking damage
-    if (this.currentHealth < this.maxHealth) {
-      this.currentHealth = Math.min(
-        this.maxHealth, 
-        this.currentHealth + this.repairRate * delta/16.67
-      );
-      this.updateHealthIndicator();
-      
-      // Remove warning when health improves
-      if (this.currentHealth >= 20) {
-        document.getElementById('damage-warning').classList.remove('flashing');
-      }
-    }
-  },
-  
-  updateHealthIndicator() {
-    const healthIndicator = document.getElementById('health-indicator');
-    if (healthIndicator) {
-      healthIndicator.style.width = `${this.currentHealth}%`;
-      
-      // Change color based on health level
-      if (this.currentHealth < 30) {
-        healthIndicator.style.backgroundColor = '#ff3333';
-      } else if (this.currentHealth < 60) {
-        healthIndicator.style.backgroundColor = '#ffaa33';
-      } else {
-        healthIndicator.style.backgroundColor = '#33cc33';
-      }
-    }
-  }
-};
-
-// Sound effects system
-const soundSystem = {
-  sounds: {},
-  youtubeAudio: null,
-  
-  initialize() {
-    // Load sounds
-    this.loadSound('engine', 'sounds/rover_engine.mp3', true);
-    this.loadSound('damage', 'sounds/damage.mp3', false);
-    this.loadSound('alert', 'sounds/alert.mp3', false);
-    this.loadSound('collect', 'sounds/collect.mp3', false);
-    this.loadSound('storm', 'sounds/dust_storm.mp3', true);
-    this.loadSound('sand', 'sounds/sand.mp3', true);
-    this.loadSound('discovery', 'sounds/discovery.mp3', false);
-    
-    // Create audio listeners
-    const listener = new THREE.AudioListener();
-    camera.add(listener);
-    
-    // Add ambient Martian wind
-    this.loadAmbientSound('wind', 'sounds/mars_wind.mp3', listener);
-  },
-  
-  loadSound(name, url, loop) {
-    const audio = new Audio(url);
-    audio.loop = loop;
-    this.sounds[name] = audio;
-  },
-  
-  loadAmbientSound(name, url, listener) {
-    const sound = new THREE.Audio(listener);
-    const audioLoader = new THREE.AudioLoader();
-    
-    audioLoader.load(url, function(buffer) {
-      sound.setBuffer(buffer);
-      sound.setLoop(true);
-      sound.setVolume(0.5);
-      sound.play();
-    });
-    
-    this.sounds[name] = sound;
-  },
-  
-  loadYoutubeAudio(videoId, options = {}) {
-    // Remove any existing YouTube player
-    if (this.youtubeAudio) {
-      const existingPlayer = document.getElementById('youtube-audio-player');
-      if (existingPlayer) {
-        existingPlayer.remove();
-      }
-    }
-    
-    // Create container for YouTube iframe
-    const container = document.createElement('div');
-    container.id = 'youtube-audio-container';
-    container.style.position = 'absolute';
-    container.style.bottom = '20px';
-    container.style.right = '20px';
-    container.style.zIndex = '1000';
-    container.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-    container.style.padding = '10px';
-    container.style.borderRadius = '5px';
-    container.style.color = 'white';
-    
-    // Create iframe for YouTube video (hidden visually but audio still plays)
-    const iframe = document.createElement('iframe');
-    iframe.id = 'youtube-audio-player';
-    iframe.width = '1';
-    iframe.height = '1';
-    iframe.style.opacity = '0.01'; // Almost invisible but still functional
-    iframe.style.pointerEvents = 'none'; // Prevent interaction with the iframe
-    iframe.allow = 'autoplay'; // Allow autoplay
-    
-    // Set YouTube parameters
-    const params = new URLSearchParams({
-      enablejsapi: '1',
-      autoplay: options.autoplay ? '1' : '0',
-      loop: options.loop ? '1' : '0',
-      playlist: options.loop ? videoId : '',
-      controls: '0',
-      showinfo: '0',
-      modestbranding: '1',
-      iv_load_policy: '3',
-      rel: '0'
-    });
-    
-    iframe.src = `https://www.youtube.com/embed/${videoId}?${params.toString()}`;
-    
-    // Create controls
-    const controls = document.createElement('div');
-    controls.innerHTML = `
-      <div style="display: flex; align-items: center; gap: 10px;">
-        <button id="youtube-play-pause" style="padding: 5px 10px;">Play</button>
-        <div>
-          <label for="youtube-volume">Volume:</label>
-          <input type="range" id="youtube-volume" min="0" max="100" value="${options.volume || 50}" style="width: 100px;">
-        </div>
-        <div id="youtube-title" style="margin-left: 10px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-          YouTube Audio
-        </div>
-      </div>
-    `;
-    
-    // Add elements to the DOM
-    container.appendChild(iframe);
-    container.appendChild(controls);
-    document.body.appendChild(container);
-    
-    // Store reference to the YouTube player
-    this.youtubeAudio = {
-      iframe,
-      videoId,
-      player: null,
-      isPlaying: options.autoplay || false
-    };
-    
-    // Initialize YouTube API if not already loaded
-    if (!window.YT) {
-      const tag = document.createElement('script');
-      tag.src = 'https://www.youtube.com/iframe_api';
-      const firstScriptTag = document.getElementsByTagName('script')[0];
-      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-      
-      window.onYouTubeIframeAPIReady = () => {
-        this._initializeYouTubePlayer();
-      };
-    } else {
-      this._initializeYouTubePlayer();
-    }
-    
-    // Set up event listeners for controls
-    document.getElementById('youtube-play-pause').addEventListener('click', () => {
-      this.toggleYoutubeAudio();
-    });
-    
-    document.getElementById('youtube-volume').addEventListener('input', (e) => {
-      if (this.youtubeAudio && this.youtubeAudio.player) {
-        this.youtubeAudio.player.setVolume(parseInt(e.target.value));
-      }
-    });
-    
-    return this.youtubeAudio;
-  },
-  
-  _initializeYouTubePlayer() {
-    if (!this.youtubeAudio) return;
-    
-    this.youtubeAudio.player = new YT.Player('youtube-audio-player', {
-      events: {
-        'onReady': (event) => {
-          // Set initial volume
-          const volumeSlider = document.getElementById('youtube-volume');
-          if (volumeSlider) {
-            event.target.setVolume(parseInt(volumeSlider.value));
-          }
-          
-          // Auto-play if specified
-          if (this.youtubeAudio.isPlaying) {
-            event.target.playVideo();
-            document.getElementById('youtube-play-pause').textContent = 'Pause';
-          }
-          
-          // Get video title
-          const videoTitle = event.target.getVideoData().title;
-          const titleElement = document.getElementById('youtube-title');
-          if (titleElement && videoTitle) {
-            titleElement.textContent = videoTitle;
-          }
-        },
-        'onStateChange': (event) => {
-          // Update play/pause button based on player state
-          if (event.data === YT.PlayerState.PLAYING) {
-            this.youtubeAudio.isPlaying = true;
-            document.getElementById('youtube-play-pause').textContent = 'Pause';
-          } else if (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) {
-            this.youtubeAudio.isPlaying = false;
-            document.getElementById('youtube-play-pause').textContent = 'Play';
-          }
-        }
-      }
-    });
-  },
-  
-  toggleYoutubeAudio() {
-    if (!this.youtubeAudio || !this.youtubeAudio.player) return;
-    
-    if (this.youtubeAudio.isPlaying) {
-      this.youtubeAudio.player.pauseVideo();
-      this.youtubeAudio.isPlaying = false;
-      document.getElementById('youtube-play-pause').textContent = 'Play';
-    } else {
-      this.youtubeAudio.player.playVideo();
-      this.youtubeAudio.isPlaying = true;
-      document.getElementById('youtube-play-pause').textContent = 'Pause';
-    }
-  },
-  
-  play(name) {
-    if (this.sounds[name]) {
-      // For non-loop sounds, play from beginning
-      if (!this.sounds[name].loop) {
-        this.sounds[name].currentTime = 0;
-      }
-      this.sounds[name].play();
-    }
-  },
-  
-  stop(name) {
-    if (this.sounds[name]) {
-      this.sounds[name].pause();
-      if (!this.sounds[name].loop) {
-        this.sounds[name].currentTime = 0;
-      }
-    }
-  },
-  
-  updateEngine(speed, inSandPit) {
-    // Engine sound changes with speed
-    if (this.sounds.engine) {
-      if (speed > 0) {
-        if (this.sounds.engine.paused) {
-          this.sounds.engine.play();
-        }
-        this.sounds.engine.volume = 0.3 + speed * 1.5;
-        this.sounds.engine.playbackRate = 0.8 + speed * 2;
-      } else {
-        this.sounds.engine.pause();
-      }
-    }
-    
-    // Sand sound
-    if (this.sounds.sand) {
-      if (inSandPit) {
-        if (this.sounds.sand.paused) {
-          this.sounds.sand.play();
-        }
-      } else {
-        this.sounds.sand.pause();
-      }
-    }
-  }
-};
-
-// Make soundSystem globally accessible
-window.soundSystem = soundSystem;
-
-function updateDistanceTraveled(currentTime) {
-  if (lastUpdateTime === 0) {
-    lastUpdateTime = currentTime;
-    return;
-  }
-  const deltaTime = (currentTime - lastUpdateTime) / 1000; // Convert to seconds
-  lastUpdateTime = currentTime;
-
-  // Assuming speed is in meters per second, convert to miles
-  const speedInMilesPerSecond = roverSpeed * 0.000621371;
-  distanceTraveled += speedInMilesPerSecond * deltaTime;
-
-  // Update the HUD or console with the distance traveled
-  console.log(`Distance Traveled: ${distanceTraveled.toFixed(2)} miles`);
-}
-
-// Create a visible sun sphere
-var sunSphere;
-
-function createSunSphere() {
-  // Create a glowing sun sphere
-  const sunGeometry = new THREE.SphereGeometry(50, 32, 32);
-  const sunMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffee66,
-    transparent: true,
-    opacity: 0.9
-  });
-  sunSphere = new THREE.Mesh(sunGeometry, sunMaterial);
-  sunSphere.position.set(500, 300, -1000);
-  scene.add(sunSphere);
-  
-  // Add a glow effect
-  const sunGlowGeometry = new THREE.SphereGeometry(60, 32, 32);
-  const sunGlowMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffdd44,
-    transparent: true,
-    opacity: 0.4,
-    side: THREE.BackSide
-  });
-  const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
-  sunSphere.add(sunGlow);
-  
-  return sunSphere;
-}
-
-function initializeScene() {
-  console.log("Initializing scene elements...");
-  
-  // Create the HUD
-  createHUD();
-  console.log("HUD created");
-  
-  // Create the skybox first and make it globally accessible
-  window.spaceSkybox = createSpaceSkybox();
-  scene.add(window.spaceSkybox);
-  console.log("Skybox added to scene");
-  
-  // Initialize meteor system
-  window.meteorSystem = new MeteorSystem(5000, 25);
-  console.log("Meteor system initialized");
-  
-  // Initialize the terrain system
-  terrainSystem.init();
-  console.log("Terrain system initialized");
-  
-  // Create the sun directional light
-  sun = new THREE.DirectionalLight(0xffffff, 1);
-  sun.position.set(10, 100, 10);
-  scene.add(sun);
-  console.log("Sun light added to scene");
-  
-  // Create a visible sun sphere
-  const sunGeometry = new THREE.SphereGeometry(50, 32, 32);
-  const sunMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffee66,
-    transparent: true,
-    opacity: 0.9
-  });
-  sunSphere = new THREE.Mesh(sunGeometry, sunMaterial);
-  sunSphere.position.set(500, 300, -1000);
-  scene.add(sunSphere);
-  
-  // Add a glow effect to the sun
-  const sunGlowGeometry = new THREE.SphereGeometry(60, 32, 32);
-  const sunGlowMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffdd44,
-    transparent: true,
-    opacity: 0.4,
-    side: THREE.BackSide
-  });
-  const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
-  sunSphere.add(sunGlow);
-  
-  console.log("Sun sphere added to scene");
-  
-  // Initialize sound system
-  soundSystem.initialize();
-  console.log("Sound system initialized");
-  
-  // Initialize UI elements including realistic mode toggle
-  initializeUI();
-  console.log("UI elements initialized");
-  
-  // Start the animation loop with timestamp - ONLY CALL THIS ONCE
-  console.log("Starting animation loop");
-  animate(0);
-}
-
-function updateSkyAppearance(transitionProgress = null) {
-  // Ensure sunSphere is defined before accessing it
-  if (typeof sunSphere === 'undefined') {
-    console.warn('sunSphere is not defined yet. Defining sunSphere now...');
-    sunSphere = new THREE.Mesh(
-      new THREE.SphereGeometry(50, 32, 32),
-      new THREE.MeshBasicMaterial({ color: 0xffee66, transparent: true, opacity: 0.9 })
-    );
-    sunSphere.position.set(500, 300, -1000);
-    scene.add(sunSphere);
-    console.log('sunSphere defined and added to scene.');
-  }
-  
-  // If we're not transitioning, use the current state
-  const isDay = transitionProgress === null ? isDaytime : 
-                (transitionStartState === 'day' ? 1 - transitionProgress : transitionProgress);
-  
-  // Create or update fog based on time of day
-  // Use more realistic Mars fog colors when in realistic mode
-  const dayFog = isRealisticMode 
-    ? new THREE.Fog(0xd8a282, 200, 2000) // Realistic dusty orange-tan fog based on NASA imagery
-    : new THREE.Fog(0xd09060, 200, 2000); // Original stylized fog
-    
-  const nightFog = new THREE.Fog(0xb77c5a, 500, 5000);
-  
-  if (transitionProgress === null) {
-    // No transition, just set the fog directly
-    scene.fog = isDaytime ? dayFog : nightFog;
-  } else {
-    // Interpolate fog color and near/far values
-    const fogColor = new THREE.Color();
-    fogColor.r = dayFog.color.r * isDay + nightFog.color.r * (1 - isDay);
-    fogColor.g = dayFog.color.g * isDay + nightFog.color.g * (1 - isDay);
-    fogColor.b = dayFog.color.b * isDay + nightFog.color.b * (1 - isDay);
-    
-    const fogNear = dayFog.near * isDay + nightFog.near * (1 - isDay);
-    const fogFar = dayFog.far * isDay + nightFog.far * (1 - isDay);
-    
-    scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
-  }
-  
-  // Handle skybox and background
-  if (transitionProgress !== null) {
-    // During transition, create a blended sky texture
-    if (isDay > 0.01 && isDay < 0.99) {
-      // Create a blended sky texture during transition
-      console.log("Creating blended sky texture - isDay:", isDay);
-      scene.background = createBlendedSkyTexture(isDay);
-    }
-  } else {
-    // Not transitioning, use appropriate sky
-    if (isDaytime) {
-      // Use realistic or stylized sky texture based on mode
-      console.log("Setting DAY sky texture - isRealisticMode:", isRealisticMode);
-      try {
-        const skyTexture = isRealisticMode ? createRealisticMarsDaySkyTexture() : createMarsDaySkyTexture();
-        scene.background = skyTexture;
-        console.log("Day sky texture created and set successfully");
-      } catch (error) {
-        console.error("Error creating day sky texture:", error);
-      }
-      
-      // Remove night skybox if it exists
-      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && scene.getObjectById(spaceSkybox.id)) {
-        console.log("Removing night skybox");
-        scene.remove(spaceSkybox);
-      }
-    } else {
-      // Add night skybox if not already in scene
-      console.log("Setting NIGHT sky");
-      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && !scene.getObjectById(spaceSkybox.id)) {
-        console.log("Adding night skybox to scene");
-        scene.add(spaceSkybox);
-      }
-    }
-  }
-  
-  // Adjust lighting based on time of day or transition progress
-  // Use more realistic lighting values when in realistic mode
-  const daySunIntensity = isRealisticMode ? 0.8 : 0.9; // Slightly dimmer in realistic mode (Mars is further from sun)
-  const nightSunIntensity = 0.3;
-  const dayAmbientIntensity = isRealisticMode ? 0.6 : 0.7; // Slightly dimmer ambient in realistic mode
-  const nightAmbientIntensity = 0.4;
-  
-  // Interpolate light intensities
-  sunLight.intensity = daySunIntensity * isDay + nightSunIntensity * (1 - isDay);
-  ambientLight.intensity = dayAmbientIntensity * isDay + nightAmbientIntensity * (1 - isDay);
-  
-  console.log("Sun light intensity set to:", sunLight.intensity);
-  console.log("Ambient light intensity set to:", ambientLight.intensity);
-  
-  // Interpolate sun position
-  const daySunPosition = new THREE.Vector3(10, 100, 10);
-  const nightSunPosition = new THREE.Vector3(-10, -5, 10);
-  sunLight.position.set(
-    daySunPosition.x * isDay + nightSunPosition.x * (1 - isDay),
-    daySunPosition.y * isDay + nightSunPosition.y * (1 - isDay),
-    daySunPosition.z * isDay + nightSunPosition.z * (1 - isDay)
-  );
-  
-  // Interpolate ambient light color
-  // Use more realistic Mars ambient light color in realistic mode
-  const dayAmbientColor = isRealisticMode 
-    ? new THREE.Color(0xd8a282) // Realistic dusty orange ambient light
-    : new THREE.Color(0xff9966); // Original stylized ambient light
-  const nightAmbientColor = new THREE.Color(0xff8866);
-  ambientLight.color.set(
-    dayAmbientColor.r * isDay + nightAmbientColor.r * (1 - isDay),
-    dayAmbientColor.g * isDay + nightAmbientColor.g * (1 - isDay),
-    dayAmbientColor.b * isDay + nightAmbientColor.b * (1 - isDay)
-  );
-  
-  // Handle sun visibility with opacity for smooth transition
-  if (typeof sunSphere !== 'undefined' && sunSphere) {
-    sunSphere.visible = true;
-    sunSphere.material.opacity = isDay * 0.9; // Fade out when transitioning to night
-    
-    // Also move the sun position during transition
-    const daySunSpherePosition = new THREE.Vector3(500, 300, -1000);
-    const nightSunSpherePosition = new THREE.Vector3(500, -300, -1000);
-    sunSphere.position.set(
-      daySunSpherePosition.x * isDay + nightSunSpherePosition.x * (1 - isDay),
-      daySunSpherePosition.y * isDay + nightSunSpherePosition.y * (1 - isDay),
-      daySunSpherePosition.z * isDay + nightSunSpherePosition.z * (1 - isDay)
-    );
-    
-    // Adjust sun color in realistic mode
-    if (isRealisticMode && isDay > 0.5) {
-      // More pale, dusty sun appearance as seen through Mars atmosphere
-      sunSphere.material.color.setHex(0xfff0e0);
-    } else {
-      // Original sun color
-      sunSphere.material.color.setHex(0xffffff);
-    }
-  }
-  
-  // Handle night skybox opacity for smooth transition
-  if (typeof spaceSkybox !== 'undefined' && spaceSkybox) {
-    if (isDay < 0.5) {
-      // Show night skybox when transitioning to night
-      if (!scene.getObjectById(spaceSkybox.id)) {
-        scene.add(spaceSkybox);
-      }
-      // Set opacity based on transition
-      spaceSkybox.traverse(obj => {
-        if (obj.isMesh && obj.material) {
-          obj.material.transparent = true;
-          obj.material.opacity = 1 - isDay * 2; // Fade in as day transitions to night
-        }
-      });
-    } else if (isDay >= 0.5 && scene.getObjectById(spaceSkybox.id)) {
-      // Fade out night skybox when transitioning to day
-      spaceSkybox.traverse(obj => {
-        if (obj.isMesh && obj.material) {
-          obj.material.transparent = true;
-          obj.material.opacity = (1 - isDay) * 2; // Fade out as night transitions to day
-        }
-      });
-    }
-  }
-}
-
-function createMarsDaySkyTexture() {
-  const canvas = document.createElement('canvas');
-  const canvasSize = 2048;
-  canvas.width = canvasSize;
-  canvas.height = canvasSize;
-  const context = canvas.getContext('2d');
-  
-  // Create gradient from horizon to zenith
-  const gradient = context.createLinearGradient(0, canvasSize, 0, 0);
-  gradient.addColorStop(0, '#c27e54'); // Dusty orange-brown at horizon
-  gradient.addColorStop(0.5, '#d7a28b'); // Pinkish in middle
-  gradient.addColorStop(1, '#e6b499'); // Lighter at zenith
-  
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, canvasSize, canvasSize);
-  
-  // Add atmospheric haze/dust
-  context.fillStyle = 'rgba(210, 170, 130, 0.2)';
-  for (let i = 0; i < 100; i++) {
-    const x = Math.random() * canvasSize;
-    const y = Math.random() * canvasSize * 0.6 + canvasSize * 0.4; // More dust near horizon
-    const size = Math.random() * 100 + 50;
-    context.beginPath();
-    context.arc(x, y, size, 0, Math.PI * 2);
-    context.fill();
-  }
-  
-  // Add subtle clouds
-  context.fillStyle = 'rgba(230, 200, 180, 0.15)';
-  for (let i = 0; i < 20; i++) {
-    const x = Math.random() * canvasSize;
-    const y = Math.random() * canvasSize * 0.3 + canvasSize * 0.2; // Clouds in middle of sky
-    const width = Math.random() * 300 + 200;
-    const height = Math.random() * 100 + 50;
-    
-    // Draw cloud as a series of circles for a fluffy appearance
-    for (let j = 0; j < 8; j++) {
-      const cloudX = x + (Math.random() - 0.5) * width * 0.8;
-      const cloudY = y + (Math.random() - 0.5) * height * 0.8;
-      const cloudSize = Math.random() * 80 + 40;
-      context.beginPath();
-      context.arc(cloudX, cloudY, cloudSize, 0, Math.PI * 2);
-      context.fill();
-    }
-  }
-  
-  // Create texture from canvas
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.mapping = THREE.EquirectangularReflectionMapping;
-  
-  return texture;
-}
-
 // Meteor System - Create shooting stars in the night sky
 class MeteorSystem {
   constructor(skyRadius = 5000, count = 25) {
@@ -4267,6 +2432,304 @@ class MeteorSystem {
     }
   }
 }
+
+// Initialize scene elements in the correct order
+function initializeScene() {
+  console.log("Initializing scene elements...");
+  
+  // Create the HUD
+  createHUD();
+  console.log("HUD created");
+  
+  // Create the skybox first and make it globally accessible
+  window.spaceSkybox = createSpaceSkybox();
+  scene.add(window.spaceSkybox);
+  console.log("Skybox added to scene");
+  
+  // Initialize meteor system
+  window.meteorSystem = new MeteorSystem(5000, 25);
+  console.log("Meteor system initialized");
+  
+  // Initialize the terrain system
+  terrainSystem.init();
+  console.log("Terrain system initialized");
+  
+  // Create the sun directional light
+  sun = new THREE.DirectionalLight(0xffffff, 1);
+  sun.position.set(10, 100, 10);
+  scene.add(sun);
+  console.log("Sun light added to scene");
+  
+  // Create a visible sun sphere
+  const sunGeometry = new THREE.SphereGeometry(50, 32, 32);
+  const sunMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffee66,
+    transparent: true,
+    opacity: 0.9
+  });
+  sunSphere = new THREE.Mesh(sunGeometry, sunMaterial);
+  sunSphere.position.set(500, 300, -1000);
+  scene.add(sunSphere);
+  
+  // Add a glow effect to the sun
+  const sunGlowGeometry = new THREE.SphereGeometry(60, 32, 32);
+  const sunGlowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffdd44,
+    transparent: true,
+    opacity: 0.4,
+    side: THREE.BackSide
+  });
+  const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
+  sunSphere.add(sunGlow);
+  
+  console.log("Sun sphere added to scene");
+  
+  // Initialize sound system
+  soundSystem.initialize();
+  console.log("Sound system initialized");
+  
+  // Initialize UI elements including realistic mode toggle
+  initializeUI();
+  console.log("UI elements initialized");
+  
+  // Start the animation loop with timestamp - ONLY CALL THIS ONCE
+  console.log("Starting animation loop");
+  animate(0);
+}
+
+// Add a day/night toggle and cycle
+let isDaytime = true; // Ensure this is true by default
+console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
+
+
+
+function toggleDayNight() {
+  console.log("Before toggle - isDaytime:", isDaytime);
+  isDaytime = !isDaytime;
+  console.log("After toggle - isDaytime:", isDaytime);
+  addRoverHeadlights();
+  updateSkyAppearance();
+}
+
+// Add a function to force day mode
+function forceDayMode() {
+  console.log("Forcing day mode...");
+  isDaytime = true;
+  isRealisticMode = true;
+  console.log("isDaytime set to:", isDaytime);
+  console.log("isRealisticMode set to:", isRealisticMode);
+  updateSkyAppearance();
+  console.log("Day mode forced!");
+}
+
+// Expose the function globally for debugging
+window.forceDayMode = forceDayMode;
+
+// Call forceDayMode after a short delay to ensure everything is initialized
+setTimeout(() => {
+  console.log("Auto-forcing day mode after initialization");
+  forceDayMode();
+}, 2000);
+
+function updateSkyAppearance(transitionProgress = null) {
+  console.log("Updating sky appearance - isDaytime:", isDaytime);
+  
+  // Define sunSphere if it is not already defined
+  if (typeof sunSphere === 'undefined') {
+    console.log('Defining sunSphere...');
+    sunSphere = new THREE.Mesh(
+      new THREE.SphereGeometry(50, 32, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffffff })
+    );
+    sunSphere.position.set(500, 300, -1000);
+    scene.add(sunSphere);
+  }
+  
+  // If we're not transitioning, use the current state
+  const isDay = transitionProgress === null ? (isDaytime ? 1 : 0) : 
+                (transitionStartState === 'day' ? 1 - transitionProgress : transitionProgress);
+  console.log("isDay value:", isDay);
+  
+  // Create or update fog based on time of day
+  // Use more realistic Mars fog colors when in realistic mode
+  const dayFog = isRealisticMode 
+    ? new THREE.Fog(0xd8a282, 200, 2000) // Realistic dusty orange-tan fog based on NASA imagery
+    : new THREE.Fog(0xd09060, 200, 2000); // Original stylized fog
+    
+  const nightFog = new THREE.Fog(0xb77c5a, 500, 5000);
+  
+  if (transitionProgress === null) {
+    // No transition, just set the fog directly
+    scene.fog = isDaytime ? dayFog : nightFog;
+    console.log("Setting fog for:", isDaytime ? "DAY" : "NIGHT");
+  } else {
+    // Interpolate fog color and near/far values
+    const fogColor = new THREE.Color();
+    fogColor.r = dayFog.color.r * isDay + nightFog.color.r * (1 - isDay);
+    fogColor.g = dayFog.color.g * isDay + nightFog.color.g * (1 - isDay);
+    fogColor.b = dayFog.color.b * isDay + nightFog.color.b * (1 - isDay);
+    
+    const fogNear = dayFog.near * isDay + nightFog.near * (1 - isDay);
+    const fogFar = dayFog.far * isDay + nightFog.far * (1 - isDay);
+    
+    scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
+    console.log("Setting transitional fog - isDay:", isDay);
+  }
+  
+  // Handle skybox and background
+  if (transitionProgress !== null) {
+    // During transition, create a blended sky texture
+    if (isDay > 0.01 && isDay < 0.99) {
+      // Create a blended sky texture during transition
+      console.log("Creating blended sky texture - isDay:", isDay);
+      scene.background = createBlendedSkyTexture(isDay);
+    }
+  } else {
+    // Not transitioning, use appropriate sky
+    if (isDaytime) {
+      // Use realistic or stylized sky texture based on mode
+      console.log("Setting DAY sky texture - isRealisticMode:", isRealisticMode);
+      try {
+        const skyTexture = isRealisticMode ? createRealisticMarsDaySkyTexture() : createMarsDaySkyTexture();
+        scene.background = skyTexture;
+        console.log("Day sky texture created and set successfully");
+      } catch (error) {
+        console.error("Error creating day sky texture:", error);
+      }
+      
+      // Remove night skybox if it exists
+      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && scene.getObjectById(spaceSkybox.id)) {
+        console.log("Removing night skybox");
+        scene.remove(spaceSkybox);
+      }
+    } else {
+      // Add night skybox if not already in scene
+      console.log("Setting NIGHT sky");
+      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && !scene.getObjectById(spaceSkybox.id)) {
+        console.log("Adding night skybox to scene");
+        
+        scene.add(spaceSkybox);
+      }
+    }
+  }
+  
+  // Adjust lighting based on time of day or transition progress
+  // Use more realistic lighting values when in realistic mode
+  const daySunIntensity = isRealisticMode ? 0.8 : 0.9; // Slightly dimmer in realistic mode (Mars is further from sun)
+  const nightSunIntensity = 0.3;
+  const dayAmbientIntensity = isRealisticMode ? 0.6 : 0.7; // Slightly dimmer ambient in realistic mode
+  const nightAmbientIntensity = 0.4;
+  
+  // Interpolate light intensities
+  sunLight.intensity = daySunIntensity * isDay + nightSunIntensity * (1 - isDay);
+  ambientLight.intensity = dayAmbientIntensity * isDay + nightAmbientIntensity * (1 - isDay);
+  
+  console.log("Sun light intensity set to:", sunLight.intensity);
+  console.log("Ambient light intensity set to:", ambientLight.intensity);
+  
+  // Interpolate sun position
+  const daySunPosition = new THREE.Vector3(10, 100, 10);
+  const nightSunPosition = new THREE.Vector3(-10, -5, 10);
+  sunLight.position.set(
+    daySunPosition.x * isDay + nightSunPosition.x * (1 - isDay),
+    daySunPosition.y * isDay + nightSunPosition.y * (1 - isDay),
+    daySunPosition.z * isDay + nightSunPosition.z * (1 - isDay)
+  );
+  
+  // Interpolate ambient light color
+  // Use more realistic Mars ambient light color in realistic mode
+  const dayAmbientColor = isRealisticMode 
+    ? new THREE.Color(0xd8a282) // Realistic dusty orange ambient light
+    : new THREE.Color(0xff9966); // Original stylized ambient light
+  const nightAmbientColor = new THREE.Color(0xff8866);
+  ambientLight.color.set(
+    dayAmbientColor.r * isDay + nightAmbientColor.r * (1 - isDay),
+    dayAmbientColor.g * isDay + nightAmbientColor.g * (1 - isDay),
+    dayAmbientColor.b * isDay + nightAmbientColor.b * (1 - isDay)
+  );
+  
+  // Handle sun visibility with opacity for smooth transition
+  if (typeof sunSphere !== 'undefined' && sunSphere) {
+    sunSphere.visible = true;
+    sunSphere.material.opacity = isDay * 0.9; // Fade out when transitioning to night
+    
+    // Also move the sun position during transition
+    const daySunSpherePosition = new THREE.Vector3(500, 300, -1000);
+    const nightSunSpherePosition = new THREE.Vector3(500, -300, -1000);
+    sunSphere.position.set(
+      daySunSpherePosition.x * isDay + nightSunSpherePosition.x * (1 - isDay),
+      daySunSpherePosition.y * isDay + nightSunSpherePosition.y * (1 - isDay),
+      daySunSpherePosition.z * isDay + nightSunSpherePosition.z * (1 - isDay)
+    );
+    
+    // Adjust sun color in realistic mode
+    if (isRealisticMode && isDay > 0.5) {
+      // More pale, dusty sun appearance as seen through Mars atmosphere
+      sunSphere.material.color.setHex(0xfff0e0);
+    } else {
+      // Original sun color
+      sunSphere.material.color.setHex(0xffffff);
+    }
+  }
+  
+  // Handle night skybox opacity for smooth transition
+  if (typeof spaceSkybox !== 'undefined' && spaceSkybox) {
+    if (isDay < 0.5) {
+      // Show night skybox when transitioning to night
+      if (!scene.getObjectById(spaceSkybox.id)) {
+        scene.add(spaceSkybox);
+      }
+      // Set opacity based on transition
+      spaceSkybox.traverse(obj => {
+        if (obj.isMesh && obj.material) {
+          obj.material.transparent = true;
+          obj.material.opacity = 1 - isDay * 2; // Fade in as day transitions to night
+        }
+      });
+    } else if (isDay >= 0.5 && scene.getObjectById(spaceSkybox.id)) {
+      // Fade out night skybox when transitioning to day
+      spaceSkybox.traverse(obj => {
+        if (obj.isMesh && obj.material) {
+          obj.material.transparent = true;
+          obj.material.opacity = (1 - isDay) * 2; // Fade out as night transitions to day
+        }
+      });
+    }
+  }
+}
+
+// Start the day/night cycle
+startDayNightCycle();
+
+// Add a keypress handler for toggling
+document.addEventListener('keydown', function(event) {
+  if (event.key === 'l' || event.key === 'L') { // 'L' for Light cycle
+    toggleDayNight();
+  }
+});
+
+// Run the initialization in the correct order
+initializeScene();
+
+function updateDistanceTraveled(currentTime) {
+  if (lastUpdateTime === 0) {
+    lastUpdateTime = currentTime;
+    return;
+  }
+  const deltaTime = (currentTime - lastUpdateTime) / 1000; // Convert to seconds
+  lastUpdateTime = currentTime;
+
+  // Assuming speed is in meters per second, convert to miles
+  const speedInMilesPerSecond = roverSpeed * 0.000621371;
+  distanceTraveled += speedInMilesPerSecond * deltaTime;
+
+  // Update the HUD or console with the distance traveled
+  console.log(`Distance Traveled: ${distanceTraveled.toFixed(2)} miles`);
+}
+
+// Create a visible sun sphere
+
+
 
 // Create a realistic Mars day sky texture based on NASA imagery and scientific data
 function createRealisticMarsDaySkyTexture() {
