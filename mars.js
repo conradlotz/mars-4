@@ -930,6 +930,13 @@ function animate(time) {
       distanceText.innerHTML = `Distance Traveled: ${distanceTraveled.toFixed(2)} miles`;
     }
   }
+
+  // Update Mars Scene Manager and its events
+  if (window.marsSceneManager) {
+    console.log("Updating Mars Scene Manager");
+    window.marsSceneManager.update(rover.position);
+    window.marsSceneManager.updateActiveEvents();
+  }
 }
 
 // Helper function to optimize wheel rotation updates
@@ -2441,6 +2448,7 @@ function initializeScene() {
   
   // Start the animation loop with timestamp - ONLY CALL THIS ONCE
   console.log("Starting animation loop");
+  marsSceneManager.init();
   animate(0);
 }
 
@@ -3935,69 +3943,6 @@ function createSunSphere() {
   sunSphere.add(sunGlow);
   
   return sunSphere;
-}
-
-function initializeScene() {
-  console.log("Initializing scene elements...");
-  
-  // Create the HUD
-  createHUD();
-  console.log("HUD created");
-  
-  // Create the skybox first and make it globally accessible
-  window.spaceSkybox = createSpaceSkybox();
-  scene.add(window.spaceSkybox);
-  console.log("Skybox added to scene");
-  
-  // Initialize meteor system
-  window.meteorSystem = new MeteorSystem(5000, 25);
-  console.log("Meteor system initialized");
-  
-  // Initialize the terrain system
-  terrainSystem.init();
-  console.log("Terrain system initialized");
-  
-  // Create the sun directional light
-  sun = new THREE.DirectionalLight(0xffffff, 1);
-  sun.position.set(10, 100, 10);
-  scene.add(sun);
-  console.log("Sun light added to scene");
-  
-  // Create a visible sun sphere
-  const sunGeometry = new THREE.SphereGeometry(50, 32, 32);
-  const sunMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffee66,
-    transparent: true,
-    opacity: 0.9
-  });
-  sunSphere = new THREE.Mesh(sunGeometry, sunMaterial);
-  sunSphere.position.set(500, 300, -1000);
-  scene.add(sunSphere);
-  
-  // Add a glow effect to the sun
-  const sunGlowGeometry = new THREE.SphereGeometry(60, 32, 32);
-  const sunGlowMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffdd44,
-    transparent: true,
-    opacity: 0.4,
-    side: THREE.BackSide
-  });
-  const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
-  sunSphere.add(sunGlow);
-  
-  console.log("Sun sphere added to scene");
-  
-  // Initialize sound system
-  soundSystem.initialize();
-  console.log("Sound system initialized");
-  
-  // Initialize UI elements including realistic mode toggle
-  initializeUI();
-  console.log("UI elements initialized");
-  
-  // Start the animation loop with timestamp - ONLY CALL THIS ONCE
-  console.log("Starting animation loop");
-  animate(0);
 }
 
 function updateSkyAppearance(transitionProgress = null) {
