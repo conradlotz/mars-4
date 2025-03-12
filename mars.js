@@ -49,62 +49,9 @@ const terrainSystem = {
     // If rover moved to a new chunk, update visible chunks
     if (newChunk.x !== this.currentChunk.x || newChunk.z !== this.currentChunk.z) {
       this.currentChunk = newChunk;
-      this.updateVisibleChunks();
       this.lastUpdateTime = now;
     }
   },
-  
-  // Update which chunks should be visible
-  updateVisibleChunks: function() {
-    // Track which chunks should be visible
-    const shouldBeVisible = new Set();
-    
-    // Calculate which chunks should be visible
-    for (let xOffset = -this.visibleRadius; xOffset <= this.visibleRadius; xOffset++) {
-      for (let zOffset = -this.visibleRadius; zOffset <= this.visibleRadius; zOffset++) {
-        const x = this.currentChunk.x + xOffset;
-        const z = this.currentChunk.z + zOffset;
-        const key = this.getChunkKey(x, z);
-        shouldBeVisible.add(key);
-        
-        // If chunk doesn't exist yet, create it
-        if (!this.chunks.has(key)) {
-          const chunk = this.createChunk(x, z);
-          this.chunks.set(key, chunk);
-          scene.add(chunk);
-        }
-      }
-    }
-    
-    // Remove chunks that are no longer visible
-    for (const [key, chunk] of this.chunks.entries()) {
-      if (!shouldBeVisible.has(key)) {
-        scene.remove(chunk);
-        this.chunks.delete(key);
-      }
-    }
-  },
-  
-  // Create a new terrain chunk
-  createChunk: function(chunkX, chunkZ) {
-    // Calculate world position of chunk
-    const worldX = chunkX * this.chunkSize;
-    const worldZ = chunkZ * this.chunkSize;
-    
-    // Create terrain with offset for this chunk
-    const terrain = createRealisticMarsTerrainChunk(this.chunkSize, worldX, worldZ);
-    
-    // Position the chunk correctly in world space
-    terrain.position.set(worldX + this.chunkSize/2, 0, worldZ + this.chunkSize/2);
-    
-    return terrain;
-  },
-  
-  // Initialize the terrain system
-  init: function() {
-    this.lastUpdateTime = performance.now();
-    this.updateVisibleChunks();
-  }
 };
 
 // Create and add the realistic Mars terrain
@@ -587,6 +534,269 @@ function toggleRealisticMode() {
   updateSkyAppearance();
 }
 
+// Meteor System - Create shooting stars in the night sky
+class MeteorSystem {
+  constructor(skyRadius = 5000, count = 25) {
+    this.skyRadius = skyRadius;
+    this.meteors = [];
+    this.meteorPool = [];
+    this.maxMeteors = count;
+    this.activeMeteors = 0;
+    this.meteorProbability = 0.03; // Probability of a new meteor each frame
+    
+    // Create meteor textures
+    this.createMeteorTextures();
+    
+    // Create the meteor pool
+    this.createMeteorPool();
+  }
+  
+  createMeteorTextures() {
+    // Create a glow texture for the meteor head
+    const glowSize = 64;
+    const glowCanvas = document.createElement('canvas');
+    glowCanvas.width = glowSize;
+    glowCanvas.height = glowSize;
+    const glowContext = glowCanvas.getContext('2d');
+    
+    // Create radial gradient for glow
+    const gradient = glowContext.createRadialGradient(
+      glowSize / 2, glowSize / 2, 0,
+      glowSize / 2, glowSize / 2, glowSize / 2
+    );
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+    gradient.addColorStop(0.3, 'rgba(255, 240, 220, 0.8)');
+    gradient.addColorStop(0.7, 'rgba(255, 220, 200, 0.3)');
+    gradient.addColorStop(1, 'rgba(255, 220, 200, 0.0)');
+    
+    glowContext.fillStyle = gradient;
+    glowContext.fillRect(0, 0, glowSize, glowSize);
+    
+    this.glowTexture = new THREE.CanvasTexture(glowCanvas);
+  }
+  
+  createMeteorPool() {
+    // Create a pool of meteors to reuse
+    for (let i = 0; i < this.maxMeteors; i++) {
+      // Create meteor trail geometry - a line with trail
+      const meteorGeometry = new THREE.BufferGeometry();
+      const positions = new Float32Array(20 * 3); // 20 points for the trail
+      
+      // Initialize all positions to zero
+      for (let j = 0; j < positions.length; j++) {
+        positions[j] = 0;
+      }
+      
+      meteorGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      
+      // Create meteor trail material with glow effect
+      const meteorMaterial = new THREE.LineBasicMaterial({
+        color: 0xffddaa,
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        linewidth: 2 // Note: linewidth may not work in all browsers
+      });
+      
+      // Create the meteor trail line
+      const meteorTrail = new THREE.Line(meteorGeometry, meteorMaterial);
+      meteorTrail.frustumCulled = false; // Ensure it's always rendered
+      meteorTrail.visible = false; // Start invisible
+      
+      // Create meteor head (glowing point)
+      const headGeometry = new THREE.PlaneGeometry(20, 20);
+      const headMaterial = new THREE.MeshBasicMaterial({
+        map: this.glowTexture,
+        transparent: true,
+        opacity: 1.0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      });
+      
+      const meteorHead = new THREE.Mesh(headGeometry, headMaterial);
+      meteorHead.frustumCulled = false;
+      meteorHead.visible = false;
+      
+      // Group the trail and head together
+      const meteorGroup = new THREE.Group();
+      meteorGroup.add(meteorTrail);
+      meteorGroup.add(meteorHead);
+      
+      // Add meteor data
+      meteorGroup.userData = {
+        active: false,
+        speed: 0,
+        direction: new THREE.Vector3(),
+        positions: [],
+        life: 0,
+        maxLife: 0,
+        size: 0,
+        trail: meteorTrail,
+        head: meteorHead
+      };
+      
+      // Add to scene and pool
+      scene.add(meteorGroup);
+      this.meteorPool.push(meteorGroup);
+    }
+  }
+  
+  activateMeteor() {
+    // Find an inactive meteor from the pool
+    for (let i = 0; i < this.meteorPool.length; i++) {
+      const meteorGroup = this.meteorPool[i];
+      
+      if (!meteorGroup.userData.active) {
+        // Randomize meteor properties
+        const phi = Math.random() * Math.PI * 2; // Random angle around the sky
+        const theta = Math.random() * Math.PI * 0.5; // Angle from zenith (top half of sky)
+        
+        // Calculate start position on the sky dome
+        const startX = this.skyRadius * Math.sin(theta) * Math.cos(phi);
+        const startY = this.skyRadius * Math.cos(theta);
+        const startZ = this.skyRadius * Math.sin(theta) * Math.sin(phi);
+        
+        // Calculate end position (opposite side but lower)
+        const endPhi = (phi + Math.PI + (Math.random() - 0.5) * Math.PI * 0.5) % (Math.PI * 2);
+        const endTheta = Math.min(Math.PI * 0.9, theta + Math.random() * Math.PI * 0.4);
+        
+        const endX = this.skyRadius * Math.sin(endTheta) * Math.cos(endPhi);
+        const endY = this.skyRadius * Math.cos(endTheta);
+        const endZ = this.skyRadius * Math.sin(endTheta) * Math.sin(endPhi);
+        
+        // Calculate direction vector
+        const direction = new THREE.Vector3(endX - startX, endY - startY, endZ - startZ).normalize();
+        
+        // Set meteor properties
+        meteorGroup.userData.active = true;
+        meteorGroup.userData.speed = 50 + Math.random() * 250; // Random speed
+        meteorGroup.userData.direction = direction;
+        meteorGroup.userData.positions = [];
+        meteorGroup.userData.positions.push(new THREE.Vector3(startX, startY, startZ));
+        meteorGroup.userData.life = 0;
+        meteorGroup.userData.maxLife = 1.5 + Math.random() * 2; // 1.5-3.5 seconds
+        meteorGroup.userData.size = 0.5 + Math.random() * 2.5; // Random size
+        
+        // Set meteor color (white to yellow-orange)
+        const colorHue = 30 + Math.random() * 20; // 30-50 (orange-yellow)
+        const colorSaturation = 80 + Math.random() * 20; // 80-100%
+        const colorLightness = 70 + Math.random() * 30; // 70-100%
+        const meteorColor = new THREE.Color(`hsl(${colorHue}, ${colorSaturation}%, ${colorLightness}%)`);
+        
+        meteorGroup.userData.trail.material.color = meteorColor;
+        
+        // Initialize the trail with the start position
+        const positions = meteorGroup.userData.trail.geometry.attributes.position.array;
+        for (let j = 0; j < 20; j++) {
+          positions[j * 3] = startX;
+          positions[j * 3 + 1] = startY;
+          positions[j * 3 + 2] = startZ;
+        }
+        meteorGroup.userData.trail.geometry.attributes.position.needsUpdate = true;
+        
+        // Position the head at the start
+        meteorGroup.userData.head.position.set(startX, startY, startZ);
+        
+        // Scale the head based on meteor size
+        const headSize = 5 + meteorGroup.userData.size * 10;
+        meteorGroup.userData.head.scale.set(headSize, headSize, headSize);
+        
+        // Make meteor visible
+        meteorGroup.userData.trail.visible = true;
+        meteorGroup.userData.head.visible = true;
+        
+        // Increase active meteor count
+        this.activeMeteors++;
+        
+        // Add to active meteors list
+        this.meteors.push(meteorGroup);
+        
+        return true;
+      }
+    }
+    
+    return false; // No inactive meteors available
+  }
+  
+  update(delta) {
+    // Try to activate a new meteor based on probability
+    if (Math.random() < this.meteorProbability && this.activeMeteors < this.maxMeteors) {
+      this.activateMeteor();
+    }
+    
+    // Update active meteors
+    for (let i = this.meteors.length - 1; i >= 0; i--) {
+      const meteorGroup = this.meteors[i];
+      
+      if (meteorGroup.userData.active) {
+        // Update life
+        meteorGroup.userData.life += delta / 1000; // Convert delta to seconds
+        
+        // Check if meteor should be deactivated
+        if (meteorGroup.userData.life >= meteorGroup.userData.maxLife) {
+          meteorGroup.userData.active = false;
+          meteorGroup.userData.trail.visible = false;
+          meteorGroup.userData.head.visible = false;
+          this.activeMeteors--;
+          this.meteors.splice(i, 1);
+          continue;
+        }
+        
+        // Calculate progress (0 to 1)
+        const progress = meteorGroup.userData.life / meteorGroup.userData.maxLife;
+        
+        // Calculate opacity based on life (fade in and out)
+        let opacity = 1.0;
+        if (progress < 0.2) {
+          // Fade in
+          opacity = progress / 0.2;
+        } else if (progress > 0.8) {
+          // Fade out
+          opacity = (1 - progress) / 0.2;
+        }
+        
+        meteorGroup.userData.trail.material.opacity = opacity * 0.8;
+        meteorGroup.userData.head.material.opacity = opacity;
+        
+        // Calculate new position
+        const lastPos = meteorGroup.userData.positions[meteorGroup.userData.positions.length - 1];
+        const newPos = new THREE.Vector3(
+          lastPos.x + meteorGroup.userData.direction.x * meteorGroup.userData.speed * delta / 1000,
+          lastPos.y + meteorGroup.userData.direction.y * meteorGroup.userData.speed * delta / 1000,
+          lastPos.z + meteorGroup.userData.direction.z * meteorGroup.userData.speed * delta / 1000
+        );
+        
+        // Add new position to the trail
+        meteorGroup.userData.positions.push(newPos);
+        
+        // Keep only the last 20 positions
+        if (meteorGroup.userData.positions.length > 20) {
+          meteorGroup.userData.positions.shift();
+        }
+        
+        // Update trail geometry with trail positions
+        const positions = meteorGroup.userData.trail.geometry.attributes.position.array;
+        for (let j = 0; j < meteorGroup.userData.positions.length; j++) {
+          const pos = meteorGroup.userData.positions[j];
+          positions[j * 3] = pos.x;
+          positions[j * 3 + 1] = pos.y;
+          positions[j * 3 + 2] = pos.z;
+        }
+        
+        meteorGroup.userData.trail.geometry.attributes.position.needsUpdate = true;
+        
+        // Update head position to the latest position
+        meteorGroup.userData.head.position.copy(newPos);
+        
+        // Make the head always face the camera
+        meteorGroup.userData.head.lookAt(camera.position);
+      }
+    }
+  }
+}
+
 // Modify the animate function
 function animate(time) {
   requestAnimationFrame(animate);
@@ -719,6 +929,13 @@ function animate(time) {
     if (distanceText) {
       distanceText.innerHTML = `Distance Traveled: ${distanceTraveled.toFixed(2)} miles`;
     }
+  }
+
+  // Update Mars Scene Manager and its events
+  if (window.marsSceneManager) {
+    console.log("Updating Mars Scene Manager");
+    window.marsSceneManager.update(rover.position);
+    window.marsSceneManager.updateActiveEvents();
   }
 }
 
@@ -3896,477 +4113,6 @@ document.addEventListener('keydown', function(event) {
   }
 });
 
-// Add headlights to the Mars rover
-function addRoverHeadlights() {
-  console.log("Adding headlights to rover...");
-  
-  // Create headlight group to hold all light components
-  const headlightsGroup = new THREE.Group();
-  headlightsGroup.name = "roverHeadlights";
-  
-  // Create the main spotlights (two headlights)
-  const leftSpotlight = new THREE.SpotLight(0xffffcc, 2, 100, Math.PI / 6, 0.5, 2);
-  leftSpotlight.position.set(0.5, 0.5, 1.2); // Position on left front of rover
-  leftSpotlight.target.position.set(0.5, 0, 5); // Point forward and slightly down
-  
-  const rightSpotlight = new THREE.SpotLight(0xffffcc, 2, 100, Math.PI / 6, 0.5, 2);
-  rightSpotlight.position.set(-0.5, 0.5, 1.2); // Position on right front of rover
-  rightSpotlight.target.position.set(-0.5, 0, 5); // Point forward and slightly down
-  
-  // Add spotlight targets to the group so they move with the rover
-  headlightsGroup.add(leftSpotlight.target);
-  headlightsGroup.add(rightSpotlight.target);
-  
-  // Create lens flare effect for the headlights
-  const textureLoader = new THREE.TextureLoader();
-  const flareTexture = textureLoader.load('https://threejs.org/examples/textures/lensflare/lensflare0.png');
-  
-  // Create lens flare for left headlight
-  const leftLensFlare = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: flareTexture,
-    color: 0xffffee,
-    transparent: true,
-    blending: THREE.AdditiveBlending,
-    opacity: 0.7
-  }));
-  leftLensFlare.scale.set(0.5, 0.5, 1);
-  leftLensFlare.position.copy(leftSpotlight.position);
-  
-  // Create lens flare for right headlight
-  const rightLensFlare = new THREE.Sprite(new THREE.SpriteMaterial({
-    map: flareTexture,
-    color: 0xffffee,
-    transparent: true,
-    blending: THREE.AdditiveBlending,
-    opacity: 0.7
-  }));
-  rightLensFlare.scale.set(0.5, 0.5, 1);
-  rightLensFlare.position.copy(rightSpotlight.position);
-  
-  // Create physical headlight models (geometry)
-  const headlightGeometry = new THREE.CylinderGeometry(0.15, 0.2, 0.1, 16);
-  const headlightMaterial = new THREE.MeshStandardMaterial({
-    color: 0x888888,
-    metalness: 0.8,
-    roughness: 0.2
-  });
-  
-  const leftHeadlightMesh = new THREE.Mesh(headlightGeometry, headlightMaterial);
-  leftHeadlightMesh.position.copy(leftSpotlight.position);
-  leftHeadlightMesh.rotation.x = Math.PI / 2;
-  
-  const rightHeadlightMesh = new THREE.Mesh(headlightGeometry, headlightMaterial);
-  rightHeadlightMesh.position.copy(rightSpotlight.position);
-  rightHeadlightMesh.rotation.x = Math.PI / 2;
-  
-  // Add the headlight meshes to the headlights group
-  headlightsGroup.add(leftHeadlightMesh);
-  headlightsGroup.add(rightHeadlightMesh);
-
-  // Add the headlights group to the rover
-  roverGroup.add(headlightsGroup);
-  
-  console.log("Headlights added to rover");
-}
-
-// Initialize and attach headlights to the rover
-function initializeRoverHeadlights() {
-  console.log("Initializing rover headlights...");
-  
-  // First, make sure we have a reference to the rover
-  if (typeof rover === 'undefined' || !rover) {
-    console.warn("Rover not found in global scope. Searching in scene...");
-    
-    // Try to find the rover in the scene
-    scene.traverse(function(object) {
-      if (object.name && (
-          object.name.toLowerCase().includes('rover') || 
-          object.name.toLowerCase().includes('vehicle') ||
-          object.name.toLowerCase().includes('curiosity')
-        )) {
-        console.log("Found potential rover object:", object.name);
-        rover = object;
-      }
-    });
-    
-    if (!rover) {
-      console.error("Could not find rover in scene. Will retry in 2 seconds.");
-      setTimeout(initializeRoverHeadlights, 2000);
-      return;
-    }
-  }
-  
-  console.log("Found rover, adding headlights...");
-  
-  // Call the addRoverHeadlights function to create and attach headlights
-  const headlights = addRoverHeadlights();
-  
-  // Make sure headlights are visible
-  if (headlights) {
-    headlights.visible = true;
-    
-    // Add a toggle button to the UI
-    addHeadlightsToggleButton();
-    
-    console.log("Headlights successfully added and turned on");
-  } else {
-    console.error("Failed to add headlights to rover");
-  }
-}
-
-// Add a toggle button for the headlights
-function addHeadlightsToggleButton() {
-  // Check if button already exists
-  if (document.getElementById('headlights-toggle')) {
-    return;
-  }
-  
-  const headlightsButton = document.createElement('button');
-  headlightsButton.id = 'headlights-toggle';
-  headlightsButton.textContent = 'Toggle Headlights';
-  headlightsButton.style.position = 'absolute';
-  headlightsButton.style.bottom = '140px';
-  headlightsButton.style.right = '20px';
-  headlightsButton.style.padding = '10px';
-  headlightsButton.style.backgroundColor = '#444';
-  headlightsButton.style.color = 'white';
-  headlightsButton.style.border = 'none';
-  headlightsButton.style.borderRadius = '5px';
-  headlightsButton.style.cursor = 'pointer';
-  headlightsButton.style.zIndex = '1000';
-  
-  // Add hover effect
-  headlightsButton.addEventListener('mouseover', () => {
-    headlightsButton.style.backgroundColor = '#666';
-  });
-  headlightsButton.addEventListener('mouseout', () => {
-    headlightsButton.style.backgroundColor = '#444';
-  });
-  
-  // Add click handler
-  headlightsButton.addEventListener('click', toggleHeadlights);
-  
-  document.body.appendChild(headlightsButton);
-  console.log("Headlights toggle button added");
-}
-
-// Function to toggle headlights on/off
-function toggleHeadlights() {
-  if (!rover) {
-    console.error("Rover not found, cannot toggle headlights");
-    return;
-  }
-  
-  const headlightsGroup = rover.getObjectByName("roverHeadlights");
-  
-  if (!headlightsGroup) {
-    console.log("No headlights found, adding them now");
-    initializeRoverHeadlights();
-    return;
-  }
-  
-  // Toggle visibility
-  headlightsGroup.visible = !headlightsGroup.visible;
-  console.log(`Headlights turned ${headlightsGroup.visible ? 'ON' : 'OFF'}`);
-  
-  // Update button text
-  const headlightsButton = document.getElementById('headlights-toggle');
-  if (headlightsButton) {
-    headlightsButton.textContent = `Headlights: ${headlightsGroup.visible ? 'ON' : 'OFF'}`;
-  }
-}
-
-// Modify the addRoverHeadlights function to make the lights brighter and more visible
-function enhanceRoverHeadlights() {
-  // Save reference to the original function
-  const originalAddRoverHeadlights = addRoverHeadlights;
-  
-  // Replace with enhanced version
-  addRoverHeadlights = function() {
-    console.log("Adding enhanced headlights to rover...");
-    
-    // Create headlight group to hold all light components
-    const headlightsGroup = new THREE.Group();
-    headlightsGroup.name = "roverHeadlights";
-    
-    // Create the main spotlights (two headlights) with increased intensity and range
-    const leftSpotlight = new THREE.SpotLight(0xffffcc, 5, 200, Math.PI / 6, 0.5, 1);
-    leftSpotlight.position.set(0.5, 0.5, 1.2); // Position on left front of rover
-    
-    // Create and position target for left spotlight
-    const leftTarget = new THREE.Object3D();
-    leftTarget.position.set(0.5, -0.5, 10); // Point forward and down
-    headlightsGroup.add(leftTarget);
-    leftSpotlight.target = leftTarget;
-    
-    const rightSpotlight = new THREE.SpotLight(0xffffcc, 5, 200, Math.PI / 6, 0.5, 1);
-    rightSpotlight.position.set(-0.5, 0.5, 1.2); // Position on right front of rover
-    
-    // Create and position target for right spotlight
-    const rightTarget = new THREE.Object3D();
-    rightTarget.position.set(-0.5, -0.5, 10); // Point forward and down
-    headlightsGroup.add(rightTarget);
-    rightSpotlight.target = rightTarget;
-    
-    // Add spotlight targets to the group so they move with the rover
-    headlightsGroup.add(leftSpotlight);
-    headlightsGroup.add(rightSpotlight);
-    
-    // Create lens flare effect for the headlights
-    const leftLensFlare = new THREE.Mesh(
-      new THREE.CircleGeometry(0.15, 16),
-      new THREE.MeshBasicMaterial({
-        color: 0xffffee,
-        transparent: true,
-        opacity: 0.9,
-        side: THREE.DoubleSide
-      })
-    );
-    leftLensFlare.position.copy(leftSpotlight.position);
-    leftLensFlare.lookAt(leftTarget.position);
-    
-    const rightLensFlare = new THREE.Mesh(
-      new THREE.CircleGeometry(0.15, 16),
-      new THREE.MeshBasicMaterial({
-        color: 0xffffee,
-        transparent: true,
-        opacity: 0.9,
-        side: THREE.DoubleSide
-      })
-    );
-    rightLensFlare.position.copy(rightSpotlight.position);
-    rightLensFlare.lookAt(rightTarget.position);
-    
-    // Create physical headlight models (geometry)
-    const headlightGeometry = new THREE.CylinderGeometry(0.15, 0.2, 0.1, 16);
-    const headlightMaterial = new THREE.MeshStandardMaterial({
-      color: 0x888888,
-      metalness: 0.8,
-      roughness: 0.2
-    });
-    
-    const leftHeadlightMesh = new THREE.Mesh(headlightGeometry, headlightMaterial);
-    leftHeadlightMesh.position.copy(leftSpotlight.position);
-    leftHeadlightMesh.rotation.x = Math.PI / 2;
-    
-    const rightHeadlightMesh = new THREE.Mesh(headlightGeometry, headlightMaterial);
-    rightHeadlightMesh.position.copy(rightSpotlight.position);
-    rightHeadlightMesh.rotation.x = Math.PI / 2;
-    
-    // Create glowing material for the headlight glass
-    const glassGeometry = new THREE.CylinderGeometry(0.14, 0.19, 0.05, 16);
-    const glassMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffffee,
-      transparent: true,
-      opacity: 0.9
-    });
-    
-    const leftGlassMesh = new THREE.Mesh(glassGeometry, glassMaterial);
-    leftGlassMesh.position.set(leftHeadlightMesh.position.x, leftHeadlightMesh.position.y, leftHeadlightMesh.position.z + 0.03);
-    leftGlassMesh.rotation.x = Math.PI / 2;
-    
-    const rightGlassMesh = new THREE.Mesh(glassGeometry, glassMaterial);
-    rightGlassMesh.position.set(rightHeadlightMesh.position.x, rightHeadlightMesh.position.y, rightHeadlightMesh.position.z + 0.03);
-    rightGlassMesh.rotation.x = Math.PI / 2;
-    
-    // Add all elements to the headlights group
-    headlightsGroup.add(leftLensFlare);
-    headlightsGroup.add(rightLensFlare);
-    headlightsGroup.add(leftHeadlightMesh);
-    headlightsGroup.add(rightHeadlightMesh);
-    headlightsGroup.add(leftGlassMesh);
-    headlightsGroup.add(rightGlassMesh);
-    
-    // Add a small light at the top of the rover (like a beacon)
-    const beaconLight = new THREE.PointLight(0xffaa44, 1, 50);
-    beaconLight.position.set(0, 1.2, 0); // Top of the rover
-    
-    const beaconGeometry = new THREE.SphereGeometry(0.1, 16, 16);
-    const beaconMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffaa44,
-      transparent: true,
-      opacity: 0.9
-    });
-    
-    const beaconMesh = new THREE.Mesh(beaconGeometry, beaconMaterial);
-    beaconMesh.position.copy(beaconLight.position);
-    
-    // Add beacon to headlights group
-    headlightsGroup.add(beaconLight);
-    headlightsGroup.add(beaconMesh);
-    
-    // Add the headlights group to the rover
-    if (rover) {
-      rover.add(headlightsGroup);
-      console.log("Enhanced headlights added to rover");
-    } else {
-      console.warn("Rover not found, couldn't add headlights");
-    }
-    
-    // Return the headlights group for future reference
-    return headlightsGroup;
-  };
-}
-
-// Add a keyboard shortcut for toggling headlights (press 'H')
-document.addEventListener('keydown', function(event) {
-  if (event.key === 'h' || event.key === 'H') {
-    toggleHeadlights();
-  }
-});
-
-// Make functions available globally for debugging
-window.toggleHeadlights = toggleHeadlights;
-window.initializeRoverHeadlights = initializeRoverHeadlights;
-
-// Enhance the headlights function
-enhanceRoverHeadlights();
-
-// Initialize headlights after a delay to ensure the scene is loaded
-setTimeout(initializeRoverHeadlights, 3000);
-
-// Also add initialization to the UI setup
-function enhanceInitializeUI() {
-  const originalInitializeUI = initializeUI;
-  
-  initializeUI = function() {
-    // Call the original function
-    if (typeof originalInitializeUI === 'function') {
-      originalInitializeUI();
-    }
-    
-    // Add headlights initialization
-    setTimeout(initializeRoverHeadlights, 1000);
-  };
-}
-
-enhanceInitializeUI();
-
-// Call this function after the scene is initialized to add headlights to the rover
-function setupRoverHeadlights() {
-  console.log("Setting up rover headlights...");
-  
-  // Try to find the rover if it's not already defined
-  if (typeof rover === 'undefined' || !rover) {
-    console.warn("Rover not found in global scope. Searching in scene...");
-    
-    // Try to find the rover in the scene
-    scene.traverse(function(object) {
-      if (object.name && (
-          object.name.toLowerCase().includes('rover') || 
-          object.name.toLowerCase().includes('vehicle') ||
-          object.name.toLowerCase().includes('curiosity')
-        )) {
-        console.log("Found potential rover object:", object.name);
-        rover = object;
-      }
-    });
-    
-    if (!rover) {
-      console.error("Could not find rover in scene. Will retry in 2 seconds.");
-      setTimeout(setupRoverHeadlights, 2000);
-      return;
-    }
-  }
-  
-  // Add headlights to the rover
-  const headlights = addRoverHeadlights();
-  
-  // Make sure headlights are visible
-  if (headlights) {
-    headlights.visible = true;
-    console.log("Headlights successfully added to rover");
-    
-    // Add a toggle button to the UI
-    addHeadlightsToggleButton();
-  }
-}
-
-// Add a toggle button for the headlights
-function addHeadlightsToggleButton() {
-  // Check if button already exists
-  if (document.getElementById('headlights-toggle')) {
-    return;
-  }
-  
-  const headlightsButton = document.createElement('button');
-  headlightsButton.id = 'headlights-toggle';
-  headlightsButton.textContent = 'Headlights: ON';
-  headlightsButton.style.position = 'absolute';
-  headlightsButton.style.bottom = '100px';
-  headlightsButton.style.right = '20px';
-  headlightsButton.style.padding = '10px';
-  headlightsButton.style.backgroundColor = '#444';
-  headlightsButton.style.color = 'white';
-  headlightsButton.style.border = 'none';
-  headlightsButton.style.borderRadius = '5px';
-  headlightsButton.style.cursor = 'pointer';
-  headlightsButton.style.zIndex = '1000';
-  
-  // Add hover effect
-  headlightsButton.addEventListener('mouseover', () => {
-    headlightsButton.style.backgroundColor = '#666';
-  });
-  headlightsButton.addEventListener('mouseout', () => {
-    headlightsButton.style.backgroundColor = '#444';
-  });
-  
-  // Add click handler
-  headlightsButton.addEventListener('click', toggleRoverHeadlights);
-  
-  document.body.appendChild(headlightsButton);
-  console.log("Headlights toggle button added");
-}
-
-// Function to toggle headlights on/off
-function toggleRoverHeadlights() {
-  if (!rover) {
-    console.error("Rover not found, cannot toggle headlights");
-    return;
-  }
-  
-  const headlightsGroup = rover.getObjectByName("roverHeadlights");
-  
-  if (!headlightsGroup) {
-    console.log("No headlights found, adding them now");
-    setupRoverHeadlights();
-    return;
-  }
-  
-  // Toggle visibility
-  headlightsGroup.visible = !headlightsGroup.visible;
-  console.log(`Headlights turned ${headlightsGroup.visible ? 'ON' : 'OFF'}`);
-  
-  // Update button text
-  const headlightsButton = document.getElementById('headlights-toggle');
-  if (headlightsButton) {
-    headlightsButton.textContent = `Headlights: ${headlightsGroup.visible ? 'ON' : 'OFF'}`;
-  }
-}
-
-// Add a keyboard shortcut for toggling headlights (press 'H')
-document.addEventListener('keydown', function(event) {
-  if (event.key === 'h' || event.key === 'H') {
-    toggleRoverHeadlights();
-  }
-});
-
-// Make functions available globally for debugging
-window.toggleRoverHeadlights = toggleRoverHeadlights;
-window.setupRoverHeadlights = setupRoverHeadlights;
-
-// Call the setup function after a delay to ensure the scene is loaded
-setTimeout(setupRoverHeadlights, 3000);
-
-// Also modify the initializeUI function to include headlights setup
-const originalInitializeUI = initializeUI;
-initializeUI = function() {
-  // Call the original function
-  originalInitializeUI();
-  
-  // Add headlights setup
-  setTimeout(setupRoverHeadlights, 1000);
-};
 
 // Mars Background Scene Manager
 class MarsSceneManager {
