@@ -49,62 +49,9 @@ const terrainSystem = {
     // If rover moved to a new chunk, update visible chunks
     if (newChunk.x !== this.currentChunk.x || newChunk.z !== this.currentChunk.z) {
       this.currentChunk = newChunk;
-      this.updateVisibleChunks();
       this.lastUpdateTime = now;
     }
   },
-  
-  // Update which chunks should be visible
-  updateVisibleChunks: function() {
-    // Track which chunks should be visible
-    const shouldBeVisible = new Set();
-    
-    // Calculate which chunks should be visible
-    for (let xOffset = -this.visibleRadius; xOffset <= this.visibleRadius; xOffset++) {
-      for (let zOffset = -this.visibleRadius; zOffset <= this.visibleRadius; zOffset++) {
-        const x = this.currentChunk.x + xOffset;
-        const z = this.currentChunk.z + zOffset;
-        const key = this.getChunkKey(x, z);
-        shouldBeVisible.add(key);
-        
-        // If chunk doesn't exist yet, create it
-        if (!this.chunks.has(key)) {
-          const chunk = this.createChunk(x, z);
-          this.chunks.set(key, chunk);
-          scene.add(chunk);
-        }
-      }
-    }
-    
-    // Remove chunks that are no longer visible
-    for (const [key, chunk] of this.chunks.entries()) {
-      if (!shouldBeVisible.has(key)) {
-        scene.remove(chunk);
-        this.chunks.delete(key);
-      }
-    }
-  },
-  
-  // Create a new terrain chunk
-  createChunk: function(chunkX, chunkZ) {
-    // Calculate world position of chunk
-    const worldX = chunkX * this.chunkSize;
-    const worldZ = chunkZ * this.chunkSize;
-    
-    // Create terrain with offset for this chunk
-    const terrain = createRealisticMarsTerrainChunk(this.chunkSize, worldX, worldZ);
-    
-    // Position the chunk correctly in world space
-    terrain.position.set(worldX + this.chunkSize/2, 0, worldZ + this.chunkSize/2);
-    
-    return terrain;
-  },
-  
-  // Initialize the terrain system
-  init: function() {
-    this.lastUpdateTime = performance.now();
-    this.updateVisibleChunks();
-  }
 };
 
 // Create and add the realistic Mars terrain
@@ -585,6 +532,269 @@ function toggleRealisticMode() {
   isRealisticMode = !isRealisticMode;
   console.log(`Realistic mode: ${isRealisticMode ? 'ON' : 'OFF'}`);
   updateSkyAppearance();
+}
+
+// Meteor System - Create shooting stars in the night sky
+class MeteorSystem {
+  constructor(skyRadius = 5000, count = 25) {
+    this.skyRadius = skyRadius;
+    this.meteors = [];
+    this.meteorPool = [];
+    this.maxMeteors = count;
+    this.activeMeteors = 0;
+    this.meteorProbability = 0.03; // Probability of a new meteor each frame
+    
+    // Create meteor textures
+    this.createMeteorTextures();
+    
+    // Create the meteor pool
+    this.createMeteorPool();
+  }
+  
+  createMeteorTextures() {
+    // Create a glow texture for the meteor head
+    const glowSize = 64;
+    const glowCanvas = document.createElement('canvas');
+    glowCanvas.width = glowSize;
+    glowCanvas.height = glowSize;
+    const glowContext = glowCanvas.getContext('2d');
+    
+    // Create radial gradient for glow
+    const gradient = glowContext.createRadialGradient(
+      glowSize / 2, glowSize / 2, 0,
+      glowSize / 2, glowSize / 2, glowSize / 2
+    );
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+    gradient.addColorStop(0.3, 'rgba(255, 240, 220, 0.8)');
+    gradient.addColorStop(0.7, 'rgba(255, 220, 200, 0.3)');
+    gradient.addColorStop(1, 'rgba(255, 220, 200, 0.0)');
+    
+    glowContext.fillStyle = gradient;
+    glowContext.fillRect(0, 0, glowSize, glowSize);
+    
+    this.glowTexture = new THREE.CanvasTexture(glowCanvas);
+  }
+  
+  createMeteorPool() {
+    // Create a pool of meteors to reuse
+    for (let i = 0; i < this.maxMeteors; i++) {
+      // Create meteor trail geometry - a line with trail
+      const meteorGeometry = new THREE.BufferGeometry();
+      const positions = new Float32Array(20 * 3); // 20 points for the trail
+      
+      // Initialize all positions to zero
+      for (let j = 0; j < positions.length; j++) {
+        positions[j] = 0;
+      }
+      
+      meteorGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      
+      // Create meteor trail material with glow effect
+      const meteorMaterial = new THREE.LineBasicMaterial({
+        color: 0xffddaa,
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        linewidth: 2 // Note: linewidth may not work in all browsers
+      });
+      
+      // Create the meteor trail line
+      const meteorTrail = new THREE.Line(meteorGeometry, meteorMaterial);
+      meteorTrail.frustumCulled = false; // Ensure it's always rendered
+      meteorTrail.visible = false; // Start invisible
+      
+      // Create meteor head (glowing point)
+      const headGeometry = new THREE.PlaneGeometry(20, 20);
+      const headMaterial = new THREE.MeshBasicMaterial({
+        map: this.glowTexture,
+        transparent: true,
+        opacity: 1.0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide
+      });
+      
+      const meteorHead = new THREE.Mesh(headGeometry, headMaterial);
+      meteorHead.frustumCulled = false;
+      meteorHead.visible = false;
+      
+      // Group the trail and head together
+      const meteorGroup = new THREE.Group();
+      meteorGroup.add(meteorTrail);
+      meteorGroup.add(meteorHead);
+      
+      // Add meteor data
+      meteorGroup.userData = {
+        active: false,
+        speed: 0,
+        direction: new THREE.Vector3(),
+        positions: [],
+        life: 0,
+        maxLife: 0,
+        size: 0,
+        trail: meteorTrail,
+        head: meteorHead
+      };
+      
+      // Add to scene and pool
+      scene.add(meteorGroup);
+      this.meteorPool.push(meteorGroup);
+    }
+  }
+  
+  activateMeteor() {
+    // Find an inactive meteor from the pool
+    for (let i = 0; i < this.meteorPool.length; i++) {
+      const meteorGroup = this.meteorPool[i];
+      
+      if (!meteorGroup.userData.active) {
+        // Randomize meteor properties
+        const phi = Math.random() * Math.PI * 2; // Random angle around the sky
+        const theta = Math.random() * Math.PI * 0.5; // Angle from zenith (top half of sky)
+        
+        // Calculate start position on the sky dome
+        const startX = this.skyRadius * Math.sin(theta) * Math.cos(phi);
+        const startY = this.skyRadius * Math.cos(theta);
+        const startZ = this.skyRadius * Math.sin(theta) * Math.sin(phi);
+        
+        // Calculate end position (opposite side but lower)
+        const endPhi = (phi + Math.PI + (Math.random() - 0.5) * Math.PI * 0.5) % (Math.PI * 2);
+        const endTheta = Math.min(Math.PI * 0.9, theta + Math.random() * Math.PI * 0.4);
+        
+        const endX = this.skyRadius * Math.sin(endTheta) * Math.cos(endPhi);
+        const endY = this.skyRadius * Math.cos(endTheta);
+        const endZ = this.skyRadius * Math.sin(endTheta) * Math.sin(endPhi);
+        
+        // Calculate direction vector
+        const direction = new THREE.Vector3(endX - startX, endY - startY, endZ - startZ).normalize();
+        
+        // Set meteor properties
+        meteorGroup.userData.active = true;
+        meteorGroup.userData.speed = 50 + Math.random() * 250; // Random speed
+        meteorGroup.userData.direction = direction;
+        meteorGroup.userData.positions = [];
+        meteorGroup.userData.positions.push(new THREE.Vector3(startX, startY, startZ));
+        meteorGroup.userData.life = 0;
+        meteorGroup.userData.maxLife = 1.5 + Math.random() * 2; // 1.5-3.5 seconds
+        meteorGroup.userData.size = 0.5 + Math.random() * 2.5; // Random size
+        
+        // Set meteor color (white to yellow-orange)
+        const colorHue = 30 + Math.random() * 20; // 30-50 (orange-yellow)
+        const colorSaturation = 80 + Math.random() * 20; // 80-100%
+        const colorLightness = 70 + Math.random() * 30; // 70-100%
+        const meteorColor = new THREE.Color(`hsl(${colorHue}, ${colorSaturation}%, ${colorLightness}%)`);
+        
+        meteorGroup.userData.trail.material.color = meteorColor;
+        
+        // Initialize the trail with the start position
+        const positions = meteorGroup.userData.trail.geometry.attributes.position.array;
+        for (let j = 0; j < 20; j++) {
+          positions[j * 3] = startX;
+          positions[j * 3 + 1] = startY;
+          positions[j * 3 + 2] = startZ;
+        }
+        meteorGroup.userData.trail.geometry.attributes.position.needsUpdate = true;
+        
+        // Position the head at the start
+        meteorGroup.userData.head.position.set(startX, startY, startZ);
+        
+        // Scale the head based on meteor size
+        const headSize = 5 + meteorGroup.userData.size * 10;
+        meteorGroup.userData.head.scale.set(headSize, headSize, headSize);
+        
+        // Make meteor visible
+        meteorGroup.userData.trail.visible = true;
+        meteorGroup.userData.head.visible = true;
+        
+        // Increase active meteor count
+        this.activeMeteors++;
+        
+        // Add to active meteors list
+        this.meteors.push(meteorGroup);
+        
+        return true;
+      }
+    }
+    
+    return false; // No inactive meteors available
+  }
+  
+  update(delta) {
+    // Try to activate a new meteor based on probability
+    if (Math.random() < this.meteorProbability && this.activeMeteors < this.maxMeteors) {
+      this.activateMeteor();
+    }
+    
+    // Update active meteors
+    for (let i = this.meteors.length - 1; i >= 0; i--) {
+      const meteorGroup = this.meteors[i];
+      
+      if (meteorGroup.userData.active) {
+        // Update life
+        meteorGroup.userData.life += delta / 1000; // Convert delta to seconds
+        
+        // Check if meteor should be deactivated
+        if (meteorGroup.userData.life >= meteorGroup.userData.maxLife) {
+          meteorGroup.userData.active = false;
+          meteorGroup.userData.trail.visible = false;
+          meteorGroup.userData.head.visible = false;
+          this.activeMeteors--;
+          this.meteors.splice(i, 1);
+          continue;
+        }
+        
+        // Calculate progress (0 to 1)
+        const progress = meteorGroup.userData.life / meteorGroup.userData.maxLife;
+        
+        // Calculate opacity based on life (fade in and out)
+        let opacity = 1.0;
+        if (progress < 0.2) {
+          // Fade in
+          opacity = progress / 0.2;
+        } else if (progress > 0.8) {
+          // Fade out
+          opacity = (1 - progress) / 0.2;
+        }
+        
+        meteorGroup.userData.trail.material.opacity = opacity * 0.8;
+        meteorGroup.userData.head.material.opacity = opacity;
+        
+        // Calculate new position
+        const lastPos = meteorGroup.userData.positions[meteorGroup.userData.positions.length - 1];
+        const newPos = new THREE.Vector3(
+          lastPos.x + meteorGroup.userData.direction.x * meteorGroup.userData.speed * delta / 1000,
+          lastPos.y + meteorGroup.userData.direction.y * meteorGroup.userData.speed * delta / 1000,
+          lastPos.z + meteorGroup.userData.direction.z * meteorGroup.userData.speed * delta / 1000
+        );
+        
+        // Add new position to the trail
+        meteorGroup.userData.positions.push(newPos);
+        
+        // Keep only the last 20 positions
+        if (meteorGroup.userData.positions.length > 20) {
+          meteorGroup.userData.positions.shift();
+        }
+        
+        // Update trail geometry with trail positions
+        const positions = meteorGroup.userData.trail.geometry.attributes.position.array;
+        for (let j = 0; j < meteorGroup.userData.positions.length; j++) {
+          const pos = meteorGroup.userData.positions[j];
+          positions[j * 3] = pos.x;
+          positions[j * 3 + 1] = pos.y;
+          positions[j * 3 + 2] = pos.z;
+        }
+        
+        meteorGroup.userData.trail.geometry.attributes.position.needsUpdate = true;
+        
+        // Update head position to the latest position
+        meteorGroup.userData.head.position.copy(newPos);
+        
+        // Make the head always face the camera
+        meteorGroup.userData.head.lookAt(camera.position);
+      }
+    }
+  }
 }
 
 // Modify the animate function
@@ -3468,14 +3678,14 @@ const soundSystem = {
   loadAmbientSound(name, url, listener) {
     const sound = new THREE.Audio(listener);
     const audioLoader = new THREE.AudioLoader();
-    
+
     audioLoader.load(url, function(buffer) {
       sound.setBuffer(buffer);
       sound.setLoop(true);
       sound.setVolume(0.5);
       sound.play();
     });
-    
+  
     this.sounds[name] = sound;
   },
   
@@ -3570,7 +3780,7 @@ const soundSystem = {
     document.getElementById('youtube-play-pause').addEventListener('click', () => {
       this.toggleYoutubeAudio();
     });
-    
+
     document.getElementById('youtube-volume').addEventListener('input', (e) => {
       if (this.youtubeAudio && this.youtubeAudio.player) {
         this.youtubeAudio.player.setVolume(parseInt(e.target.value));
@@ -4003,269 +4213,6 @@ function createMarsDaySkyTexture() {
   texture.mapping = THREE.EquirectangularReflectionMapping;
   
   return texture;
-}
-
-// Meteor System - Create shooting stars in the night sky
-class MeteorSystem {
-  constructor(skyRadius = 5000, count = 25) {
-    this.skyRadius = skyRadius;
-    this.meteors = [];
-    this.meteorPool = [];
-    this.maxMeteors = count;
-    this.activeMeteors = 0;
-    this.meteorProbability = 0.03; // Probability of a new meteor each frame
-    
-    // Create meteor textures
-    this.createMeteorTextures();
-    
-    // Create the meteor pool
-    this.createMeteorPool();
-  }
-  
-  createMeteorTextures() {
-    // Create a glow texture for the meteor head
-    const glowSize = 64;
-    const glowCanvas = document.createElement('canvas');
-    glowCanvas.width = glowSize;
-    glowCanvas.height = glowSize;
-    const glowContext = glowCanvas.getContext('2d');
-    
-    // Create radial gradient for glow
-    const gradient = glowContext.createRadialGradient(
-      glowSize / 2, glowSize / 2, 0,
-      glowSize / 2, glowSize / 2, glowSize / 2
-    );
-    gradient.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
-    gradient.addColorStop(0.3, 'rgba(255, 240, 220, 0.8)');
-    gradient.addColorStop(0.7, 'rgba(255, 220, 200, 0.3)');
-    gradient.addColorStop(1, 'rgba(255, 220, 200, 0.0)');
-    
-    glowContext.fillStyle = gradient;
-    glowContext.fillRect(0, 0, glowSize, glowSize);
-    
-    this.glowTexture = new THREE.CanvasTexture(glowCanvas);
-  }
-  
-  createMeteorPool() {
-    // Create a pool of meteors to reuse
-    for (let i = 0; i < this.maxMeteors; i++) {
-      // Create meteor trail geometry - a line with trail
-      const meteorGeometry = new THREE.BufferGeometry();
-      const positions = new Float32Array(20 * 3); // 20 points for the trail
-      
-      // Initialize all positions to zero
-      for (let j = 0; j < positions.length; j++) {
-        positions[j] = 0;
-      }
-      
-      meteorGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      
-      // Create meteor trail material with glow effect
-      const meteorMaterial = new THREE.LineBasicMaterial({
-        color: 0xffddaa,
-        transparent: true,
-        opacity: 0.8,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        linewidth: 2 // Note: linewidth may not work in all browsers
-      });
-      
-      // Create the meteor trail line
-      const meteorTrail = new THREE.Line(meteorGeometry, meteorMaterial);
-      meteorTrail.frustumCulled = false; // Ensure it's always rendered
-      meteorTrail.visible = false; // Start invisible
-      
-      // Create meteor head (glowing point)
-      const headGeometry = new THREE.PlaneGeometry(20, 20);
-      const headMaterial = new THREE.MeshBasicMaterial({
-        map: this.glowTexture,
-        transparent: true,
-        opacity: 1.0,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide
-      });
-      
-      const meteorHead = new THREE.Mesh(headGeometry, headMaterial);
-      meteorHead.frustumCulled = false;
-      meteorHead.visible = false;
-      
-      // Group the trail and head together
-      const meteorGroup = new THREE.Group();
-      meteorGroup.add(meteorTrail);
-      meteorGroup.add(meteorHead);
-      
-      // Add meteor data
-      meteorGroup.userData = {
-        active: false,
-        speed: 0,
-        direction: new THREE.Vector3(),
-        positions: [],
-        life: 0,
-        maxLife: 0,
-        size: 0,
-        trail: meteorTrail,
-        head: meteorHead
-      };
-      
-      // Add to scene and pool
-      scene.add(meteorGroup);
-      this.meteorPool.push(meteorGroup);
-    }
-  }
-  
-  activateMeteor() {
-    // Find an inactive meteor from the pool
-    for (let i = 0; i < this.meteorPool.length; i++) {
-      const meteorGroup = this.meteorPool[i];
-      
-      if (!meteorGroup.userData.active) {
-        // Randomize meteor properties
-        const phi = Math.random() * Math.PI * 2; // Random angle around the sky
-        const theta = Math.random() * Math.PI * 0.5; // Angle from zenith (top half of sky)
-        
-        // Calculate start position on the sky dome
-        const startX = this.skyRadius * Math.sin(theta) * Math.cos(phi);
-        const startY = this.skyRadius * Math.cos(theta);
-        const startZ = this.skyRadius * Math.sin(theta) * Math.sin(phi);
-        
-        // Calculate end position (opposite side but lower)
-        const endPhi = (phi + Math.PI + (Math.random() - 0.5) * Math.PI * 0.5) % (Math.PI * 2);
-        const endTheta = Math.min(Math.PI * 0.9, theta + Math.random() * Math.PI * 0.4);
-        
-        const endX = this.skyRadius * Math.sin(endTheta) * Math.cos(endPhi);
-        const endY = this.skyRadius * Math.cos(endTheta);
-        const endZ = this.skyRadius * Math.sin(endTheta) * Math.sin(endPhi);
-        
-        // Calculate direction vector
-        const direction = new THREE.Vector3(endX - startX, endY - startY, endZ - startZ).normalize();
-        
-        // Set meteor properties
-        meteorGroup.userData.active = true;
-        meteorGroup.userData.speed = 50 + Math.random() * 250; // Random speed
-        meteorGroup.userData.direction = direction;
-        meteorGroup.userData.positions = [];
-        meteorGroup.userData.positions.push(new THREE.Vector3(startX, startY, startZ));
-        meteorGroup.userData.life = 0;
-        meteorGroup.userData.maxLife = 1.5 + Math.random() * 2; // 1.5-3.5 seconds
-        meteorGroup.userData.size = 0.5 + Math.random() * 2.5; // Random size
-        
-        // Set meteor color (white to yellow-orange)
-        const colorHue = 30 + Math.random() * 20; // 30-50 (orange-yellow)
-        const colorSaturation = 80 + Math.random() * 20; // 80-100%
-        const colorLightness = 70 + Math.random() * 30; // 70-100%
-        const meteorColor = new THREE.Color(`hsl(${colorHue}, ${colorSaturation}%, ${colorLightness}%)`);
-        
-        meteorGroup.userData.trail.material.color = meteorColor;
-        
-        // Initialize the trail with the start position
-        const positions = meteorGroup.userData.trail.geometry.attributes.position.array;
-        for (let j = 0; j < 20; j++) {
-          positions[j * 3] = startX;
-          positions[j * 3 + 1] = startY;
-          positions[j * 3 + 2] = startZ;
-        }
-        meteorGroup.userData.trail.geometry.attributes.position.needsUpdate = true;
-        
-        // Position the head at the start
-        meteorGroup.userData.head.position.set(startX, startY, startZ);
-        
-        // Scale the head based on meteor size
-        const headSize = 5 + meteorGroup.userData.size * 10;
-        meteorGroup.userData.head.scale.set(headSize, headSize, headSize);
-        
-        // Make meteor visible
-        meteorGroup.userData.trail.visible = true;
-        meteorGroup.userData.head.visible = true;
-        
-        // Increase active meteor count
-        this.activeMeteors++;
-        
-        // Add to active meteors list
-        this.meteors.push(meteorGroup);
-        
-        return true;
-      }
-    }
-    
-    return false; // No inactive meteors available
-  }
-  
-  update(delta) {
-    // Try to activate a new meteor based on probability
-    if (Math.random() < this.meteorProbability && this.activeMeteors < this.maxMeteors) {
-      this.activateMeteor();
-    }
-    
-    // Update active meteors
-    for (let i = this.meteors.length - 1; i >= 0; i--) {
-      const meteorGroup = this.meteors[i];
-      
-      if (meteorGroup.userData.active) {
-        // Update life
-        meteorGroup.userData.life += delta / 1000; // Convert delta to seconds
-        
-        // Check if meteor should be deactivated
-        if (meteorGroup.userData.life >= meteorGroup.userData.maxLife) {
-          meteorGroup.userData.active = false;
-          meteorGroup.userData.trail.visible = false;
-          meteorGroup.userData.head.visible = false;
-          this.activeMeteors--;
-          this.meteors.splice(i, 1);
-          continue;
-        }
-        
-        // Calculate progress (0 to 1)
-        const progress = meteorGroup.userData.life / meteorGroup.userData.maxLife;
-        
-        // Calculate opacity based on life (fade in and out)
-        let opacity = 1.0;
-        if (progress < 0.2) {
-          // Fade in
-          opacity = progress / 0.2;
-        } else if (progress > 0.8) {
-          // Fade out
-          opacity = (1 - progress) / 0.2;
-        }
-        
-        meteorGroup.userData.trail.material.opacity = opacity * 0.8;
-        meteorGroup.userData.head.material.opacity = opacity;
-        
-        // Calculate new position
-        const lastPos = meteorGroup.userData.positions[meteorGroup.userData.positions.length - 1];
-        const newPos = new THREE.Vector3(
-          lastPos.x + meteorGroup.userData.direction.x * meteorGroup.userData.speed * delta / 1000,
-          lastPos.y + meteorGroup.userData.direction.y * meteorGroup.userData.speed * delta / 1000,
-          lastPos.z + meteorGroup.userData.direction.z * meteorGroup.userData.speed * delta / 1000
-        );
-        
-        // Add new position to the trail
-        meteorGroup.userData.positions.push(newPos);
-        
-        // Keep only the last 20 positions
-        if (meteorGroup.userData.positions.length > 20) {
-          meteorGroup.userData.positions.shift();
-        }
-        
-        // Update trail geometry with trail positions
-        const positions = meteorGroup.userData.trail.geometry.attributes.position.array;
-        for (let j = 0; j < meteorGroup.userData.positions.length; j++) {
-          const pos = meteorGroup.userData.positions[j];
-          positions[j * 3] = pos.x;
-          positions[j * 3 + 1] = pos.y;
-          positions[j * 3 + 2] = pos.z;
-        }
-        
-        meteorGroup.userData.trail.geometry.attributes.position.needsUpdate = true;
-        
-        // Update head position to the latest position
-        meteorGroup.userData.head.position.copy(newPos);
-        
-        // Make the head always face the camera
-        meteorGroup.userData.head.lookAt(camera.position);
-      }
-    }
-  }
 }
 
 // Create a realistic Mars day sky texture based on NASA imagery and scientific data
