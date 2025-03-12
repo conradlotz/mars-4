@@ -820,6 +820,11 @@ function animate(time) {
     window.meteorSystem.update(delta);
   }
 
+  // Update Mars Scene Manager if it exists
+  if (window.marsSceneManager && rover) {
+    window.marsSceneManager.update(rover.position);
+  }
+
   // Rover Movement
   isMoving = false;
   currentSpeed = 0; // Reset current speed
@@ -2403,11 +2408,16 @@ function initializeScene() {
   // Initialize meteor system
   window.meteorSystem = new MeteorSystem(5000, 25);
   console.log("Meteor system initialized");
+
   
   // Initialize the terrain system
   terrainSystem.init();
   console.log("Terrain system initialized");
-  
+
+  // Initialize Mars Scene Manager and make it globally accessible
+  window.marsSceneManager = new MarsSceneManager(scene, 5000);
+  console.log("Mars Scene Manager initialized");
+
   // Create the sun directional light
   sun = new THREE.DirectionalLight(0xffffff, 1);
   sun.position.set(10, 100, 10);
@@ -2439,16 +2449,14 @@ function initializeScene() {
   console.log("Sun sphere added to scene");
   
   // Initialize sound system
-  soundSystem.initialize();
-  console.log("Sound system initialized");
+  if (typeof soundSystem !== 'undefined') {
+    soundSystem.initialize();
+    console.log("Sound system initialized");
+  }
   
   // Initialize UI elements including realistic mode toggle
   initializeUI();
   console.log("UI elements initialized");
-  
-  // Start the animation loop with timestamp - ONLY CALL THIS ONCE
-  console.log("Starting animation loop");
-  animate(0);
 }
 
 // Add a day/night toggle and cycle
@@ -4393,4 +4401,32 @@ soundSystem.loadYoutubeAudio('your_ambient_music_id', {
 // Start ambient sounds
 soundSystem.play('marsWind');
 soundSystem.play('baseAmbient');
+
+// Sound System Initialization
+const soundSystem = {
+  sounds: {},
+  initialize: function() {
+    // Load essential sounds
+    this.loadSound('rocketLaunch', 'sounds/rocket-launch.mp3', false);
+    this.loadSound('rocketLanding', 'sounds/rocket-landing.mp3', false);
+    this.loadSound('marsWind', 'sounds/mars-wind.mp3', true);
+    this.loadSound('baseAmbient', 'sounds/base-ambient.mp3', true);
+  },
+  loadSound: function(id, url, loop = false) {
+    const audio = new Audio(url);
+    audio.loop = loop;
+    this.sounds[id] = audio;
+  },
+  play: function(id) {
+    if (this.sounds[id]) {
+      this.sounds[id].play().catch(e => console.warn('Sound playback failed:', e));
+    }
+  },
+  stop: function(id) {
+    if (this.sounds[id]) {
+      this.sounds[id].pause();
+      this.sounds[id].currentTime = 0;
+    }
+  }
+};
 
