@@ -797,6 +797,529 @@ class MeteorSystem {
   }
 }
 
+
+// Mars Background Scene Manager
+class MarsSceneManager {
+  constructor(scene, terrainSize) {
+    this.scene = scene;
+    //this.terrainSize = terrainSize;
+    //this.backgroundElements = new Map();
+    this.rocketLaunchSites = [];
+    this.marsBases = [];
+    this.activeEvents = new Set();
+    this.lastPlayerPosition = new THREE.Vector3();
+    this.sceneRepeatDistance = 5000; // Distance after which scenes repeat
+    
+    // Initialize background elements
+    this.initializeBackgroundScenes();
+  }
+
+  initializeBackgroundScenes() {
+    // Create Mars bases at strategic locations
+    this.createMarsBases();
+    // Create rocket launch sites
+    this.createLaunchSites();
+    // Add distant mountains and geological features
+    //this.createDistantFeatures();
+  }
+
+  createMarsBases() {
+    const baseLocations = [
+      { x: 2000, z: 1000 },
+      { x: -1500, z: 2000 },
+      { x: 1000, z: -2000 }
+    ];
+
+    baseLocations.forEach(loc => {
+      const base = this.createMarsBase(loc.x, loc.z);
+      this.marsBases.push(base);
+      this.scene.add(base);
+    });
+  }
+
+  createMarsBase(x, z) {
+    const baseGroup = new THREE.Group();
+    baseGroup.position.set(x, 0, z);
+
+    // Main dome - large central habitat
+    const domeGeometry = new THREE.SphereGeometry(150, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2);
+    const domeMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0xccddff,
+      transparent: true,
+      opacity: 0.6,
+      metalness: 0.3,
+      roughness: 0.2,
+      transmission: 0.5
+    });
+    const dome = new THREE.Mesh(domeGeometry, domeMaterial);
+    
+    // Add base structures
+    const structures = this.createBaseStructures();
+    baseGroup.add(dome, ...structures);
+
+    // Add atmospheric lighting
+    const baseLight = new THREE.PointLight(0x88aaff, 1, 500);
+    baseLight.position.set(0, 100, 0);
+    baseGroup.add(baseLight);
+
+    // Position on terrain
+    const raycaster = new THREE.Raycaster();
+    raycaster.set(new THREE.Vector3(x, 1000, z), new THREE.Vector3(0, -1, 0));
+    const intersects = raycaster.intersectObjects(this.scene.children, true);
+    if (intersects.length > 0) {
+      baseGroup.position.y = intersects[0].point.y;
+    }
+
+    return baseGroup;
+  }
+
+  createBaseStructures() {
+    const structures = [];
+
+    // Create smaller domes and connecting corridors
+    for (let i = 0; i < 5; i++) {
+      const angle = (i / 5) * Math.PI * 2;
+      const radius = 200;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+
+      // Smaller habitat dome
+      const smallDome = new THREE.Mesh(
+        new THREE.SphereGeometry(50, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshPhysicalMaterial({
+          color: 0xccddff,
+          transparent: true,
+          opacity: 0.6,
+          metalness: 0.3,
+          roughness: 0.2
+        })
+      );
+      smallDome.position.set(x, 0, z);
+      structures.push(smallDome);
+
+      // Connecting corridor
+      const corridor = new THREE.Mesh(
+        new THREE.CylinderGeometry(15, 15, radius, 8),
+        new THREE.MeshStandardMaterial({ color: 0x888899 })
+      );
+      corridor.rotation.z = Math.PI / 2;
+      corridor.position.set(x/2, 15, z/2);
+      corridor.lookAt(new THREE.Vector3(0, 15, 0));
+      structures.push(corridor);
+    }
+
+    return structures;
+  }
+
+  createLaunchSites() {
+    const siteLocations = [
+      { x: 1500, z: 1500 },
+      { x: -2000, z: 1000 },
+      { x: 1000, z: -1500 }
+    ];
+
+    siteLocations.forEach(loc => {
+      const site = this.createLaunchSite(loc.x, loc.z);
+      this.rocketLaunchSites.push(site);
+      this.scene.add(site);
+    });
+  }
+
+  createLaunchSite(x, z) {
+    const siteGroup = new THREE.Group();
+    siteGroup.position.set(x, 0, z);
+
+    // Launch pad
+    const padGeometry = new THREE.CylinderGeometry(50, 50, 10, 32);
+    const padMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
+    const launchPad = new THREE.Mesh(padGeometry, padMaterial);
+
+    // Support structures
+    const supportStructures = this.createLaunchSupports();
+    siteGroup.add(launchPad, ...supportStructures);
+
+    // Position on terrain
+    const raycaster = new THREE.Raycaster();
+    raycaster.set(new THREE.Vector3(x, 1000, z), new THREE.Vector3(0, -1, 0));
+    const intersects = raycaster.intersectObjects(this.scene.children, true);
+    if (intersects.length > 0) {
+      siteGroup.position.y = intersects[0].point.y;
+    }
+
+    return siteGroup;
+  }
+
+  createLaunchSupports() {
+    const supports = [];
+
+    // Add tower and support structures
+    const towerGeometry = new THREE.BoxGeometry(10, 100, 10);
+    const towerMaterial = new THREE.MeshStandardMaterial({ color: 0x666666 });
+
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2;
+      const radius = 30;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+
+      const tower = new THREE.Mesh(towerGeometry, towerMaterial);
+      tower.position.set(x, 50, z);
+      supports.push(tower);
+    }
+
+    return supports;
+  }
+
+  createRocket() {
+    const rocketGroup = new THREE.Group();
+
+    // Rocket body
+    const bodyGeometry = new THREE.CylinderGeometry(5, 8, 80, 16);
+    const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    
+    // Nose cone
+    const noseGeometry = new THREE.ConeGeometry(5, 20, 16);
+    const nose = new THREE.Mesh(noseGeometry, bodyMaterial);
+    nose.position.y = 50;
+
+    // Fins
+    const finGeometry = new THREE.BoxGeometry(20, 2, 10);
+    const finMaterial = new THREE.MeshStandardMaterial({ color: 0xcc0000 });
+    
+    for (let i = 0; i < 4; i++) {
+      const fin = new THREE.Mesh(finGeometry, finMaterial);
+      fin.position.y = -35;
+      fin.rotation.y = (i / 4) * Math.PI * 2;
+      rocketGroup.add(fin);
+    }
+
+    rocketGroup.add(body, nose);
+    return rocketGroup;
+  }
+
+  triggerRocketEvent(type, startPosition) {
+    const rocket = this.createRocket();
+    const startPos = startPosition || this.getRandomLaunchSite().position;
+    rocket.position.copy(startPos);
+
+    const event = {
+      type: type,
+      rocket: rocket,
+      startTime: Date.now(),
+      duration: 10000, // 10 seconds for launch/landing
+      startPos: startPos.clone(),
+      endPos: type === 'launch' ? 
+        startPos.clone().add(new THREE.Vector3(0, 1000, 0)) :
+        startPos.clone()
+    };
+
+    this.scene.add(rocket);
+    this.activeEvents.add(event);
+  }
+
+  getRandomLaunchSite() {
+    return this.rocketLaunchSites[
+      Math.floor(Math.random() * this.rocketLaunchSites.length)
+    ];
+  }
+
+  update(playerPosition) {
+    // Check if player has moved far enough to trigger scene repeat
+    const distanceMoved = playerPosition.distanceTo(this.lastPlayerPosition);
+    if (distanceMoved > this.sceneRepeatDistance) {
+      this.lastPlayerPosition.copy(playerPosition);
+      this.repositionSceneElements(playerPosition);
+    }
+
+    // Random chance to trigger rocket events
+    if (Math.random() < 0.001) { // 0.1% chance per frame
+      this.triggerRocketEvent(Math.random() < 0.5 ? 'launch' : 'landing');
+    }
+
+    // Update active events
+    this.updateActiveEvents();
+  }
+
+  updateActiveEvents() {
+    for (const event of this.activeEvents) {
+      const progress = (Date.now() - event.startTime) / event.duration;
+      
+      if (progress >= 1) {
+        this.scene.remove(event.rocket);
+        this.activeEvents.delete(event);
+        continue;
+      }
+
+      if (event.type === 'launch') {
+        // Rocket launch animation
+        event.rocket.position.lerp(event.endPos, progress);
+        event.rocket.rotation.z = Math.sin(progress * Math.PI * 2) * 0.1;
+      } else {
+        // Rocket landing animation
+        event.rocket.position.lerp(event.endPos, progress);
+        event.rocket.rotation.z = Math.sin(progress * Math.PI * 2) * 0.1;
+      }
+    }
+  }
+
+  repositionSceneElements(playerPosition) {
+    // Move bases and launch sites ahead of the player
+    this.marsBases.forEach(base => {
+      if (base.position.distanceTo(playerPosition) > this.sceneRepeatDistance * 1.5) {
+        const newPos = this.getNewElementPosition(playerPosition);
+        base.position.set(newPos.x, newPos.y, newPos.z);
+      }
+    });
+
+    this.rocketLaunchSites.forEach(site => {
+      if (site.position.distanceTo(playerPosition) > this.sceneRepeatDistance * 1.5) {
+        const newPos = this.getNewElementPosition(playerPosition);
+        site.position.set(newPos.x, newPos.y, newPos.z);
+      }
+    });
+  }
+
+  getNewElementPosition(playerPosition) {
+    const angle = Math.random() * Math.PI * 2;
+    const distance = this.sceneRepeatDistance;
+    const x = playerPosition.x + Math.cos(angle) * distance;
+    const z = playerPosition.z + Math.sin(angle) * distance;
+    
+    // Find ground height at new position
+    const raycaster = new THREE.Raycaster();
+    raycaster.set(new THREE.Vector3(x, 1000, z), new THREE.Vector3(0, -1, 0));
+    const intersects = raycaster.intersectObjects(this.scene.children, true);
+    const y = intersects.length > 0 ? intersects[0].point.y : 0;
+
+    return new THREE.Vector3(x, y, z);
+  }
+
+  // createDistantFeatures() {
+  //   // Create distant mountain ranges
+  //   const mountainRanges = [
+  //     { distance: 4000, height: 800, count: 20 },
+  //     { distance: 6000, height: 1200, count: 15 },
+  //     { distance: 8000, height: 1500, count: 10 }
+  //   ];
+
+  //   mountainRanges.forEach(range => {
+  //     this.createMountainRange(range.distance, range.height, range.count);
+  //   });
+  // }
+
+  // createMountainRange(distance, maxHeight, peakCount) {
+  //   const rangeGroup = new THREE.Group();
+    
+  //   for (let i = 0; i < peakCount; i++) {
+  //     const angle = (i / peakCount) * Math.PI * 2;
+  //     const offset = (Math.random() - 0.5) * distance * 0.2;
+  //     const x = Math.cos(angle) * (distance + offset);
+  //     const z = Math.sin(angle) * (distance + offset);
+      
+  //     const height = maxHeight * (0.7 + Math.random() * 0.3);
+  //     const width = height * (0.8 + Math.random() * 0.4);
+      
+  //     const mountainGeometry = new THREE.ConeGeometry(width, height, 8);
+  //     const mountainMaterial = new THREE.MeshStandardMaterial({
+  //       color: 0xaa6644,
+  //       roughness: 0.9,
+  //       metalness: 0.1
+  //     });
+      
+  //     const mountain = new THREE.Mesh(mountainGeometry, mountainMaterial);
+  //     mountain.position.set(x, height/2, z);
+      
+  //     // Add snow caps
+  //     const snowCapGeometry = new THREE.ConeGeometry(width * 0.3, height * 0.2, 8);
+  //     const snowMaterial = new THREE.MeshStandardMaterial({
+  //       color: 0xffffff,
+  //       roughness: 0.6,
+  //       metalness: 0.1
+  //     });
+      
+  //     const snowCap = new THREE.Mesh(snowCapGeometry, snowMaterial);
+  //     snowCap.position.y = height * 0.4;
+  //     mountain.add(snowCap);
+      
+  //     rangeGroup.add(mountain);
+  //   }
+    
+  //   this.scene.add(rangeGroup);
+  // }
+
+  addRocketEffects(rocket, type) {
+    // Create engine exhaust
+    const exhaustGeometry = new THREE.ConeGeometry(3, 20, 16);
+    const exhaustMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff3300,
+      transparent: true,
+      opacity: 0.7
+    });
+    
+    const exhaust = new THREE.Mesh(exhaustGeometry, exhaustMaterial);
+    exhaust.position.y = -50;
+    exhaust.rotation.x = Math.PI;
+    rocket.add(exhaust);
+    
+    // Add engine glow
+    const glowGeometry = new THREE.SphereGeometry(8, 16, 16);
+    const glowMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff5500,
+      transparent: true,
+      opacity: 0.5
+    });
+    
+    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+    glow.position.y = -45;
+    rocket.add(glow);
+    
+    // Add point light for engine
+    const engineLight = new THREE.PointLight(0xff3300, 2, 100);
+    engineLight.position.y = -45;
+    rocket.add(engineLight);
+    
+    // Add particle system for smoke
+    const particleCount = 100;
+    const particles = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    
+    for (let i = 0; i < particleCount; i++) {
+      positions[i * 3] = (Math.random() - 0.5) * 10;
+      positions[i * 3 + 1] = -50 - Math.random() * 20;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 10;
+    }
+    
+    particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    
+    const particleMaterial = new THREE.PointsMaterial({
+      color: 0x888888,
+      size: 2,
+      transparent: true,
+      opacity: 0.5,
+      sizeAttenuation: true
+    });
+    
+    const particleSystem = new THREE.Points(particles, particleMaterial);
+    rocket.add(particleSystem);
+    
+    // Animate particles
+    const animateParticles = () => {
+      const positions = particles.attributes.position.array;
+      
+      for (let i = 0; i < particleCount; i++) {
+        positions[i * 3 + 1] -= 0.5; // Move down
+        
+        // Reset particle if too far down
+        if (positions[i * 3 + 1] < -100) {
+          positions[i * 3] = (Math.random() - 0.5) * 10;
+          positions[i * 3 + 1] = -50;
+          positions[i * 3 + 2] = (Math.random() - 0.5) * 10;
+        }
+      }
+      
+      particles.attributes.position.needsUpdate = true;
+    };
+    
+    // Store animation function for later use
+    rocket.userData.animateParticles = animateParticles;
+  }
+
+  // Modify the existing triggerRocketEvent method to include effects
+  triggerRocketEvent(type, startPosition) {
+    const rocket = this.createRocket();
+    const startPos = startPosition || this.getRandomLaunchSite().position;
+    rocket.position.copy(startPos);
+    
+    // Add rocket effects
+    this.addRocketEffects(rocket, type);
+    
+    const event = {
+      type: type,
+      rocket: rocket,
+      startTime: Date.now(),
+      duration: 10000,
+      startPos: startPos.clone(),
+      endPos: type === 'launch' ? 
+        startPos.clone().add(new THREE.Vector3(0, 1000, 0)) :
+        startPos.clone()
+    };
+    
+    this.scene.add(rocket);
+    this.activeEvents.add(event);
+    
+  }
+
+  // Modify the updateActiveEvents method to include particle animation
+  updateActiveEvents() {
+    for (const event of this.activeEvents) {
+      const progress = (Date.now() - event.startTime) / event.duration;
+      
+      if (progress >= 1) {
+        this.scene.remove(event.rocket);
+        this.activeEvents.delete(event);
+        continue;
+      }
+      
+      if (event.type === 'launch') {
+        event.rocket.position.lerp(event.endPos, progress);
+        event.rocket.rotation.z = Math.sin(progress * Math.PI * 2) * 0.1;
+      } else {
+        event.rocket.position.lerp(event.endPos, progress);
+        event.rocket.rotation.z = Math.sin(progress * Math.PI * 2) * 0.1;
+      }
+      
+      // Animate particles
+      if (event.rocket.userData.animateParticles) {
+        event.rocket.userData.animateParticles();
+      }
+    }
+  }
+
+  // updateSoundscape(playerPosition) {
+  //   // Update wind sound based on height
+  //   if (soundSystem.sounds.marsWind) {
+  //     const windVolume = Math.min(playerPosition.y / 1000, 1) * 0.5;
+  //     soundSystem.sounds.marsWind.volume = windVolume;
+  //   }
+
+  //   // Update base ambient sound based on proximity to nearest base
+  //   if (soundSystem.sounds.baseAmbient) {
+  //     let closestBaseDistance = Infinity;
+  //     this.marsBases.forEach(base => {
+  //       const distance = playerPosition.distanceTo(base.position);
+  //       closestBaseDistance = Math.min(closestBaseDistance, distance);
+  //     });
+
+  //     const baseVolume = Math.max(0, 1 - (closestBaseDistance / 500)) * 0.3;
+  //     soundSystem.sounds.baseAmbient.volume = baseVolume;
+  //   }
+  // }
+
+  // update(playerPosition) {
+  //   // Existing update code...
+    
+  //   // Update soundscape
+  //   this.updateSoundscape(playerPosition);
+    
+  //   // Rest of existing update code...
+  // }
+}
+
+// Initialize scene manager after scene setup
+const sceneManager = new MarsSceneManager(scene, 5000);
+
+// Add scene manager update to animation loop
+const originalAnimate = animate;
+animate = function(time) {
+  originalAnimate(time);
+  
+  // Update scene manager with rover position
+  if (rover) {
+    sceneManager.update(rover.position);
+  }
+};
+
 // Modify the animate function
 function animate(time) {
   requestAnimationFrame(animate);
@@ -810,12 +1333,12 @@ function animate(time) {
   
   frameCount++;
 
-  // Make the skybox follow the camera ONLY if it exists
-  if (window.spaceSkybox) {
-    window.spaceSkybox.position.copy(camera.position);
-  }
+  // // Make the skybox follow the camera ONLY if it exists
+  // if (window.spaceSkybox) {
+  //   window.spaceSkybox.position.copy(camera.position);
+  // }
   
-  // Update meteor system if it exists and we're in night mode
+  // // Update meteor system if it exists and we're in night mode
   if (window.meteorSystem && (!isDaytime || isTransitioning)) {
     window.meteorSystem.update(delta);
   }
@@ -936,12 +1459,12 @@ function animate(time) {
     }
   }
 
-  // Update Mars Scene Manager and its events
-  if (window.marsSceneManager) {
-    console.log("Updating Mars Scene Manager");
-    window.marsSceneManager.update(rover.position);
-    window.marsSceneManager.updateActiveEvents();
-  }
+  // // Update Mars Scene Manager and its events
+  // if (window.marsSceneManager) {
+  //   console.log("Updating Mars Scene Manager");
+  //   //window.marsSceneManager.update(rover.position);
+  //   window.marsSceneManager.updateActiveEvents();
+  // }
 }
 
 // Helper function to optimize wheel rotation updates
@@ -2411,7 +2934,7 @@ function initializeScene() {
 
   
   // Initialize the terrain system
-  terrainSystem.init();
+  //terrainSystem.init();
   console.log("Terrain system initialized");
 
   // Initialize Mars Scene Manager and make it globally accessible
@@ -2448,11 +2971,11 @@ function initializeScene() {
   
   console.log("Sun sphere added to scene");
   
-  // Initialize sound system
-  if (typeof soundSystem !== 'undefined') {
-    soundSystem.initialize();
-    console.log("Sound system initialized");
-  }
+  // // Initialize sound system
+  // if (typeof soundSystem !== 'undefined') {
+  //   soundSystem.initialize();
+  //   console.log("Sound system initialized");
+  // }
   
   // Initialize UI elements including realistic mode toggle
   initializeUI();
@@ -2462,36 +2985,6 @@ function initializeScene() {
 // Add a day/night toggle and cycle
 let isDaytime = true; // Ensure this is true by default
 console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
-
-
-
-function toggleDayNight() {
-  console.log("Before toggle - isDaytime:", isDaytime);
-  isDaytime = !isDaytime;
-  console.log("After toggle - isDaytime:", isDaytime);
-  addRoverHeadlights();
-  updateSkyAppearance();
-}
-
-// Add a function to force day mode
-function forceDayMode() {
-  console.log("Forcing day mode...");
-  isDaytime = true;
-  isRealisticMode = true;
-  console.log("isDaytime set to:", isDaytime);
-  console.log("isRealisticMode set to:", isRealisticMode);
-  updateSkyAppearance();
-  console.log("Day mode forced!");
-}
-
-// Expose the function globally for debugging
-window.forceDayMode = forceDayMode;
-
-// Call forceDayMode after a short delay to ensure everything is initialized
-setTimeout(() => {
-  console.log("Auto-forcing day mode after initialization");
-  forceDayMode();
-}, 2000);
 
 function updateSkyAppearance(transitionProgress = null) {
   console.log("Updating sky appearance - isDaytime:", isDaytime);
@@ -2891,122 +3384,6 @@ function initializeUI() {
   // Add realistic mode toggle
   addRealisticModeToggle();
 }
-
-// Create a completely new function to force day mode that doesn't rely on existing code
-function forceMarsDayMode() {
-  console.log("EMERGENCY: Forcing Mars day mode...");
-  
-  // 1. Set the state variables
-  isDaytime = true;
-  isRealisticMode = true;
-  isTransitioning = false;
-  
-  // 2. Create a new day sky texture directly
-  const canvas = document.createElement('canvas');
-  const size = 2048;
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext('2d');
-  
-  // Create a bright Mars day sky gradient
-  const gradient = context.createLinearGradient(0, size, 0, 0);
-  gradient.addColorStop(0, '#e8b090'); // Bright dusty orange at horizon
-  gradient.addColorStop(0.5, '#f0c0a0'); // Lighter in middle
-  gradient.addColorStop(1, '#f8d0b0'); // Very light at zenith
-  
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, size, size);
-  
-  // Create a texture from the canvas
-  const skyTexture = new THREE.CanvasTexture(canvas);
-  skyTexture.mapping = THREE.EquirectangularReflectionMapping;
-  
-  // 3. Apply the sky texture directly
-  scene.background = skyTexture;
-  
-  // 4. Create and apply a bright day fog
-  scene.fog = new THREE.Fog(0xe8b090, 200, 2000);
-  
-  // 5. Make sure the sun is visible and bright
-  if (typeof sunSphere !== 'undefined' && sunSphere) {
-    sunSphere.visible = true;
-    sunSphere.material.opacity = 1.0;
-    sunSphere.position.set(500, 300, -1000); // Position high in the sky
-    
-    // Make the sun brighter
-    if (sunSphere.material) {
-      sunSphere.material.color.setHex(0xffffff);
-    }
-  }
-  
-  // 6. Make sure the night skybox is removed
-  if (typeof spaceSkybox !== 'undefined' && spaceSkybox && scene.getObjectById(spaceSkybox.id)) {
-    scene.remove(spaceSkybox);
-  }
-  
-  // 7. Increase lighting intensity
-  if (typeof sunLight !== 'undefined' && sunLight) {
-    sunLight.intensity = 1.2;
-    sunLight.position.set(10, 100, 10);
-  }
-  
-  if (typeof ambientLight !== 'undefined' && ambientLight) {
-    ambientLight.intensity = 0.8;
-    ambientLight.color.set(0xffd0a0);
-  }
-  
-  console.log("Emergency day mode forced!");
-  
-  // 8. Update UI buttons to reflect current state
-  const buttons = document.querySelectorAll('button');
-  buttons.forEach(button => {
-    if (button.textContent.includes('Night') || button.textContent.includes('Day')) {
-      button.textContent = 'Switch to Night';
-    }
-  });
-  
-  // 9. Return true to confirm the function executed
-  return true;
-}
-
-// Add a highly visible emergency button
-function addEmergencyDayButton() {
-  const emergencyButton = document.createElement('button');
-  emergencyButton.textContent = '🔆 EMERGENCY DAY MODE 🔆';
-  emergencyButton.style.position = 'absolute';
-  emergencyButton.style.top = '20px';
-  emergencyButton.style.left = '20px';
-  emergencyButton.style.padding = '15px';
-  emergencyButton.style.backgroundColor = '#ff5500';
-  emergencyButton.style.color = 'white';
-  emergencyButton.style.border = '3px solid yellow';
-  emergencyButton.style.borderRadius = '5px';
-  emergencyButton.style.cursor = 'pointer';
-  emergencyButton.style.zIndex = '2000';
-  emergencyButton.style.fontWeight = 'bold';
-  emergencyButton.style.fontSize = '16px';
-  
-  emergencyButton.addEventListener('click', forceMarsDayMode);
-  
-  document.body.appendChild(emergencyButton);
-  
-  console.log("Emergency day button added");
-}
-
-// Call this immediately after the script loads
-setTimeout(() => {
-  console.log("Adding emergency day button...");
-  addEmergencyDayButton();
-  
-  // Also try to force day mode automatically
-  setTimeout(() => {
-    console.log("Auto-triggering emergency day mode...");
-    forceMarsDayMode();
-  }, 3000);
-}, 1000);
-
-// Also expose the function globally for console access
-window.forceMarsDayMode = forceMarsDayMode;
 
 // Add a more sophisticated day/night cycle with smooth transitions
 let currentTimeOfDay = 0.5; // 0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk, 1 = midnight
@@ -3857,576 +4234,3 @@ document.addEventListener('keydown', function(event) {
     toggleDayNight();
   }
 });
-
-
-// Mars Background Scene Manager
-class MarsSceneManager {
-  constructor(scene, terrainSize) {
-    this.scene = scene;
-    this.terrainSize = terrainSize;
-    this.backgroundElements = new Map();
-    this.rocketLaunchSites = [];
-    this.marsBases = [];
-    this.activeEvents = new Set();
-    this.lastPlayerPosition = new THREE.Vector3();
-    this.sceneRepeatDistance = 5000; // Distance after which scenes repeat
-    
-    // Initialize background elements
-    this.initializeBackgroundScenes();
-  }
-
-  initializeBackgroundScenes() {
-    // Create Mars bases at strategic locations
-    this.createMarsBases();
-    // Create rocket launch sites
-    this.createLaunchSites();
-    // Add distant mountains and geological features
-    this.createDistantFeatures();
-  }
-
-  createMarsBases() {
-    const baseLocations = [
-      { x: 2000, z: 1000 },
-      { x: -1500, z: 2000 },
-      { x: 1000, z: -2000 }
-    ];
-
-    baseLocations.forEach(loc => {
-      const base = this.createMarsBase(loc.x, loc.z);
-      this.marsBases.push(base);
-      this.scene.add(base);
-    });
-  }
-
-  createMarsBase(x, z) {
-    const baseGroup = new THREE.Group();
-    baseGroup.position.set(x, 0, z);
-
-    // Main dome - large central habitat
-    const domeGeometry = new THREE.SphereGeometry(150, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2);
-    const domeMaterial = new THREE.MeshPhysicalMaterial({
-      color: 0xccddff,
-      transparent: true,
-      opacity: 0.6,
-      metalness: 0.3,
-      roughness: 0.2,
-      transmission: 0.5
-    });
-    const dome = new THREE.Mesh(domeGeometry, domeMaterial);
-    
-    // Add base structures
-    const structures = this.createBaseStructures();
-    baseGroup.add(dome, ...structures);
-
-    // Add atmospheric lighting
-    const baseLight = new THREE.PointLight(0x88aaff, 1, 500);
-    baseLight.position.set(0, 100, 0);
-    baseGroup.add(baseLight);
-
-    // Position on terrain
-    const raycaster = new THREE.Raycaster();
-    raycaster.set(new THREE.Vector3(x, 1000, z), new THREE.Vector3(0, -1, 0));
-    const intersects = raycaster.intersectObjects(this.scene.children, true);
-    if (intersects.length > 0) {
-      baseGroup.position.y = intersects[0].point.y;
-    }
-
-    return baseGroup;
-  }
-
-  createBaseStructures() {
-    const structures = [];
-
-    // Create smaller domes and connecting corridors
-    for (let i = 0; i < 5; i++) {
-      const angle = (i / 5) * Math.PI * 2;
-      const radius = 200;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-
-      // Smaller habitat dome
-      const smallDome = new THREE.Mesh(
-        new THREE.SphereGeometry(50, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2),
-        new THREE.MeshPhysicalMaterial({
-          color: 0xccddff,
-          transparent: true,
-          opacity: 0.6,
-          metalness: 0.3,
-          roughness: 0.2
-        })
-      );
-      smallDome.position.set(x, 0, z);
-      structures.push(smallDome);
-
-      // Connecting corridor
-      const corridor = new THREE.Mesh(
-        new THREE.CylinderGeometry(15, 15, radius, 8),
-        new THREE.MeshStandardMaterial({ color: 0x888899 })
-      );
-      corridor.rotation.z = Math.PI / 2;
-      corridor.position.set(x/2, 15, z/2);
-      corridor.lookAt(new THREE.Vector3(0, 15, 0));
-      structures.push(corridor);
-    }
-
-    return structures;
-  }
-
-  createLaunchSites() {
-    const siteLocations = [
-      { x: 1500, z: 1500 },
-      { x: -2000, z: 1000 },
-      { x: 1000, z: -1500 }
-    ];
-
-    siteLocations.forEach(loc => {
-      const site = this.createLaunchSite(loc.x, loc.z);
-      this.rocketLaunchSites.push(site);
-      this.scene.add(site);
-    });
-  }
-
-  createLaunchSite(x, z) {
-    const siteGroup = new THREE.Group();
-    siteGroup.position.set(x, 0, z);
-
-    // Launch pad
-    const padGeometry = new THREE.CylinderGeometry(50, 50, 10, 32);
-    const padMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
-    const launchPad = new THREE.Mesh(padGeometry, padMaterial);
-
-    // Support structures
-    const supportStructures = this.createLaunchSupports();
-    siteGroup.add(launchPad, ...supportStructures);
-
-    // Position on terrain
-    const raycaster = new THREE.Raycaster();
-    raycaster.set(new THREE.Vector3(x, 1000, z), new THREE.Vector3(0, -1, 0));
-    const intersects = raycaster.intersectObjects(this.scene.children, true);
-    if (intersects.length > 0) {
-      siteGroup.position.y = intersects[0].point.y;
-    }
-
-    return siteGroup;
-  }
-
-  createLaunchSupports() {
-    const supports = [];
-
-    // Add tower and support structures
-    const towerGeometry = new THREE.BoxGeometry(10, 100, 10);
-    const towerMaterial = new THREE.MeshStandardMaterial({ color: 0x666666 });
-
-    for (let i = 0; i < 4; i++) {
-      const angle = (i / 4) * Math.PI * 2;
-      const radius = 30;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-
-      const tower = new THREE.Mesh(towerGeometry, towerMaterial);
-      tower.position.set(x, 50, z);
-      supports.push(tower);
-    }
-
-    return supports;
-  }
-
-  createRocket() {
-    const rocketGroup = new THREE.Group();
-
-    // Rocket body
-    const bodyGeometry = new THREE.CylinderGeometry(5, 8, 80, 16);
-    const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    
-    // Nose cone
-    const noseGeometry = new THREE.ConeGeometry(5, 20, 16);
-    const nose = new THREE.Mesh(noseGeometry, bodyMaterial);
-    nose.position.y = 50;
-
-    // Fins
-    const finGeometry = new THREE.BoxGeometry(20, 2, 10);
-    const finMaterial = new THREE.MeshStandardMaterial({ color: 0xcc0000 });
-    
-    for (let i = 0; i < 4; i++) {
-      const fin = new THREE.Mesh(finGeometry, finMaterial);
-      fin.position.y = -35;
-      fin.rotation.y = (i / 4) * Math.PI * 2;
-      rocketGroup.add(fin);
-    }
-
-    rocketGroup.add(body, nose);
-    return rocketGroup;
-  }
-
-  triggerRocketEvent(type, startPosition) {
-    const rocket = this.createRocket();
-    const startPos = startPosition || this.getRandomLaunchSite().position;
-    rocket.position.copy(startPos);
-
-    const event = {
-      type: type,
-      rocket: rocket,
-      startTime: Date.now(),
-      duration: 10000, // 10 seconds for launch/landing
-      startPos: startPos.clone(),
-      endPos: type === 'launch' ? 
-        startPos.clone().add(new THREE.Vector3(0, 1000, 0)) :
-        startPos.clone()
-    };
-
-    this.scene.add(rocket);
-    this.activeEvents.add(event);
-  }
-
-  getRandomLaunchSite() {
-    return this.rocketLaunchSites[
-      Math.floor(Math.random() * this.rocketLaunchSites.length)
-    ];
-  }
-
-  update(playerPosition) {
-    // Check if player has moved far enough to trigger scene repeat
-    const distanceMoved = playerPosition.distanceTo(this.lastPlayerPosition);
-    if (distanceMoved > this.sceneRepeatDistance) {
-      this.lastPlayerPosition.copy(playerPosition);
-      this.repositionSceneElements(playerPosition);
-    }
-
-    // Random chance to trigger rocket events
-    if (Math.random() < 0.001) { // 0.1% chance per frame
-      this.triggerRocketEvent(Math.random() < 0.5 ? 'launch' : 'landing');
-    }
-
-    // Update active events
-    this.updateActiveEvents();
-  }
-
-  updateActiveEvents() {
-    for (const event of this.activeEvents) {
-      const progress = (Date.now() - event.startTime) / event.duration;
-      
-      if (progress >= 1) {
-        this.scene.remove(event.rocket);
-        this.activeEvents.delete(event);
-        continue;
-      }
-
-      if (event.type === 'launch') {
-        // Rocket launch animation
-        event.rocket.position.lerp(event.endPos, progress);
-        event.rocket.rotation.z = Math.sin(progress * Math.PI * 2) * 0.1;
-      } else {
-        // Rocket landing animation
-        event.rocket.position.lerp(event.endPos, progress);
-        event.rocket.rotation.z = Math.sin(progress * Math.PI * 2) * 0.1;
-      }
-    }
-  }
-
-  repositionSceneElements(playerPosition) {
-    // Move bases and launch sites ahead of the player
-    this.marsBases.forEach(base => {
-      if (base.position.distanceTo(playerPosition) > this.sceneRepeatDistance * 1.5) {
-        const newPos = this.getNewElementPosition(playerPosition);
-        base.position.set(newPos.x, newPos.y, newPos.z);
-      }
-    });
-
-    this.rocketLaunchSites.forEach(site => {
-      if (site.position.distanceTo(playerPosition) > this.sceneRepeatDistance * 1.5) {
-        const newPos = this.getNewElementPosition(playerPosition);
-        site.position.set(newPos.x, newPos.y, newPos.z);
-      }
-    });
-  }
-
-  getNewElementPosition(playerPosition) {
-    const angle = Math.random() * Math.PI * 2;
-    const distance = this.sceneRepeatDistance;
-    const x = playerPosition.x + Math.cos(angle) * distance;
-    const z = playerPosition.z + Math.sin(angle) * distance;
-    
-    // Find ground height at new position
-    const raycaster = new THREE.Raycaster();
-    raycaster.set(new THREE.Vector3(x, 1000, z), new THREE.Vector3(0, -1, 0));
-    const intersects = raycaster.intersectObjects(this.scene.children, true);
-    const y = intersects.length > 0 ? intersects[0].point.y : 0;
-
-    return new THREE.Vector3(x, y, z);
-  }
-
-  createDistantFeatures() {
-    // Create distant mountain ranges
-    const mountainRanges = [
-      { distance: 4000, height: 800, count: 20 },
-      { distance: 6000, height: 1200, count: 15 },
-      { distance: 8000, height: 1500, count: 10 }
-    ];
-
-    mountainRanges.forEach(range => {
-      this.createMountainRange(range.distance, range.height, range.count);
-    });
-  }
-
-  createMountainRange(distance, maxHeight, peakCount) {
-    const rangeGroup = new THREE.Group();
-    
-    for (let i = 0; i < peakCount; i++) {
-      const angle = (i / peakCount) * Math.PI * 2;
-      const offset = (Math.random() - 0.5) * distance * 0.2;
-      const x = Math.cos(angle) * (distance + offset);
-      const z = Math.sin(angle) * (distance + offset);
-      
-      const height = maxHeight * (0.7 + Math.random() * 0.3);
-      const width = height * (0.8 + Math.random() * 0.4);
-      
-      const mountainGeometry = new THREE.ConeGeometry(width, height, 8);
-      const mountainMaterial = new THREE.MeshStandardMaterial({
-        color: 0xaa6644,
-        roughness: 0.9,
-        metalness: 0.1
-      });
-      
-      const mountain = new THREE.Mesh(mountainGeometry, mountainMaterial);
-      mountain.position.set(x, height/2, z);
-      
-      // Add snow caps
-      const snowCapGeometry = new THREE.ConeGeometry(width * 0.3, height * 0.2, 8);
-      const snowMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        roughness: 0.6,
-        metalness: 0.1
-      });
-      
-      const snowCap = new THREE.Mesh(snowCapGeometry, snowMaterial);
-      snowCap.position.y = height * 0.4;
-      mountain.add(snowCap);
-      
-      rangeGroup.add(mountain);
-    }
-    
-    this.scene.add(rangeGroup);
-  }
-
-  addRocketEffects(rocket, type) {
-    // Create engine exhaust
-    const exhaustGeometry = new THREE.ConeGeometry(3, 20, 16);
-    const exhaustMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff3300,
-      transparent: true,
-      opacity: 0.7
-    });
-    
-    const exhaust = new THREE.Mesh(exhaustGeometry, exhaustMaterial);
-    exhaust.position.y = -50;
-    exhaust.rotation.x = Math.PI;
-    rocket.add(exhaust);
-    
-    // Add engine glow
-    const glowGeometry = new THREE.SphereGeometry(8, 16, 16);
-    const glowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff5500,
-      transparent: true,
-      opacity: 0.5
-    });
-    
-    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-    glow.position.y = -45;
-    rocket.add(glow);
-    
-    // Add point light for engine
-    const engineLight = new THREE.PointLight(0xff3300, 2, 100);
-    engineLight.position.y = -45;
-    rocket.add(engineLight);
-    
-    // Add particle system for smoke
-    const particleCount = 100;
-    const particles = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-    
-    for (let i = 0; i < particleCount; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * 10;
-      positions[i * 3 + 1] = -50 - Math.random() * 20;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 10;
-    }
-    
-    particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    
-    const particleMaterial = new THREE.PointsMaterial({
-      color: 0x888888,
-      size: 2,
-      transparent: true,
-      opacity: 0.5,
-      sizeAttenuation: true
-    });
-    
-    const particleSystem = new THREE.Points(particles, particleMaterial);
-    rocket.add(particleSystem);
-    
-    // Animate particles
-    const animateParticles = () => {
-      const positions = particles.attributes.position.array;
-      
-      for (let i = 0; i < particleCount; i++) {
-        positions[i * 3 + 1] -= 0.5; // Move down
-        
-        // Reset particle if too far down
-        if (positions[i * 3 + 1] < -100) {
-          positions[i * 3] = (Math.random() - 0.5) * 10;
-          positions[i * 3 + 1] = -50;
-          positions[i * 3 + 2] = (Math.random() - 0.5) * 10;
-        }
-      }
-      
-      particles.attributes.position.needsUpdate = true;
-    };
-    
-    // Store animation function for later use
-    rocket.userData.animateParticles = animateParticles;
-  }
-
-  // Modify the existing triggerRocketEvent method to include effects
-  triggerRocketEvent(type, startPosition) {
-    const rocket = this.createRocket();
-    const startPos = startPosition || this.getRandomLaunchSite().position;
-    rocket.position.copy(startPos);
-    
-    // Add rocket effects
-    this.addRocketEffects(rocket, type);
-    
-    const event = {
-      type: type,
-      rocket: rocket,
-      startTime: Date.now(),
-      duration: 10000,
-      startPos: startPos.clone(),
-      endPos: type === 'launch' ? 
-        startPos.clone().add(new THREE.Vector3(0, 1000, 0)) :
-        startPos.clone()
-    };
-    
-    this.scene.add(rocket);
-    this.activeEvents.add(event);
-    
-    // Add launch/landing sound effect
-    if (typeof soundSystem !== 'undefined') {
-      soundSystem.play(type === 'launch' ? 'rocketLaunch' : 'rocketLanding');
-    }
-  }
-
-  // Modify the updateActiveEvents method to include particle animation
-  updateActiveEvents() {
-    for (const event of this.activeEvents) {
-      const progress = (Date.now() - event.startTime) / event.duration;
-      
-      if (progress >= 1) {
-        this.scene.remove(event.rocket);
-        this.activeEvents.delete(event);
-        continue;
-      }
-      
-      if (event.type === 'launch') {
-        event.rocket.position.lerp(event.endPos, progress);
-        event.rocket.rotation.z = Math.sin(progress * Math.PI * 2) * 0.1;
-      } else {
-        event.rocket.position.lerp(event.endPos, progress);
-        event.rocket.rotation.z = Math.sin(progress * Math.PI * 2) * 0.1;
-      }
-      
-      // Animate particles
-      if (event.rocket.userData.animateParticles) {
-        event.rocket.userData.animateParticles();
-      }
-    }
-  }
-
-  updateSoundscape(playerPosition) {
-    // Update wind sound based on height
-    if (soundSystem.sounds.marsWind) {
-      const windVolume = Math.min(playerPosition.y / 1000, 1) * 0.5;
-      soundSystem.sounds.marsWind.volume = windVolume;
-    }
-
-    // Update base ambient sound based on proximity to nearest base
-    if (soundSystem.sounds.baseAmbient) {
-      let closestBaseDistance = Infinity;
-      this.marsBases.forEach(base => {
-        const distance = playerPosition.distanceTo(base.position);
-        closestBaseDistance = Math.min(closestBaseDistance, distance);
-      });
-
-      const baseVolume = Math.max(0, 1 - (closestBaseDistance / 500)) * 0.3;
-      soundSystem.sounds.baseAmbient.volume = baseVolume;
-    }
-  }
-
-  update(playerPosition) {
-    // Existing update code...
-    
-    // Update soundscape
-    this.updateSoundscape(playerPosition);
-    
-    // Rest of existing update code...
-  }
-}
-
-// Initialize scene manager after scene setup
-const sceneManager = new MarsSceneManager(scene, 5000);
-
-// Add scene manager update to animation loop
-const originalAnimate = animate;
-animate = function(time) {
-  originalAnimate(time);
-  
-  // Update scene manager with rover position
-  if (rover) {
-    sceneManager.update(rover.position);
-  }
-};
-
-// Add ambient sound effects
-soundSystem.loadSound('rocketLaunch', 'https://assets.mixkit.co/active_storage/sfx/2019/03/22/sfx-2019-03-22-18-50-42-371.mp3', false);
-soundSystem.loadSound('rocketLanding', 'https://assets.mixkit.co/active_storage/sfx/2019/03/22/sfx-2019-03-22-18-50-42-372.mp3', false);
-soundSystem.loadSound('marsWind', 'https://assets.mixkit.co/active_storage/sfx/2019/03/22/sfx-2019-03-22-18-50-42-373.mp3', true);
-soundSystem.loadSound('baseAmbient', 'https://assets.mixkit.co/active_storage/sfx/2019/03/22/sfx-2019-03-22-18-50-42-374.mp3', true);
-
-// Add background music from YouTube (optional, will only play if user interacts)
-soundSystem.loadYoutubeAudio('your_ambient_music_id', {
-  autoplay: false,
-  loop: true,
-  volume: 30
-});
-
-// Start ambient sounds
-soundSystem.play('marsWind');
-soundSystem.play('baseAmbient');
-
-// Sound System Initialization
-const soundSystem = {
-  sounds: {},
-  initialize: function() {
-    // Load essential sounds
-    this.loadSound('rocketLaunch', 'sounds/rocket-launch.mp3', false);
-    this.loadSound('rocketLanding', 'sounds/rocket-landing.mp3', false);
-    this.loadSound('marsWind', 'sounds/mars-wind.mp3', true);
-    this.loadSound('baseAmbient', 'sounds/base-ambient.mp3', true);
-  },
-  loadSound: function(id, url, loop = false) {
-    const audio = new Audio(url);
-    audio.loop = loop;
-    this.sounds[id] = audio;
-  },
-  play: function(id) {
-    if (this.sounds[id]) {
-      this.sounds[id].play().catch(e => console.warn('Sound playback failed:', e));
-    }
-  },
-  stop: function(id) {
-    if (this.sounds[id]) {
-      this.sounds[id].pause();
-      this.sounds[id].currentTime = 0;
-    }
-  }
-};
-
