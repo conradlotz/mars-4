@@ -1137,28 +1137,131 @@ class MarsSceneManager {
   createRocket() {
     const rocketGroup = new THREE.Group();
 
-    // Rocket body
-    const bodyGeometry = new THREE.CylinderGeometry(5, 8, 80, 16);
-    const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
+    // Main body - stainless steel with metallic finish
+    const bodyGeometry = new THREE.CylinderGeometry(10, 10, 150, 32);
+    const bodyMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0xE8E8E8,
+      metalness: 0.8,
+      roughness: 0.2,
+      envMapIntensity: 1.0
+    });
     const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
 
-    // Nose cone
-    const noseGeometry = new THREE.ConeGeometry(5, 20, 16);
+    // Nose section - slightly tapered
+    const noseGeometry = new THREE.CylinderGeometry(7, 10, 30, 32);
     const nose = new THREE.Mesh(noseGeometry, bodyMaterial);
-    nose.position.y = 50;
+    nose.position.y = 90;
 
-    // Fins
-    const finGeometry = new THREE.BoxGeometry(20, 2, 10);
-    const finMaterial = new THREE.MeshStandardMaterial({ color: 0xcc0000 });
+    // Black thermal protection band near bottom
+    const heatShieldGeometry = new THREE.CylinderGeometry(10.1, 10.1, 40, 32);
+    const heatShieldMaterial = new THREE.MeshStandardMaterial({
+      color: 0x222222,
+      roughness: 0.7,
+      metalness: 0.3
+    });
+    const heatShield = new THREE.Mesh(heatShieldGeometry, heatShieldMaterial);
+    heatShield.position.y = -40;
 
-    for (let i = 0; i < 4; i++) {
-      const fin = new THREE.Mesh(finGeometry, finMaterial);
-      fin.position.y = -35;
-      fin.rotation.y = (i / 4) * Math.PI * 2;
-      rocketGroup.add(fin);
+    // Upper flaps (smaller and more angular than previous version)
+    const upperFlapGeometry = new THREE.BoxGeometry(20, 2, 10);
+    const flapMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0xE8E8E8,
+      metalness: 0.8,
+      roughness: 0.2
+    });
+
+    // Two upper flaps
+    const upperFlapLeft = new THREE.Mesh(upperFlapGeometry, flapMaterial);
+    upperFlapLeft.position.set(-12, 60, 0);
+    upperFlapLeft.rotation.z = -0.2;
+    
+    const upperFlapRight = new THREE.Mesh(upperFlapGeometry, flapMaterial);
+    upperFlapRight.position.set(12, 60, 0);
+    upperFlapRight.rotation.z = 0.2;
+
+    // Lower flaps (slightly larger than upper)
+    const lowerFlapGeometry = new THREE.BoxGeometry(25, 2, 12);
+    
+    const lowerFlapLeft = new THREE.Mesh(lowerFlapGeometry, flapMaterial);
+    lowerFlapLeft.position.set(-14, -30, 0);
+    lowerFlapLeft.rotation.z = 0.2;
+    
+    const lowerFlapRight = new THREE.Mesh(lowerFlapGeometry, flapMaterial);
+    lowerFlapRight.position.set(14, -30, 0);
+    lowerFlapRight.rotation.z = -0.2;
+
+    // Engine section with Raptor engines
+    const engineSection = new THREE.Group();
+    const engineCount = 3; // Starship has 3 sea-level Raptor engines
+    const engineRadius = 6;
+
+    for (let i = 0; i < engineCount; i++) {
+      const angle = (i / engineCount) * Math.PI * 2;
+      
+      // Engine bell
+      const engineGeometry = new THREE.CylinderGeometry(2, 3, 8, 16);
+      const engineMaterial = new THREE.MeshStandardMaterial({
+        color: 0x666666,
+        metalness: 0.9,
+        roughness: 0.3
+      });
+      const engine = new THREE.Mesh(engineGeometry, engineMaterial);
+      
+      engine.position.x = Math.cos(angle) * engineRadius;
+      engine.position.z = Math.sin(angle) * engineRadius;
+      engine.position.y = -78;
+      
+      // Add engine detail (injector plate)
+      const injectorGeometry = new THREE.CylinderGeometry(1.5, 1.5, 1, 16);
+      const injector = new THREE.Mesh(injectorGeometry, engineMaterial);
+      injector.position.y = 4;
+      engine.add(injector);
+      
+      engineSection.add(engine);
     }
 
-    rocketGroup.add(body, nose);
+    // Add surface details - grid pattern for tiles
+    const gridSize = 5;
+    const tileSize = 2;
+    for (let i = 0; i < gridSize; i++) {
+      for (let j = 0; j < gridSize; j++) {
+        const tileGeometry = new THREE.BoxGeometry(tileSize, 0.1, tileSize);
+        const tile = new THREE.Mesh(tileGeometry, heatShieldMaterial);
+        tile.position.set(
+          (i - gridSize/2) * (tileSize + 0.5),
+          -20,
+          (j - gridSize/2) * (tileSize + 0.5)
+        );
+        body.add(tile);
+      }
+    }
+
+    // Add surface details - pipes and conduits
+    const pipeCount = 8;
+    for (let i = 0; i < pipeCount; i++) {
+      const pipeGeometry = new THREE.CylinderGeometry(0.3, 0.3, 40, 8);
+      const pipe = new THREE.Mesh(pipeGeometry, bodyMaterial);
+      pipe.position.y = -20;
+      pipe.position.x = Math.cos(i * Math.PI / 4) * 9;
+      pipe.position.z = Math.sin(i * Math.PI / 4) * 9;
+      body.add(pipe);
+    }
+
+    // Combine all parts
+    rocketGroup.add(body, nose, heatShield, upperFlapLeft, upperFlapRight, 
+                    lowerFlapLeft, lowerFlapRight, engineSection);
+
+    // Add subtle ambient occlusion to the entire rocket
+    const aoMaterial = new THREE.MeshStandardMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.1
+    });
+    
+    const aoGeometry = new THREE.CylinderGeometry(10.2, 10.2, 150, 32);
+    const ao = new THREE.Mesh(aoGeometry, aoMaterial);
+    rocketGroup.add(ao);
+
     return rocketGroup;
   }
 
@@ -1168,7 +1271,7 @@ class MarsSceneManager {
     rocket.position.copy(startPos);
   
     // Increase duration for slower launch/landing
-    const duration = 20000; // 20 seconds for a more dramatic effect
+    const duration = 10000; // 20 seconds for a more dramatic effect
   
     const event = {
       type: type,
@@ -1483,7 +1586,7 @@ class MarsSceneManager {
     }
 
     // Random chance to trigger rocket events
-    if (Math.random() < 0.001) { // 0.1% chance per frame
+    if (Math.random() < 0.01) { // 0.1% chance per frame
       this.triggerRocketEvent(Math.random() < 0.5 ? 'launch' : 'landing');
     }
 
@@ -1493,7 +1596,8 @@ class MarsSceneManager {
 
   updateActiveEvents() {
     for (const event of this.activeEvents) {
-      const progress = (Date.now() - event.startTime) / event.duration;
+      const elapsedTime = Date.now() - event.startTime;
+      const progress = elapsedTime / event.duration;
 
       if (progress >= 1) {
         this.scene.remove(event.rocket);
@@ -1501,14 +1605,16 @@ class MarsSceneManager {
         continue;
       }
 
+      const slowProgress = progress * 0.5; // Slow down the progress by half
+
       if (event.type === 'launch') {
         // Rocket launch animation
-        event.rocket.position.lerp(event.endPos, progress);
-        event.rocket.rotation.z = Math.sin(progress * Math.PI * 2) * 0.1;
+        event.rocket.position.lerp(event.endPos, slowProgress);
+        event.rocket.rotation.z = Math.sin(slowProgress * Math.PI * 2) * 0.1;
       } else {
         // Rocket landing animation
-        event.rocket.position.lerp(event.endPos, progress);
-        event.rocket.rotation.z = Math.sin(progress * Math.PI * 2) * 0.1;
+        event.rocket.position.lerp(event.endPos, slowProgress);
+        event.rocket.rotation.z = Math.sin(slowProgress * Math.PI * 2) * 0.1;
       }
     }
   }
@@ -3837,7 +3943,7 @@ function initializeUI() {
 
 // Add a more sophisticated day/night cycle with smooth transitions
 let currentTimeOfDay = 0.5; // 0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk, 1 = midnight
-let dayNightCycleSpeed = 0.0001; // Speed of day/night cycle (smaller = slower)
+let dayNightCycleSpeed = 0.00001; // Speed of day/night cycle (smaller = slower)
 let isManualTransition = false;
 let manualTransitionTarget = null;
 let manualTransitionSpeed = 0.005;
@@ -4376,7 +4482,7 @@ function updateTimeIndicator(timeOfDay) {
 }
 
 // Function to transition to a specific time of day
-function transitionToTimeOfDay(targetTime, speed = 0.005) {
+function transitionToTimeOfDay(targetTime, speed = 0.0005) {
   isManualTransition = true;
   manualTransitionTarget = targetTime;
   manualTransitionSpeed = speed;
@@ -4454,7 +4560,7 @@ function startDayNightCycle() {
   // Use a 1-minute cycle duration
   setInterval(() => {
     toggleDayNight();
-  }, 30000); // 30 seconds for each cycle
+  }, 60000); // 30 seconds for each cycle
 
   // Add a manual toggle button for testing
   const toggleButton = document.createElement('button');
@@ -4676,7 +4782,7 @@ function updateSkyAppearance(transitionProgress = null) {
 }
 
 // Start the day/night cycle
-startDayNightCycle();
+//startDayNightCycle();
 
 // Add a keypress handler for toggling
 document.addEventListener('keydown', function (event) {
