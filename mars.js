@@ -815,12 +815,9 @@ class MarsSceneManager {
   }
 
   initializeBackgroundScenes() {
-    // Create Mars bases at strategic locations
+    // Create Mars skyscraper city
     this.createMarsBase();
-    // Create rocket launch sites
-    this.createLaunchSites();
-    // Add distant mountains and geological features
-    //this.createDistantFeatures();
+    // Focus only on the city - removed rocket launch sites for simplicity
   }
 
   createSingleBase(x, z) {
@@ -848,12 +845,6 @@ class MarsSceneManager {
   }
 
   createMarsBase() {
-    const baseLocations = [
-      { x: 2000, z: 1000 },
-      { x: -2500, z: 2000 },
-      { x: 1000, z: -3000 }
-    ];
-
     // Clear any existing bases
     this.marsBases.forEach(base => {
       if (base && base.parent) {
@@ -862,216 +853,358 @@ class MarsSceneManager {
     });
     this.marsBases = [];
 
-    baseLocations.forEach(loc => {
-      const base = this.createSingleBase(loc.x, loc.z);
-      // Add a check to ensure bases aren't too close to each other
-      const isTooClose = this.marsBases.some(existingBase => {
-        const distance = existingBase.position.distanceTo(base.position);
-        return distance < 1500; // Minimum distance between bases
-      });
+    // Create a single impressive skyscraper city
+    const cityLocation = { x: 1500, z: 1000 };
+    const city = this.createSingleBase(cityLocation.x, cityLocation.z);
+    this.marsBases.push(city);
+    this.scene.add(city);
 
-      if (!isTooClose) {
-        this.marsBases.push(base);
-        this.scene.add(base);
-      }
-    });
+    // Add atmospheric effects around the city
+    this.addCityAtmosphere(city);
   }
 
-  // Helper function to create corridors with support structures
-  createCorridor(x, z, length) {
-    const corridorParts = [];
-    const startPoint = new THREE.Vector3(0, 25, 0);
-    const endPoint = new THREE.Vector3(x, 25, z);
-    const direction = endPoint.clone().sub(startPoint).normalize();
+  // Add atmospheric effects around the city
+  addCityAtmosphere(city) {
+    const cityPosition = city.position;
+    
+    // Add atmospheric dome around the city
+    const atmosphereGeometry = new THREE.SphereGeometry(500, 32, 32);
+    const atmosphereMaterial = new THREE.MeshBasicMaterial({
+      color: 0x4488ff,
+      transparent: true,
+      opacity: 0.1,
+      side: THREE.DoubleSide
+    });
+    const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
+    atmosphere.position.copy(cityPosition);
+    atmosphere.position.y += 200;
+    city.add(atmosphere);
 
-    // Create main corridor tube
-    const corridorGeometry = new THREE.CylinderGeometry(8, 8, length, 16);
-    const corridor = new THREE.Mesh(
-      corridorGeometry,
-      new THREE.MeshPhysicalMaterial({
-        color: 0xccddff,
-        transparent: true,
-        opacity: 0.8,
-        metalness: 0.3,
-        roughness: 0.2
-      })
-    );
+    // Add city-wide ambient lighting
+    const cityAmbientLight = new THREE.AmbientLight(0x4488ff, 0.3);
+    city.add(cityAmbientLight);
 
-    corridor.position.set(x / 2, 25, z / 2);
-    corridor.lookAt(new THREE.Vector3(0, 25, 0));
-    corridor.rotateX(Math.PI / 2);
-    corridorParts.push(corridor);
+    // Add directional light for the city
+    const cityDirectionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    cityDirectionalLight.position.set(100, 300, 100);
+    cityDirectionalLight.target.position.copy(cityPosition);
+    cityDirectionalLight.castShadow = true;
+    cityDirectionalLight.shadow.mapSize.width = 2048;
+    cityDirectionalLight.shadow.mapSize.height = 2048;
+    cityDirectionalLight.shadow.camera.near = 0.5;
+    cityDirectionalLight.shadow.camera.far = 1000;
+    cityDirectionalLight.shadow.camera.left = -500;
+    cityDirectionalLight.shadow.camera.right = 500;
+    cityDirectionalLight.shadow.camera.top = 500;
+    cityDirectionalLight.shadow.camera.bottom = -500;
+    city.add(cityDirectionalLight);
+    city.add(cityDirectionalLight.target);
 
-    // Add support pillars
-    const pillarCount = Math.floor(length / 40);
-    for (let i = 1; i < pillarCount; i++) {
-      const t = i / pillarCount;
-      const pillar = new THREE.Mesh(
-        new THREE.CylinderGeometry(3, 5, 20, 8),
-        new THREE.MeshStandardMaterial({ color: 0x777788 })
-      );
+    // Add floating particles around the city
+    this.addCityParticles(city);
+  }
 
-      pillar.position.set(
-        x * t,
-        15,
-        z * t
-      );
-      corridorParts.push(pillar);
+  // Add floating particles for atmospheric effect
+  addCityParticles(city) {
+    const particleCount = 200;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const colors = new Float32Array(particleCount * 3);
+
+    for (let i = 0; i < particleCount; i++) {
+      // Random positions around the city
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 200 + Math.random() * 300;
+      const height = 50 + Math.random() * 400;
+
+      positions[i * 3] = Math.cos(angle) * radius;
+      positions[i * 3 + 1] = height;
+      positions[i * 3 + 2] = Math.sin(angle) * radius;
+
+      // Soft blue/white colors
+      const intensity = 0.5 + Math.random() * 0.5;
+      colors[i * 3] = intensity * 0.8;     // R
+      colors[i * 3 + 1] = intensity * 0.9; // G  
+      colors[i * 3 + 2] = intensity;       // B
     }
 
-    return corridorParts;
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const material = new THREE.PointsMaterial({
+      size: 3,
+      transparent: true,
+      opacity: 0.6,
+      vertexColors: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+
+    const particles = new THREE.Points(geometry, material);
+    city.add(particles);
+
+    // Animate particles
+    const animateParticles = () => {
+      const positions = particles.geometry.attributes.position.array;
+      const time = Date.now() * 0.001;
+
+      for (let i = 0; i < particleCount; i++) {
+        positions[i * 3 + 1] += Math.sin(time + i * 0.1) * 0.2;
+        
+        // Reset particles that drift too high
+        if (positions[i * 3 + 1] > 500) {
+          positions[i * 3 + 1] = 50;
+        }
+      }
+
+      particles.geometry.attributes.position.needsUpdate = true;
+      requestAnimationFrame(animateParticles);
+    };
+
+    animateParticles();
   }
 
   createBaseStructures() {
     const structures = [];
 
-    // Create main circular platform with detailed rim
+    // Create main circular platform foundation
     const basePlatform = new THREE.Mesh(
-      new THREE.CylinderGeometry(350, 380, 20, 64),
+      new THREE.CylinderGeometry(400, 420, 30, 64),
       new THREE.MeshStandardMaterial({
-        color: 0x666677,
+        color: 0x333344,
         roughness: 0.8,
-        metalness: 0.3
-      })
-    );
-    basePlatform.position.y = 5;
-    structures.push(basePlatform);
-
-    // Add rim details
-    const rimDetail = new THREE.Mesh(
-      new THREE.CylinderGeometry(380, 385, 30, 64),
-      new THREE.MeshStandardMaterial({
-        color: 0x444455,
-        roughness: 0.7,
         metalness: 0.4
       })
     );
-    rimDetail.position.y = 0;
-    structures.push(rimDetail);
+    basePlatform.position.y = 15;
+    basePlatform.castShadow = true;
+    basePlatform.receiveShadow = true;
+    structures.push(basePlatform);
 
-    // Create central tiered dome
-    const tiers = [
-      { radius: 120, height: 60, y: 30 },
-      { radius: 100, height: 40, y: 80 },
-      { radius: 80, height: 30, y: 115 }
-    ];
+    // Create central mega skyscraper
+    const centralTower = this.createSkyscraper(0, 0, 80, 600, 0x4455aa, 'central');
+    structures.push(...centralTower);
 
-    tiers.forEach(tier => {
-      // Base of each tier
-      const tierBase = new THREE.Mesh(
-        new THREE.CylinderGeometry(tier.radius, tier.radius + 5, tier.height, 32),
-        new THREE.MeshPhysicalMaterial({
-          color: 0x888899,
-          metalness: 0.5,
-          roughness: 0.3
-        })
-      );
-      tierBase.position.set(0, tier.y, 0);
-      structures.push(tierBase);
-
-      // Dome of each tier
-      const tierDome = new THREE.Mesh(
-        new THREE.SphereGeometry(tier.radius, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2),
-        new THREE.MeshPhysicalMaterial({
-          color: 0xccddff,
-          transparent: true,
-          opacity: 0.6,
-          metalness: 0.3,
-          roughness: 0.2,
-          transmission: 0.2,
-          clearcoat: 0.3
-        })
-      );
-      tierDome.position.set(0, tier.y + tier.height / 2, 0);
-      structures.push(tierDome);
-    });
-
-    // Create agricultural sections in a radial pattern
-    const sectionCount = 8;
-    for (let i = 0; i < sectionCount; i++) {
-      const angle = (i / sectionCount) * Math.PI * 2;
-      const radius = 250; // Distance from center
-
+    // Create ring of tall skyscrapers
+    const ringCount = 8;
+    for (let i = 0; i < ringCount; i++) {
+      const angle = (i / ringCount) * Math.PI * 2;
+      const radius = 250;
       const x = Math.cos(angle) * radius;
       const z = Math.sin(angle) * radius;
-
-      // Create greenhouse section
-      const greenhouse = new THREE.Mesh(
-        new THREE.BoxGeometry(60, 15, 40),
-        new THREE.MeshPhysicalMaterial({
-          color: 0xccddff,
-          transparent: true,
-          opacity: 0.7,
-          metalness: 0.2,
-          roughness: 0.1,
-          transmission: 0.3
-        })
-      );
-      greenhouse.position.set(x, 20, z);
-      greenhouse.rotation.y = angle;
-      structures.push(greenhouse);
-
-      // Add greenhouse roof
-      const roof = new THREE.Mesh(
-        new THREE.CylinderGeometry(30, 30, 40, 1, 1, true),
-        new THREE.MeshPhysicalMaterial({
-          color: 0xccddff,
-          transparent: true,
-          opacity: 0.7,
-          metalness: 0.2,
-          roughness: 0.1,
-          transmission: 0.3
-        })
-      );
-      roof.rotation.x = Math.PI / 2;
-      roof.rotation.y = angle;
-      roof.position.set(x, 35, z);
-      structures.push(roof);
+      
+      const height = 300 + Math.random() * 200; // Vary heights
+      const width = 40 + Math.random() * 20;
+      const color = [0x5566bb, 0x6677cc, 0x7788dd, 0x4455aa][Math.floor(Math.random() * 4)];
+      
+      const skyscraper = this.createSkyscraper(x, z, width, height, color, 'residential');
+      structures.push(...skyscraper);
     }
 
-    // Create smaller domes in a circular pattern
-    const domeCount = 6;
-    for (let i = 0; i < domeCount; i++) {
-      const angle = (i / domeCount) * Math.PI * 2;
-      const radius = 180; // Distance from center
-
+    // Create outer ring of medium skyscrapers
+    const outerRingCount = 12;
+    for (let i = 0; i < outerRingCount; i++) {
+      const angle = (i / outerRingCount) * Math.PI * 2;
+      const radius = 350;
       const x = Math.cos(angle) * radius;
       const z = Math.sin(angle) * radius;
-
-      // Create foundation
-      const foundation = new THREE.Mesh(
-        new THREE.CylinderGeometry(25, 27, 20, 16),
-        new THREE.MeshStandardMaterial({
-          color: 0x888899,
-          roughness: 0.7,
-          metalness: 0.2
-        })
-      );
-      foundation.position.set(x, 20, z);
-      structures.push(foundation);
-
-      // Create dome
-      const smallDome = new THREE.Mesh(
-        new THREE.SphereGeometry(25, 32, 32, 0, Math.PI * 2, 0, Math.PI / 2),
-        new THREE.MeshPhysicalMaterial({
-          color: 0xccddff,
-          transparent: true,
-          opacity: 0.6,
-          metalness: 0.3,
-          roughness: 0.2,
-          transmission: 0.2,
-          clearcoat: 0.3
-        })
-      );
-      smallDome.position.set(x, 45, z);
-      structures.push(smallDome);
-
-      // Create connecting corridor to central hub
-      const corridor = this.createCorridor(x, z, radius);
-      structures.push(...corridor);
+      
+      const height = 150 + Math.random() * 150;
+      const width = 25 + Math.random() * 15;
+      const color = [0x6677cc, 0x7788dd, 0x8899ee, 0x5566bb][Math.floor(Math.random() * 4)];
+      
+      const skyscraper = this.createSkyscraper(x, z, width, height, color, 'commercial');
+      structures.push(...skyscraper);
     }
+
+    // Create scattered smaller buildings
+    const smallBuildingCount = 20;
+    for (let i = 0; i < smallBuildingCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 150 + Math.random() * 100;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      
+      const height = 50 + Math.random() * 100;
+      const width = 15 + Math.random() * 10;
+      const color = [0x7788dd, 0x8899ee, 0x99aaff, 0x6677cc][Math.floor(Math.random() * 4)];
+      
+      const building = this.createSkyscraper(x, z, width, height, color, 'utility');
+      structures.push(...building);
+    }
+
+    // Add connecting bridges between tall buildings
+    this.createSkyBridges(structures);
 
     return structures;
+  }
+
+  createSkyscraper(x, z, width, height, color, type) {
+    const parts = [];
+    
+    // Main building structure
+    const buildingGeometry = new THREE.BoxGeometry(width, height, width * 0.8);
+    const buildingMaterial = new THREE.MeshStandardMaterial({
+      color: color,
+      roughness: 0.3,
+      metalness: 0.7
+    });
+    const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+    building.position.set(x, height / 2 + 30, z);
+    building.castShadow = true;
+    building.receiveShadow = true;
+    parts.push(building);
+
+    // Add building details based on type
+    if (type === 'central') {
+      // Central spire
+      const spireGeometry = new THREE.CylinderGeometry(width * 0.2, width * 0.4, height * 0.3, 16);
+      const spire = new THREE.Mesh(spireGeometry, buildingMaterial);
+      spire.position.set(x, height + height * 0.15 + 30, z);
+      spire.castShadow = true;
+      parts.push(spire);
+
+      // Communication array
+      const arrayGeometry = new THREE.CylinderGeometry(2, 2, 50, 8);
+      const arrayMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.9 });
+      const array = new THREE.Mesh(arrayGeometry, arrayMaterial);
+      array.position.set(x, height + height * 0.3 + 55, z);
+      parts.push(array);
+    }
+
+    // Add windows pattern
+    const windowRows = Math.floor(height / 20);
+    const windowCols = Math.floor(width / 8);
+    
+    for (let row = 0; row < windowRows; row++) {
+      for (let col = 0; col < windowCols; col++) {
+        if (Math.random() > 0.3) { // 70% chance for lit windows
+          const windowGeometry = new THREE.PlaneGeometry(3, 3);
+          const windowMaterial = new THREE.MeshBasicMaterial({
+            color: Math.random() > 0.5 ? 0xffffaa : 0xaaffff,
+            transparent: true,
+            opacity: 0.8
+          });
+          
+          const window = new THREE.Mesh(windowGeometry, windowMaterial);
+          window.position.set(
+            x + (width / 2) + 0.1,
+            30 + (row * 20) + 10,
+            z - (width * 0.4) + (col * 8)
+          );
+          window.rotation.y = -Math.PI / 2;
+          parts.push(window);
+        }
+      }
+    }
+
+    // Add landing platforms for flying vehicles
+    if (height > 200) {
+      const platformCount = Math.floor(height / 150);
+      for (let i = 0; i < platformCount; i++) {
+        const platformY = 100 + (i * 150);
+        const platformGeometry = new THREE.CylinderGeometry(width * 0.8, width * 0.8, 3, 16);
+        const platformMaterial = new THREE.MeshStandardMaterial({
+          color: 0x666677,
+          metalness: 0.8,
+          roughness: 0.2
+        });
+        const platform = new THREE.Mesh(platformGeometry, platformMaterial);
+        platform.position.set(x, platformY, z);
+        platform.castShadow = true;
+        parts.push(platform);
+
+        // Add platform lights
+        const lightGeometry = new THREE.CylinderGeometry(1, 1, 2, 8);
+        const lightMaterial = new THREE.MeshBasicMaterial({ color: 0x00ffff });
+        for (let j = 0; j < 4; j++) {
+          const lightAngle = (j / 4) * Math.PI * 2;
+          const lightRadius = width * 0.6;
+          const light = new THREE.Mesh(lightGeometry, lightMaterial);
+          light.position.set(
+            x + Math.cos(lightAngle) * lightRadius,
+            platformY + 2,
+            z + Math.sin(lightAngle) * lightRadius
+          );
+          parts.push(light);
+        }
+      }
+    }
+
+    // Add atmospheric lighting
+    const buildingLight = new THREE.PointLight(color, 0.5, width * 3);
+    buildingLight.position.set(x, height / 2 + 30, z);
+    parts.push(buildingLight);
+
+    return parts;
+  }
+
+  createSkyBridges(structures) {
+    // Add bridges between the tallest buildings
+    const tallBuildings = [];
+    
+    // Find buildings over 250 units tall
+    structures.forEach(structure => {
+      if (structure.geometry && structure.geometry.type === 'BoxGeometry' && 
+          structure.position.y > 150) {
+        tallBuildings.push(structure);
+      }
+    });
+
+    // Create bridges between nearby tall buildings
+    for (let i = 0; i < tallBuildings.length; i++) {
+      for (let j = i + 1; j < tallBuildings.length; j++) {
+        const building1 = tallBuildings[i];
+        const building2 = tallBuildings[j];
+        const distance = building1.position.distanceTo(building2.position);
+        
+        if (distance < 200 && distance > 50) { // Optimal bridge distance
+          const bridgeHeight = Math.min(building1.position.y, building2.position.y) - 50;
+          const bridgeGeometry = new THREE.BoxGeometry(distance, 8, 12);
+          const bridgeMaterial = new THREE.MeshStandardMaterial({
+            color: 0x555566,
+            metalness: 0.8,
+            roughness: 0.3,
+            transparent: true,
+            opacity: 0.9
+          });
+          
+          const bridge = new THREE.Mesh(bridgeGeometry, bridgeMaterial);
+          bridge.position.set(
+            (building1.position.x + building2.position.x) / 2,
+            bridgeHeight,
+            (building1.position.z + building2.position.z) / 2
+          );
+          
+          // Rotate bridge to connect buildings
+          const angle = Math.atan2(
+            building2.position.z - building1.position.z,
+            building2.position.x - building1.position.x
+          );
+          bridge.rotation.y = angle;
+          bridge.castShadow = true;
+          bridge.receiveShadow = true;
+          
+          structures.push(bridge);
+
+          // Add bridge lighting
+          const bridgeLightCount = Math.floor(distance / 30);
+          for (let k = 0; k < bridgeLightCount; k++) {
+            const lightProgress = k / (bridgeLightCount - 1);
+            const lightGeometry = new THREE.SphereGeometry(2, 8, 8);
+            const lightMaterial = new THREE.MeshBasicMaterial({ color: 0x00aaff });
+            const bridgeLight = new THREE.Mesh(lightGeometry, lightMaterial);
+            
+            bridgeLight.position.set(
+              building1.position.x + (building2.position.x - building1.position.x) * lightProgress,
+              bridgeHeight + 5,
+              building1.position.z + (building2.position.z - building1.position.z) * lightProgress
+            );
+            structures.push(bridgeLight);
+          }
+        }
+      }
+    }
   }
 
 
@@ -1585,13 +1718,8 @@ class MarsSceneManager {
       this.repositionSceneElements(playerPosition);
     }
 
-    // Random chance to trigger rocket events
-    if (Math.random() < 0.01) { // 0.1% chance per frame
-      this.triggerRocketEvent(Math.random() < 0.5 ? 'launch' : 'landing');
-    }
-
-    // Update active events
-    this.updateActiveEvents();
+    // Update city lighting based on time of day
+    this.updateCityLighting();
   }
 
   updateActiveEvents() {
@@ -1620,20 +1748,54 @@ class MarsSceneManager {
   }
 
   repositionSceneElements(playerPosition) {
-    // Move bases and launch sites ahead of the player
-    this.marsBases.forEach(base => {
-      if (base.position.distanceTo(playerPosition) > this.sceneRepeatDistance * 1.5) {
+    // Move city if player has moved too far away
+    this.marsBases.forEach(city => {
+      if (city.position.distanceTo(playerPosition) > this.sceneRepeatDistance * 1.5) {
         const newPos = this.getNewElementPosition(playerPosition);
-        base.position.set(newPos.x, newPos.y, newPos.z);
+        city.position.set(newPos.x, newPos.y, newPos.z);
       }
     });
+  }
 
-    this.rocketLaunchSites.forEach(site => {
-      if (site.position.distanceTo(playerPosition) > this.sceneRepeatDistance * 1.5) {
-        const newPos = this.getNewElementPosition(playerPosition);
-        site.position.set(newPos.x, newPos.y, newPos.z);
+  // Update city lighting based on time of day
+  updateCityLighting() {
+    if (typeof timeOfDay !== 'undefined') {
+      const intensity = this.getCityLightIntensity(timeOfDay);
+      
+      this.marsBases.forEach(city => {
+        // Update building lights
+        city.traverse((child) => {
+          if (child.material && child.material.color) {
+            // Adjust building window brightness
+            if (child.material.color.r > 0.8) { // Likely a window
+              child.material.opacity = intensity;
+            }
+          }
+          
+          // Update point lights
+          if (child.isPointLight) {
+            child.intensity = intensity * 0.5;
+          }
+        });
+      });
+    }
+  }
+
+  // Calculate city light intensity based on time of day
+  getCityLightIntensity(timeOfDay) {
+    // Lights are brightest at night (0.0-0.2 and 0.8-1.0)
+    if (timeOfDay < 0.2 || timeOfDay > 0.8) {
+      return 1.0; // Full brightness at night
+    } else if (timeOfDay > 0.3 && timeOfDay < 0.7) {
+      return 0.3; // Dim during day
+    } else {
+      // Transition periods (dawn/dusk)
+      if (timeOfDay < 0.3) {
+        return 1.0 - ((timeOfDay - 0.2) / 0.1) * 0.7; // Fade out at dawn
+      } else {
+        return 0.3 + ((timeOfDay - 0.7) / 0.1) * 0.7; // Fade in at dusk
       }
-    });
+    }
   }
 
   getNewElementPosition(playerPosition) {
