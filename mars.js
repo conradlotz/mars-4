@@ -544,6 +544,9 @@ let frameCount = 0;
 let lastTime = 0;
 const FRAME_THROTTLE = 3; // Only perform heavy operations every N frames
 
+// Add previousPosition variable for collision detection
+let previousPosition = new THREE.Vector3(0, 0, 0);
+
 // Add these variables at the top level of your script
 let isTransitioning = false;
 let transitionStartTime = 0;
@@ -1239,7 +1242,121 @@ class MarsSceneManager {
   initializeBackgroundScenes() {
     // Create Mars skyscraper city
     this.createMarsBase();
-    // Focus only on the city - removed rocket launch sites for simplicity
+    // Create rocket launch sites
+    this.createLaunchSites();
+    
+    // Initialize rocket launch timing system
+    this.initializeRocketLaunchSystem();
+  }
+
+  initializeRocketLaunchSystem() {
+    // Rocket launch timing variables - reduced frequency for better performance
+    this.rocketLaunchInterval = 60000; // 1 minute = 60000ms
+    this.lastRocketLaunch = 0;
+    this.rocketLaunchActive = true;
+    this.maxSimultaneousRockets = 3; // Reduced for better performance
+    
+    // Simplified launch patterns for better performance
+    this.launchPatterns = [
+      { type: 'single', count: 1, delay: 0 },
+      { type: 'double', count: 2, delay: 3000 },
+      { type: 'triple', count: 3, delay: 2000 }
+    ];
+    
+    // Start the rocket launch cycle
+    this.startRocketLaunchCycle();
+  }
+
+  // Control methods for rocket launch system
+  setRocketLaunchInterval(milliseconds) {
+    this.rocketLaunchInterval = milliseconds;
+  }
+
+  enableRocketLaunches() {
+    this.rocketLaunchActive = true;
+    if (window.showNotification) {
+      window.showNotification('🚀 SpaceX Rocket Launches ENABLED', 3000);
+    }
+  }
+
+  disableRocketLaunches() {
+    this.rocketLaunchActive = false;
+    if (window.showNotification) {
+      window.showNotification('🚀 SpaceX Rocket Launches DISABLED', 3000);
+    }
+  }
+
+  triggerManualLaunch(patternType = 'random') {
+    if (patternType === 'random') {
+      this.triggerRocketLaunchSequence();
+    } else {
+      const pattern = this.launchPatterns.find(p => p.type === patternType) || this.launchPatterns[0];
+      const eventType = Math.random() > 0.5 ? 'launch' : 'landing';
+      
+      for (let i = 0; i < pattern.count; i++) {
+        setTimeout(() => {
+          if (this.activeEvents.size < this.maxSimultaneousRockets) {
+            this.triggerRocketEvent(eventType);
+          }
+        }, i * pattern.delay);
+      }
+    }
+  }
+
+  startRocketLaunchCycle() {
+    // Schedule the first launch after 15 seconds to allow system to load
+    setTimeout(() => {
+      this.triggerRocketLaunchSequence();
+      
+      // Set up recurring launches every minute with performance check
+      setInterval(() => {
+        if (this.rocketLaunchActive && this.activeEvents.size < this.maxSimultaneousRockets) {
+          // Only launch if system isn't overloaded
+          if (performance.now() - (window.lastFrameTime || 0) < 100) {
+            this.triggerRocketLaunchSequence();
+          }
+        }
+      }, this.rocketLaunchInterval);
+    }, 15000);
+  }
+
+  triggerRocketLaunchSequence() {
+    // Choose a random launch pattern
+    const pattern = this.launchPatterns[Math.floor(Math.random() * this.launchPatterns.length)];
+    
+    // Decide if this is a launch or landing sequence
+    const isLaunch = Math.random() > 0.3; // 70% chance of launch, 30% chance of landing
+    const eventType = isLaunch ? 'launch' : 'landing';
+    
+    // Show notification about the upcoming launch sequence
+    if (window.showNotification) {
+      window.showNotification(`🚀 SpaceX ${eventType.toUpperCase()} Sequence! ${pattern.count} Starship rockets ${eventType === 'launch' ? 'launching' : 'landing'} (${pattern.type})`, 6000);
+    }
+    
+    // Launch rockets with delays based on pattern
+    for (let i = 0; i < pattern.count; i++) {
+      setTimeout(() => {
+        if (this.activeEvents.size < this.maxSimultaneousRockets) {
+          this.triggerRocketEvent(eventType);
+        }
+      }, i * pattern.delay);
+    }
+    
+    // Schedule additional mixed launches/landings for more activity
+    if (Math.random() > 0.5) {
+      setTimeout(() => {
+        const additionalCount = Math.floor(Math.random() * 2) + 1;
+        const additionalType = eventType === 'launch' ? 'landing' : 'launch';
+        
+        for (let i = 0; i < additionalCount; i++) {
+          setTimeout(() => {
+            if (this.activeEvents.size < this.maxSimultaneousRockets) {
+              this.triggerRocketEvent(additionalType);
+            }
+          }, i * 2000);
+        }
+      }, 20000); // 20 seconds after main sequence
+    }
   }
 
   createSingleBase(x, z, type = 'metropolis') {
@@ -1952,9 +2069,11 @@ class MarsSceneManager {
 
   createLaunchSites() {
     const siteLocations = [
-      { x: 1500, z: 1500 },
-      { x: -2000, z: 1000 },
-      { x: 1000, z: -1500 }
+      { x: 300, z: 300 },    // Closer to starting position
+      { x: -400, z: 200 },   // Closer to starting position
+      { x: 200, z: -300 },   // Closer to starting position
+      { x: 500, z: -100 },   // Additional closer site
+      { x: -300, z: -400 }   // Additional closer site
     ];
 
     siteLocations.forEach(loc => {
@@ -2677,16 +2796,28 @@ class MarsSceneManager {
         continue;
       }
 
-      const slowProgress = progress * 0.5; // Slow down the progress by half
-
       if (event.type === 'launch') {
-        // Rocket launch animation
-        event.rocket.position.lerp(event.endPos, slowProgress);
-        event.rocket.rotation.z = Math.sin(slowProgress * Math.PI * 2) * 0.1;
+        // Rocket launch animation - use easing for smooth acceleration
+        const easeProgress = this.easeInOutCubic(progress);
+        event.rocket.position.lerp(event.endPos, easeProgress);
+        
+        // Add slight wobble and rotation
+        event.rocket.rotation.z = Math.sin(progress * Math.PI * 4) * 0.05;
+        
+        // Update engine effects if they exist
+        if (event.engineParticles) {
+          event.engineParticles.update(progress);
+        }
       } else {
-        // Rocket landing animation
-        event.rocket.position.lerp(event.endPos, slowProgress);
-        event.rocket.rotation.z = Math.sin(slowProgress * Math.PI * 2) * 0.1;
+        // Rocket landing animation - use easing for controlled descent
+        const easeProgress = this.easeInOutCubic(1 - progress);
+        event.rocket.position.lerp(event.endPos, easeProgress);
+        event.rocket.rotation.z = Math.sin(progress * Math.PI * 4) * 0.05;
+        
+        // Update engine effects for landing burn
+        if (event.engineParticles) {
+          event.engineParticles.update(1 - progress);
+        }
       }
     }
   }
@@ -2887,56 +3018,7 @@ class MarsSceneManager {
     rocket.userData.animateParticles = animateParticles;
   }
 
-  // Modify the existing triggerRocketEvent method to include effects
-  triggerRocketEvent(type, startPosition) {
-    const rocket = this.createRocket();
-    const startPos = startPosition || this.getRandomLaunchSite().position;
-    rocket.position.copy(startPos);
 
-    // Add rocket effects
-    this.addRocketEffects(rocket, type);
-
-    const event = {
-      type: type,
-      rocket: rocket,
-      startTime: Date.now(),
-      duration: 10000,
-      startPos: startPos.clone(),
-      endPos: type === 'launch' ?
-        startPos.clone().add(new THREE.Vector3(0, 1000, 0)) :
-        startPos.clone()
-    };
-
-    this.scene.add(rocket);
-    this.activeEvents.add(event);
-
-  }
-
-  // Modify the updateActiveEvents method to include particle animation
-  updateActiveEvents() {
-    for (const event of this.activeEvents) {
-      const progress = (Date.now() - event.startTime) / event.duration;
-
-      if (progress >= 1) {
-        this.scene.remove(event.rocket);
-        this.activeEvents.delete(event);
-        continue;
-      }
-
-      if (event.type === 'launch') {
-        event.rocket.position.lerp(event.endPos, progress);
-        event.rocket.rotation.z = Math.sin(progress * Math.PI * 2) * 0.1;
-      } else {
-        event.rocket.position.lerp(event.endPos, progress);
-        event.rocket.rotation.z = Math.sin(progress * Math.PI * 2) * 0.1;
-      }
-
-      // Animate particles
-      if (event.rocket.userData.animateParticles) {
-        event.rocket.userData.animateParticles();
-      }
-    }
-  }
 
   // updateSoundscape(playerPosition) {
   //   // Update wind sound based on height
@@ -3010,14 +3092,17 @@ function animate(time) {
     window.meteorSystem.update(delta);
   }
 
-  // Update Mars Scene Manager if it exists (throttled for performance)
-  if (window.marsSceneManager && rover && frameCount % (frameThrottle * 2) === 0) {
+  // Update Mars Scene Manager if it exists (heavily throttled for performance)
+  if (window.marsSceneManager && rover && frameCount % (frameThrottle * 4) === 0) {
     window.marsSceneManager.update(rover.position);
   }
 
   // Rover Movement
   isMoving = false;
   currentSpeed = 0; // Reset current speed
+
+  // Store previous position before moving
+  previousPosition.copy(rover.position);
 
   if (keys.w || keys.s) {
     isMoving = true;
@@ -3116,19 +3201,24 @@ function animate(time) {
     const deltaTime = (time - lastUpdateTime) / 1000; // Convert to seconds
     lastUpdateTime = time;
 
-    // Update atmospheric effects system (now that deltaTime is available)
-    if (window.atmosphericEffects && rover) {
-      window.atmosphericEffects.update(deltaTime * 1000, rover.position); // Convert back to milliseconds for consistency
-    }
+      // Update atmospheric effects system (now that deltaTime is available)
+  if (window.atmosphericEffects && rover) {
+    window.atmosphericEffects.update(deltaTime * 1000, rover.position); // Convert back to milliseconds for consistency
+  }
 
-    // Calculate distance based on current speed with scaling factor
-    // Only add distance when moving forward (positive speed)
-    if (currentSpeed > 0) {
-      // Apply a scaling factor to make the distance more noticeable
-      const scaledSpeed = currentSpeed * DISTANCE_SCALE_FACTOR;
-      const speedInMilesPerSecond = scaledSpeed * 0.000621371;
-      distanceTraveled += speedInMilesPerSecond * deltaTime;
-    }
+  // Update enhanced systems (missions, samples, etc.) - throttled for performance
+  if (typeof updateEnhancedSystems === 'function' && rover && frameCount % (frameThrottle * 3) === 0) {
+    updateEnhancedSystems(deltaTime, rover.position);
+  }
+
+  // Calculate distance based on current speed with scaling factor
+  // Only add distance when moving forward (positive speed)
+  if (currentSpeed > 0) {
+    // Apply a scaling factor to make the distance more noticeable
+    const scaledSpeed = currentSpeed * DISTANCE_SCALE_FACTOR;
+    const speedInMilesPerSecond = scaledSpeed * 0.000621371;
+    distanceTraveled += speedInMilesPerSecond * deltaTime;
+  }
 
     // Update the HUD with the distance traveled
     if (distanceText) {
@@ -3136,12 +3226,13 @@ function animate(time) {
     }
   }
 
-  // // Update Mars Scene Manager and its events
-  // if (window.marsSceneManager) {
-  //   console.log("Updating Mars Scene Manager");
-  //   //window.marsSceneManager.update(rover.position);
-  //   window.marsSceneManager.updateActiveEvents();
-  // }
+  // Update Mars Scene Manager and its events (throttled for performance)
+  if (window.marsSceneManager && frameCount % frameThrottle === 0) {
+    window.marsSceneManager.updateActiveEvents();
+  }
+  
+  // Track frame time for performance monitoring
+  window.lastFrameTime = time;
 }
 
 // Helper function to optimize wheel rotation updates
@@ -4925,25 +5016,29 @@ function loadCoreComponents() {
 function loadNonEssentialComponents() {
   const perfSettings = getPerformanceSettings();
   
-  // Load meteor system only if performance allows
-  if (perfSettings.detailLevel !== 'low') {
+  // Load meteor system only on high performance devices
+  if (perfSettings.detailLevel === 'high') {
     lazyLoader.loadInBackground('meteorSystem', () => {
       window.meteorSystem = new MeteorSystem(5000);
       return Promise.resolve();
     });
   }
 
-  // Load Mars scene manager with delay
-  lazyLoader.loadInBackground('marsSceneManager', () => {
-    window.marsSceneManager = new MarsSceneManager(scene, 5000);
-    return Promise.resolve();
-  });
+  // Load Mars scene manager with longer delay for better performance
+  setTimeout(() => {
+    lazyLoader.loadInBackground('marsSceneManager', () => {
+      window.marsSceneManager = new MarsSceneManager(scene, 5000);
+      return Promise.resolve();
+    });
+  }, 5000);
 
-  // Load atmospheric effects system
-  lazyLoader.loadInBackground('atmosphericEffects', () => {
-    window.atmosphericEffects = new MarsAtmosphericEffects(scene);
-    return Promise.resolve();
-  });
+  // Load atmospheric effects system only on higher performance
+  if (perfSettings.detailLevel !== 'low') {
+    lazyLoader.loadInBackground('atmosphericEffects', () => {
+      window.atmosphericEffects = new MarsAtmosphericEffects(scene);
+      return Promise.resolve();
+    });
+  }
 
   // Add sun glow effect only for higher performance settings
   if (perfSettings.detailLevel === 'high') {
@@ -6225,3 +6320,841 @@ document.addEventListener('keydown', function (event) {
     toggleDayNight();
   }
 });
+
+// ==============================================================================
+// COMPREHENSIVE ENHANCEMENT SYSTEMS
+// ==============================================================================
+
+// Advanced Mission System
+class MissionSystem {
+  constructor() {
+    this.missions = [];
+    this.activeMissions = [];
+    this.completedMissions = [];
+    this.currentObjective = null;
+    this.playerXP = 0;
+    this.playerLevel = 1;
+    this.achievements = [];
+    this.missionTypes = ['tutorial', 'science', 'exploration', 'logistics', 'survival'];
+    this.initialized = false;
+    this.missionCounter = 0;
+    
+    this.initializeMissions();
+  }
+
+  initializeMissions() {
+    // Create diverse mission types
+    this.missions = [
+      // Tutorial Missions
+      {
+        id: 'tutorial_001',
+        name: 'First Steps on Mars',
+        description: 'Drive your rover 100 meters and take your first photo',
+        type: 'tutorial',
+        objectives: [
+          { type: 'drive', target: 100, current: 0, complete: false },
+          { type: 'photo', target: 1, current: 0, complete: false }
+        ],
+        reward: { xp: 50, achievement: 'First Steps' },
+        unlocked: true
+      },
+      
+      // Science Missions
+      {
+        id: 'science_001',
+        name: 'Geological Survey',
+        description: 'Collect 5 different rock samples for analysis',
+        type: 'science',
+        objectives: [
+          { type: 'collect_samples', target: 5, current: 0, complete: false }
+        ],
+        reward: { xp: 100, achievement: 'Rock Hound' },
+        unlocked: true
+      },
+      
+      {
+        id: 'science_002',
+        name: 'Meteorite Hunter',
+        description: 'Find and collect 3 meteorite samples',
+        type: 'science',
+        objectives: [
+          { type: 'collect_meteorites', target: 3, current: 0, complete: false }
+        ],
+        reward: { xp: 150, achievement: 'Meteorite Hunter' },
+        unlocked: false
+      },
+      
+      // Exploration Missions
+      {
+        id: 'exploration_001',
+        name: 'Mars Marathon',
+        description: 'Travel 1000 meters exploring the Martian surface',
+        type: 'exploration',
+        objectives: [
+          { type: 'distance', target: 1000, current: 0, complete: false }
+        ],
+        reward: { xp: 200, achievement: 'Mars Explorer' },
+        unlocked: true
+      },
+      
+      {
+        id: 'exploration_002',
+        name: 'Colony Spotter',
+        description: 'Photograph all 6 Mars colonies',
+        type: 'exploration',
+        objectives: [
+          { type: 'photo_colonies', target: 6, current: 0, complete: false }
+        ],
+        reward: { xp: 250, achievement: 'Colony Photographer' },
+        unlocked: false
+      },
+      
+      // Logistics Missions
+      {
+        id: 'logistics_001',
+        name: 'Sample Delivery',
+        description: 'Collect 10 samples and analyze them',
+        type: 'logistics',
+        objectives: [
+          { type: 'analyze_samples', target: 10, current: 0, complete: false }
+        ],
+        reward: { xp: 180, achievement: 'Lab Technician' },
+        unlocked: false
+      },
+      
+      // Survival Missions
+      {
+        id: 'survival_001',
+        name: 'Weather the Storm',
+        description: 'Survive a dust storm and continue operations',
+        type: 'survival',
+        objectives: [
+          { type: 'survive_storm', target: 1, current: 0, complete: false }
+        ],
+        reward: { xp: 300, achievement: 'Storm Survivor' },
+        unlocked: false
+      }
+    ];
+    
+    // Start with tutorial mission
+    this.activateMission('tutorial_001');
+    this.initialized = true;
+  }
+
+  activateMission(missionId) {
+    const mission = this.missions.find(m => m.id === missionId);
+    if (mission && mission.unlocked && !this.activeMissions.includes(mission)) {
+      this.activeMissions.push(mission);
+      this.currentObjective = mission.objectives[0];
+      this.showMissionNotification(`New Mission: ${mission.name}`, mission.description);
+    }
+  }
+
+  updateMissionProgress(type, amount = 1) {
+    this.activeMissions.forEach(mission => {
+      mission.objectives.forEach(objective => {
+        if (objective.type === type && !objective.complete) {
+          objective.current += amount;
+          if (objective.current >= objective.target) {
+            objective.complete = true;
+            this.checkMissionCompletion(mission);
+          }
+        }
+      });
+    });
+  }
+
+  checkMissionCompletion(mission) {
+    const allComplete = mission.objectives.every(obj => obj.complete);
+    if (allComplete) {
+      this.completeMission(mission);
+    }
+  }
+
+  completeMission(mission) {
+    this.activeMissions = this.activeMissions.filter(m => m.id !== mission.id);
+    this.completedMissions.push(mission);
+    
+    // Award rewards
+    this.playerXP += mission.reward.xp;
+    this.checkLevelUp();
+    
+    if (mission.reward.achievement) {
+      this.unlockAchievement(mission.reward.achievement);
+    }
+    
+    // Unlock next missions
+    this.unlockNextMissions(mission.type);
+    
+    this.showMissionNotification(`Mission Complete: ${mission.name}`, `+${mission.reward.xp} XP`);
+  }
+
+  unlockAchievement(name) {
+    if (!this.achievements.includes(name)) {
+      this.achievements.push(name);
+      this.showAchievementNotification(name);
+    }
+  }
+
+  checkLevelUp() {
+    const xpForNextLevel = this.playerLevel * 500;
+    if (this.playerXP >= xpForNextLevel) {
+      this.playerLevel++;
+      this.showLevelUpNotification();
+    }
+  }
+
+  unlockNextMissions(missionType) {
+    // Unlock missions based on completed mission type
+    const typeIndex = this.missionTypes.indexOf(missionType);
+    if (typeIndex !== -1) {
+      this.missions.forEach(mission => {
+        if (!mission.unlocked && mission.type === missionType) {
+          mission.unlocked = true;
+        }
+      });
+    }
+  }
+
+  showMissionNotification(title, description) {
+    if (window.showNotification) {
+      window.showNotification(`${title}: ${description}`, 6000);
+    }
+  }
+
+  showAchievementNotification(achievement) {
+    if (window.showNotification) {
+      window.showNotification(`🏆 Achievement Unlocked: ${achievement}!`, 5000);
+    }
+  }
+
+  showLevelUpNotification() {
+    if (window.showNotification) {
+      window.showNotification(`🎉 Level Up! You are now level ${this.playerLevel}!`, 4000);
+    }
+  }
+
+  getMissionStatus() {
+    return {
+      active: this.activeMissions.length,
+      completed: this.completedMissions.length,
+      total: this.missions.length,
+      xp: this.playerXP,
+      level: this.playerLevel,
+      achievements: this.achievements.length
+    };
+  }
+}
+
+// Sample Collection System
+class SampleCollectionSystem {
+  constructor(scene) {
+    this.scene = scene;
+    this.samples = [];
+    this.collectedSamples = [];
+    this.sampleTypes = [
+      { name: 'Rock', color: 0x8B4513, rarity: 'common', analysis: 'Sedimentary rock formed from ancient water deposits' },
+      { name: 'Mineral', color: 0xFFD700, rarity: 'uncommon', analysis: 'Iron oxide minerals indicating past water activity' },
+      { name: 'Meteorite', color: 0x2F4F4F, rarity: 'rare', analysis: 'Extraterrestrial material containing rare elements' },
+      { name: 'Crystal', color: 0x9370DB, rarity: 'rare', analysis: 'Crystalline structure with unique mineral composition' },
+      { name: 'Soil', color: 0xDEB887, rarity: 'common', analysis: 'Martian regolith rich in perchlorates' },
+      { name: 'Ice', color: 0x87CEEB, rarity: 'uncommon', analysis: 'Subsurface ice deposit, potential water source' },
+      { name: 'Volcanic Glass', color: 0x000000, rarity: 'very rare', analysis: 'Obsidian-like glass from ancient volcanic activity' }
+    ];
+    this.analysisData = new Map();
+    this.lastSampleTime = 0;
+    this.sampleCooldown = 2000; // 2 seconds between samples
+    
+    this.generateSamples();
+  }
+
+  generateSamples() {
+    // Generate fewer samples for better performance
+    const perfSettings = getPerformanceSettings();
+    const sampleCount = perfSettings.detailLevel === 'high' ? 100 : 
+                       perfSettings.detailLevel === 'normal' ? 50 : 25;
+    
+    for (let i = 0; i < sampleCount; i++) {
+      const sample = this.createSample();
+      this.samples.push(sample);
+      this.scene.add(sample.mesh);
+    }
+  }
+
+  createSample() {
+    const sampleType = this.getRandomSampleType();
+    const position = this.getRandomPosition();
+    
+    // Create sample mesh
+    const geometry = new THREE.OctahedronGeometry(2, 1);
+    const material = new THREE.MeshStandardMaterial({
+      color: sampleType.color,
+      emissive: sampleType.color,
+      emissiveIntensity: 0.2,
+      roughness: 0.7,
+      metalness: 0.3
+    });
+    
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.copy(position);
+    
+    // Add glow effect
+    const glowGeometry = new THREE.SphereGeometry(3, 16, 16);
+    const glowMaterial = new THREE.MeshBasicMaterial({
+      color: sampleType.color,
+      transparent: true,
+      opacity: 0.3,
+      blending: THREE.AdditiveBlending
+    });
+    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+    mesh.add(glow);
+    
+    // Add floating animation
+    const startY = position.y;
+    mesh.userData.startY = startY;
+    mesh.userData.time = Math.random() * Math.PI * 2;
+    
+    return {
+      mesh: mesh,
+      type: sampleType,
+      position: position,
+      collected: false,
+      id: `sample_${Date.now()}_${Math.random()}`
+    };
+  }
+
+  getRandomSampleType() {
+    const rarities = { common: 0.5, uncommon: 0.3, rare: 0.15, 'very rare': 0.05 };
+    const rand = Math.random();
+    let cumulative = 0;
+    
+    for (const [rarity, chance] of Object.entries(rarities)) {
+      cumulative += chance;
+      if (rand <= cumulative) {
+        const typesOfRarity = this.sampleTypes.filter(s => s.rarity === rarity);
+        return typesOfRarity[Math.floor(Math.random() * typesOfRarity.length)];
+      }
+    }
+    
+    return this.sampleTypes[0]; // fallback
+  }
+
+  getRandomPosition() {
+    const angle = Math.random() * Math.PI * 2;
+    const distance = Math.random() * 3000;
+    const x = Math.cos(angle) * distance;
+    const z = Math.sin(angle) * distance;
+    
+    // Use raycasting to place on terrain
+    const raycaster = new THREE.Raycaster();
+    raycaster.set(new THREE.Vector3(x, 1000, z), new THREE.Vector3(0, -1, 0));
+    
+    let y = 50; // default height
+    if (this.scene && this.scene.children) {
+      const intersects = raycaster.intersectObjects(this.scene.children, true);
+      if (intersects.length > 0) {
+        y = intersects[0].point.y + 3; // slightly above ground
+      }
+    }
+    
+    return new THREE.Vector3(x, y, z);
+  }
+
+  update(roverPosition) {
+    // Update sample animations
+    this.samples.forEach(sample => {
+      if (!sample.collected && sample.mesh) {
+        sample.mesh.userData.time += 0.02;
+        sample.mesh.position.y = sample.mesh.userData.startY + Math.sin(sample.mesh.userData.time) * 1;
+        sample.mesh.rotation.y += 0.01;
+        
+        // Check if rover is close enough to collect
+        const distance = roverPosition.distanceTo(sample.position);
+        if (distance < 20) {
+          // Highlight sample
+          sample.mesh.children[0].material.opacity = 0.6;
+        } else {
+          sample.mesh.children[0].material.opacity = 0.3;
+        }
+      }
+    });
+  }
+
+  collectSample(roverPosition) {
+    const currentTime = Date.now();
+    if (currentTime - this.lastSampleTime < this.sampleCooldown) {
+      return false; // Still in cooldown
+    }
+    
+    // Find closest sample
+    let closestSample = null;
+    let closestDistance = Infinity;
+    
+    this.samples.forEach(sample => {
+      if (!sample.collected) {
+        const distance = roverPosition.distanceTo(sample.position);
+        if (distance < closestDistance && distance < 20) {
+          closestDistance = distance;
+          closestSample = sample;
+        }
+      }
+    });
+    
+    if (closestSample) {
+      closestSample.collected = true;
+      this.collectedSamples.push(closestSample);
+      
+      // Remove from scene
+      this.scene.remove(closestSample.mesh);
+      
+      // Generate analysis data
+      this.generateAnalysisData(closestSample);
+      
+      // Update missions
+      if (window.missionSystem) {
+        window.missionSystem.updateMissionProgress('collect_samples');
+        if (closestSample.type.name === 'Meteorite') {
+          window.missionSystem.updateMissionProgress('collect_meteorites');
+        }
+      }
+      
+      // Show notification
+      if (window.showNotification) {
+        window.showNotification(`Collected ${closestSample.type.name} sample (${closestSample.type.rarity})`, 3000);
+      }
+      
+      this.lastSampleTime = currentTime;
+      return true;
+    }
+    
+    return false;
+  }
+
+  generateAnalysisData(sample) {
+    const data = {
+      id: sample.id,
+      name: sample.type.name,
+      rarity: sample.type.rarity,
+      composition: this.generateComposition(sample.type),
+      age: this.generateAge(sample.type),
+      origin: this.generateOrigin(sample.type),
+      analysis: sample.type.analysis,
+      collectTime: new Date().toISOString()
+    };
+    
+    this.analysisData.set(sample.id, data);
+  }
+
+  generateComposition(type) {
+    const compositions = {
+      'Rock': ['Silicon Dioxide (45%)', 'Iron Oxide (25%)', 'Magnesium Oxide (15%)', 'Calcium Oxide (10%)', 'Other (5%)'],
+      'Mineral': ['Iron Oxide (60%)', 'Silicon Dioxide (20%)', 'Aluminum Oxide (10%)', 'Magnesium Oxide (5%)', 'Other (5%)'],
+      'Meteorite': ['Iron (70%)', 'Nickel (25%)', 'Cobalt (3%)', 'Rare Elements (2%)'],
+      'Crystal': ['Silicon Dioxide (80%)', 'Aluminum Oxide (15%)', 'Trace Elements (5%)'],
+      'Soil': ['Iron Oxide (30%)', 'Silicon Dioxide (25%)', 'Magnesium Oxide (20%)', 'Perchlorates (15%)', 'Other (10%)'],
+      'Ice': ['Water Ice (95%)', 'Carbon Dioxide (3%)', 'Salts (2%)'],
+      'Volcanic Glass': ['Silicon Dioxide (70%)', 'Aluminum Oxide (15%)', 'Iron Oxide (10%)', 'Other (5%)']
+    };
+    
+    return compositions[type.name] || ['Unknown composition'];
+  }
+
+  generateAge(type) {
+    const ages = {
+      'Rock': `${Math.floor(Math.random() * 3000) + 1000} million years`,
+      'Mineral': `${Math.floor(Math.random() * 2000) + 500} million years`,
+      'Meteorite': `${Math.floor(Math.random() * 4000) + 500} million years`,
+      'Crystal': `${Math.floor(Math.random() * 1000) + 100} million years`,
+      'Soil': `${Math.floor(Math.random() * 100) + 10} million years`,
+      'Ice': `${Math.floor(Math.random() * 10) + 1} million years`,
+      'Volcanic Glass': `${Math.floor(Math.random() * 500) + 50} million years`
+    };
+    
+    return ages[type.name] || 'Unknown age';
+  }
+
+  generateOrigin(type) {
+    const origins = {
+      'Rock': 'Formed from sedimentary deposits in ancient Martian oceans',
+      'Mineral': 'Crystallized from hydrothermal vents during Mars\' volcanic period',
+      'Meteorite': 'Originated from the asteroid belt between Mars and Jupiter',
+      'Crystal': 'Formed in underground caverns through slow crystallization',
+      'Soil': 'Weathered from surface rocks by wind and temperature cycles',
+      'Ice': 'Deposited from atmospheric condensation in polar regions',
+      'Volcanic Glass': 'Formed during explosive volcanic eruptions in Tharsis region'
+    };
+    
+    return origins[type.name] || 'Unknown origin';
+  }
+
+  analyzeSample(sampleId) {
+    const data = this.analysisData.get(sampleId);
+    if (data) {
+      // Update missions
+      if (window.missionSystem) {
+        window.missionSystem.updateMissionProgress('analyze_samples');
+      }
+      
+      return data;
+    }
+    return null;
+  }
+
+  getCollectedSamples() {
+    return this.collectedSamples;
+  }
+
+  getSampleAnalysis(sampleId) {
+    return this.analysisData.get(sampleId);
+  }
+}
+
+// Global notification system
+function showNotification(message, duration = 3000) {
+  // Remove existing notifications
+  const existingNotification = document.getElementById('notification');
+  if (existingNotification) {
+    existingNotification.remove();
+  }
+  
+  // Create notification element
+  const notification = document.createElement('div');
+  notification.id = 'notification';
+  notification.textContent = message;
+  notification.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 15px 20px;
+    border-radius: 8px;
+    font-family: Arial, sans-serif;
+    font-size: 14px;
+    z-index: 1000;
+    max-width: 300px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    border-left: 4px solid #00ff88;
+    animation: slideIn 0.3s ease-out;
+  `;
+  
+  // Add CSS animation
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    @keyframes slideOut {
+      from { transform: translateX(0); opacity: 1; }
+      to { transform: translateX(100%); opacity: 0; }
+    }
+  `;
+  document.head.appendChild(style);
+  
+  document.body.appendChild(notification);
+  
+  // Auto-remove notification
+  setTimeout(() => {
+    if (notification.parentNode) {
+      notification.style.animation = 'slideOut 0.3s ease-out';
+      setTimeout(() => {
+        if (notification.parentNode) {
+          notification.remove();
+        }
+      }, 300);
+    }
+  }, duration);
+}
+
+// Initialize enhanced systems
+function initializeEnhancedSystems() {
+  // Initialize global systems
+  window.missionSystem = new MissionSystem();
+  window.sampleSystem = new SampleCollectionSystem(scene);
+  window.showNotification = showNotification;
+  
+  // Initialize enhanced UI
+  createEnhancedHUD();
+  
+  // Add enhanced controls information
+  addEnhancedControlsInfo();
+  
+  console.log('Enhanced systems initialized successfully!');
+}
+
+// Enhanced HUD with new features
+function createEnhancedHUD() {
+  const existingHUD = document.getElementById('hud');
+  if (existingHUD) {
+    existingHUD.remove();
+  }
+  
+  const hud = document.createElement('div');
+  hud.id = 'hud';
+  hud.style.cssText = `
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    color: white;
+    font-family: monospace;
+    font-size: 14px;
+    z-index: 100;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 15px;
+    border-radius: 8px;
+    min-width: 250px;
+    max-height: 80vh;
+    overflow-y: auto;
+    border: 2px solid #00ff88;
+  `;
+  
+  hud.innerHTML = `
+    <div style="color: #00ff88; font-weight: bold; margin-bottom: 10px;">🚀 MARS ROVER HUD</div>
+    <div id="hud-status">
+      <div>Status: <span id="rover-status">Operational</span></div>
+      <div>Distance: <span id="distance-traveled">0</span> m</div>
+      <div>Speed: <span id="current-speed">0</span> m/s</div>
+      <div>Camera: <span id="camera-mode">Third Person</span></div>
+    </div>
+    <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
+      <div style="color: #88ff88; font-weight: bold;">🎯 MISSIONS</div>
+      <div>Level: <span id="player-level">1</span></div>
+      <div>XP: <span id="player-xp">0</span></div>
+      <div>Active: <span id="active-missions">0</span></div>
+      <div>Completed: <span id="completed-missions">0</span></div>
+    </div>
+    <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
+      <div style="color: #ffaa44; font-weight: bold;">🔬 SAMPLES</div>
+      <div>Collected: <span id="samples-collected">0</span></div>
+      <div>Analyzed: <span id="samples-analyzed">0</span></div>
+    </div>
+    <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
+      <div style="color: #aa44ff; font-weight: bold;">🏆 ACHIEVEMENTS</div>
+      <div>Unlocked: <span id="achievements-count">0</span></div>
+    </div>
+  `;
+  
+  document.body.appendChild(hud);
+}
+
+// Enhanced controls information
+function addEnhancedControlsInfo() {
+  const existingControls = document.getElementById('controls');
+  if (existingControls) {
+    existingControls.remove();
+  }
+  
+  const controls = document.createElement('div');
+  controls.id = 'controls';
+  controls.style.cssText = `
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    color: white;
+    font-family: monospace;
+    font-size: 12px;
+    z-index: 100;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 15px;
+    border-radius: 8px;
+    border: 2px solid #00ff88;
+    max-width: 300px;
+  `;
+  
+  controls.innerHTML = `
+    <div style="color: #00ff88; font-weight: bold; margin-bottom: 10px;">🎮 ENHANCED CONTROLS</div>
+    <div><strong>Movement:</strong> WASD</div>
+    <div><strong>Camera:</strong> C to cycle modes</div>
+    <div><strong>Day/Night:</strong> L to toggle</div>
+    <div><strong>Samples:</strong> E to collect</div>
+    <div><strong>Analysis:</strong> Q to analyze</div>
+    <div><strong>Rockets:</strong> R to launch SpaceX rockets</div>
+    <div style="margin-top: 10px; font-size: 10px; color: #aaa;">
+      Look for glowing objects to collect samples!<br>
+      Watch for meteor showers at night!<br>
+      Press R to trigger manual rocket launches!<br>
+      Explore to find Mars colonies!
+    </div>
+  `;
+  
+  document.body.appendChild(controls);
+}
+
+// Enhanced update function for all systems
+function updateEnhancedSystems(deltaTime, roverPosition) {
+  // Update sample system
+  if (window.sampleSystem) {
+    window.sampleSystem.update(roverPosition);
+  }
+  
+  // Update HUD
+  updateEnhancedHUD();
+  
+  // Handle sample collection
+  if (keys['e']) {
+    if (window.sampleSystem) {
+      window.sampleSystem.collectSample(roverPosition);
+    }
+  }
+  
+  // Handle sample analysis
+  if (keys['q']) {
+    if (window.sampleSystem) {
+      const samples = window.sampleSystem.getCollectedSamples();
+      if (samples.length > 0) {
+        const lastSample = samples[samples.length - 1];
+        const analysis = window.sampleSystem.analyzeSample(lastSample.id);
+        if (analysis) {
+          showAnalysisDialog(analysis);
+        }
+      }
+    }
+  }
+  
+  // Handle manual rocket launch (R key)
+  if (keys['r']) {
+    if (window.marsSceneManager && window.marsSceneManager.rocketLaunchActive) {
+      // Prevent spamming - only allow one manual launch per 3 seconds
+      if (!window.lastManualRocketLaunch || Date.now() - window.lastManualRocketLaunch > 3000) {
+        window.lastManualRocketLaunch = Date.now();
+        window.marsSceneManager.triggerManualLaunch();
+      }
+    }
+  }
+}
+
+// Update HUD with enhanced information
+function updateEnhancedHUD() {
+  // Update mission status
+  if (window.missionSystem) {
+    const status = window.missionSystem.getMissionStatus();
+    document.getElementById('player-level').textContent = status.level;
+    document.getElementById('player-xp').textContent = status.xp;
+    document.getElementById('active-missions').textContent = status.active;
+    document.getElementById('completed-missions').textContent = status.completed;
+    document.getElementById('achievements-count').textContent = status.achievements;
+  }
+  
+  // Update sample status
+  if (window.sampleSystem) {
+    const samples = window.sampleSystem.getCollectedSamples();
+    const analyzedCount = samples.filter(s => window.sampleSystem.getSampleAnalysis(s.id)).length;
+    document.getElementById('samples-collected').textContent = samples.length;
+    document.getElementById('samples-analyzed').textContent = analyzedCount;
+  }
+  
+  // Update other status
+  document.getElementById('distance-traveled').textContent = Math.round(distanceTraveled);
+  document.getElementById('current-speed').textContent = currentSpeed.toFixed(1);
+  document.getElementById('camera-mode').textContent = cameraMode;
+}
+
+// Show sample analysis dialog
+function showAnalysisDialog(analysis) {
+  // Remove existing dialog
+  const existingDialog = document.getElementById('analysis-dialog');
+  if (existingDialog) {
+    existingDialog.remove();
+  }
+  
+  const dialog = document.createElement('div');
+  dialog.id = 'analysis-dialog';
+  dialog.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.95);
+    color: white;
+    padding: 30px;
+    border-radius: 12px;
+    font-family: monospace;
+    font-size: 14px;
+    z-index: 1500;
+    max-width: 600px;
+    border: 3px solid #00ff88;
+    box-shadow: 0 0 30px rgba(0, 255, 136, 0.3);
+  `;
+  
+  dialog.innerHTML = `
+    <div style="color: #00ff88; font-weight: bold; font-size: 18px; margin-bottom: 15px;">
+      🔬 SAMPLE ANALYSIS COMPLETE
+    </div>
+    <div style="margin-bottom: 15px;">
+      <strong>Sample:</strong> ${analysis.name} (${analysis.rarity})<br>
+      <strong>Age:</strong> ${analysis.age}<br>
+      <strong>Collection Time:</strong> ${new Date(analysis.collectTime).toLocaleString()}
+    </div>
+    <div style="margin-bottom: 15px;">
+      <strong>Composition:</strong><br>
+      ${analysis.composition.map(comp => `• ${comp}`).join('<br>')}
+    </div>
+    <div style="margin-bottom: 15px;">
+      <strong>Origin:</strong><br>
+      ${analysis.origin}
+    </div>
+    <div style="margin-bottom: 15px;">
+      <strong>Scientific Analysis:</strong><br>
+      ${analysis.analysis}
+    </div>
+    <div style="text-align: center; margin-top: 20px;">
+      <button onclick="document.getElementById('analysis-dialog').remove()" 
+              style="background: #00ff88; color: black; border: none; padding: 10px 20px; 
+                     border-radius: 5px; font-weight: bold; cursor: pointer;">
+        Close Analysis
+      </button>
+    </div>
+  `;
+  
+  document.body.appendChild(dialog);
+  
+  // Auto-close after 10 seconds
+  setTimeout(() => {
+    if (dialog.parentNode) {
+      dialog.remove();
+    }
+  }, 10000);
+}
+
+// Initialize enhanced systems after a short delay
+setTimeout(() => {
+  initializeEnhancedSystems();
+  
+  // Show welcome message
+  setTimeout(() => {
+    if (window.showNotification) {
+      window.showNotification('🚀 Mars Rover Ready! WASD to move, C for camera, R for rockets!', 5000);
+    }
+  }, 2000);
+  
+  // Set up global controls for easy access (only after mars scene manager is ready)
+  setTimeout(() => {
+    if (window.marsSceneManager) {
+      // Global rocket launch controls
+      window.rocketLaunchControls = {
+        enableLaunches: () => window.marsSceneManager.enableRocketLaunches(),
+        disableLaunches: () => window.marsSceneManager.disableRocketLaunches(),
+        manualLaunch: (pattern) => window.marsSceneManager.triggerManualLaunch(pattern || 'single'),
+        setInterval: (ms) => window.marsSceneManager.setRocketLaunchInterval(ms)
+      };
+      
+      // Show rocket system ready message
+      if (window.showNotification) {
+        window.showNotification('🚀 Rocket System Ready! Press R for manual launch!', 4000);
+      }
+    }
+    
+    // Add performance mode toggle
+    window.performanceMode = {
+      enable: () => {
+        if (window.marsSceneManager) window.marsSceneManager.disableRocketLaunches();
+        if (window.showNotification) window.showNotification('Performance Mode ENABLED - Heavy effects disabled', 3000);
+      },
+      disable: () => {
+        if (window.marsSceneManager) window.marsSceneManager.enableRocketLaunches();
+        if (window.showNotification) window.showNotification('Performance Mode DISABLED - All effects enabled', 3000);
+      }
+         };
+   }, 8000);
+}, 1000);
