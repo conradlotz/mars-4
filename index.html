@@ -35,24 +35,45 @@
       position: absolute;
       bottom: 20px;
       right: 20px;
-      background-color: rgba(0, 0, 0, 0.5);
+      background-color: rgba(0, 0, 0, 0.6);
       color: white;
-      padding: 10px;
-      border-radius: 5px;
+      padding: 8px 12px;
+      border-radius: 20px;
       z-index: 1000;
       display: none;
+      border: 1px solid rgba(255, 107, 53, 0.3);
+      backdrop-filter: blur(10px);
+      font-size: 12px;
     }
     #youtube-controls {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
+    }
+    #youtube-controls button {
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      color: white;
+      padding: 4px 8px;
+      border-radius: 12px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    #youtube-controls button:hover {
+      background: rgba(255, 107, 53, 0.5);
+    }
+    #youtube-controls input {
+      width: 60px;
+      height: 16px;
     }
     #youtube-title {
-      margin-left: 10px;
-      max-width: 200px;
+      max-width: 120px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      font-size: 11px;
+      opacity: 0.8;
     }
     
     /* Preloader Styles */
@@ -296,19 +317,29 @@
         padding: 8px;
       }
       
-      .youtube-button {
-        top: 60px !important;
+      #youtube-audio-container {
+        bottom: 10px;
+        right: 10px;
+        font-size: 10px;
       }
       
-      .settings-toggle {
-        top: 110px !important;
+      #youtube-controls {
+        gap: 6px;
       }
       
-      #device-info {
-        top: 160px !important;
-        left: 10px !important;
-        right: 10px !important;
-        width: auto;
+      #youtube-controls button {
+        padding: 3px 6px;
+        font-size: 10px;
+      }
+      
+      #youtube-controls input {
+        width: 50px;
+        height: 14px;
+      }
+      
+      #youtube-title {
+        max-width: 100px;
+        font-size: 10px;
       }
     }
     
@@ -439,7 +470,7 @@
           'Creating rover model...',
           'Generating space environment...',
           'Initializing physics...',
-          'Loading audio systems...',
+          'Preparing ambient audio...',
           this.deviceSpecs.isMobile ? 'Setting up touch controls...' : 'Final optimization...'
         ];
         this.currentStep = 0;
@@ -668,6 +699,9 @@
         try {
           await this.loadGameScript();
           
+          // Load and start ambient music after game loads
+          this.loadAmbientMusic();
+          
           // Hide preloader with fade out
           setTimeout(() => {
             const preloader = document.getElementById('preloader');
@@ -676,14 +710,8 @@
             setTimeout(() => {
               preloader.style.display = 'none';
               
-              // Show device info briefly after loading
-              const deviceInfo = document.getElementById('device-info');
-              if (deviceInfo) {
-                deviceInfo.style.display = 'block';
-                setTimeout(() => {
-                  deviceInfo.style.display = 'none';
-                }, 3000);
-              }
+              // Clean up UI elements after loading
+              this.cleanupUI();
             }, 500);
           }, 500);
         } catch (error) {
@@ -753,6 +781,94 @@
         }
         
         return true;
+      }
+      
+      // Auto-load ambient music after game loads
+      loadAmbientMusic() {
+        setTimeout(() => {
+          console.log('Loading Mars ambient music...');
+          
+          // Load YouTube audio with autoplay
+          const videoId = 'QGe0wLjJDqA'; // Mars Ambience Sound
+          youtubePlayer.loadVideo(videoId, {
+            autoplay: true,
+            loop: true,
+            volume: 25
+          });
+          
+          // Show audio container
+          document.getElementById('youtube-audio-container').style.display = 'block';
+          
+          // Show subtle music notification
+          this.showMusicNotification();
+          
+        }, 1000); // Wait 1 second after game loads
+      }
+      
+      // Show subtle music notification
+      showMusicNotification() {
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+          position: fixed;
+          top: 20px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: rgba(0, 0, 0, 0.8);
+          color: white;
+          padding: 12px 20px;
+          border-radius: 25px;
+          z-index: 10001;
+          font-size: 14px;
+          text-align: center;
+          border: 1px solid rgba(255, 107, 53, 0.3);
+          backdrop-filter: blur(10px);
+          transition: all 0.3s ease;
+        `;
+        
+        notification.innerHTML = `🎵 Mars ambient music started`;
+        document.body.appendChild(notification);
+        
+        // Auto-remove after 3 seconds
+        setTimeout(() => {
+          notification.style.opacity = '0';
+          notification.style.transform = 'translateX(-50%) translateY(-20px)';
+          setTimeout(() => {
+            if (notification.parentNode) {
+              notification.parentNode.removeChild(notification);
+            }
+          }, 300);
+        }, 3000);
+      }
+      
+      // Clean up UI elements after loading
+      cleanupUI() {
+        // Hide the YouTube load button since audio auto-loads
+        const loadButton = document.getElementById('load-youtube');
+        if (loadButton) {
+          loadButton.style.display = 'none';
+        }
+        
+        // Hide settings button on mobile for cleaner UI
+        if (this.deviceSpecs.isMobile) {
+          const settingsToggle = document.getElementById('settings-toggle');
+          if (settingsToggle) {
+            settingsToggle.style.display = 'none';
+          }
+        }
+        
+        // Auto-hide performance settings
+        const performanceSettings = document.getElementById('performance-settings');
+        if (performanceSettings) {
+          performanceSettings.style.display = 'none';
+        }
+        
+        // Remove device info permanently
+        const deviceInfo = document.getElementById('device-info');
+        if (deviceInfo) {
+          deviceInfo.remove();
+        }
+        
+        console.log('UI cleaned up for better gaming experience');
       }
     }
     
@@ -1255,18 +1371,8 @@
       }
     };
     
-    // Add event listener for the YouTube button
-    document.getElementById('load-youtube').addEventListener('click', function() {
-      // Example YouTube video ID - replace with your desired video
-      const videoId = 'QGe0wLjJDqA'; // Mars Ambience Sound
-      
-      // Load the YouTube audio with options
-      youtubePlayer.loadVideo(videoId, {
-        autoplay: true,
-        loop: true,
-        volume: 30
-      });
-    });
+    // YouTube button is now hidden as audio auto-loads
+    // Event listener removed to clean up the interface
   </script>
 </body>
 </html>
