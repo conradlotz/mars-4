@@ -225,66 +225,84 @@
     /* Virtual Joystick */
     #virtual-joystick {
       position: absolute;
-      bottom: 50px;
-      left: 50px;
-      width: 120px;
-      height: 120px;
-      background: rgba(255, 255, 255, 0.1);
-      border: 3px solid rgba(255, 255, 255, 0.3);
+      bottom: 40px;
+      left: 40px;
+      width: 140px;
+      height: 140px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 3px solid rgba(255, 107, 53, 0.5);
       border-radius: 50%;
       pointer-events: auto;
       touch-action: none;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
     }
     
     #joystick-knob {
       position: absolute;
       top: 50%;
       left: 50%;
-      width: 40px;
-      height: 40px;
-      background: rgba(255, 255, 255, 0.8);
+      width: 50px;
+      height: 50px;
+      background: linear-gradient(145deg, #ff6b35, #e55a2b);
       border-radius: 50%;
       transform: translate(-50%, -50%);
       transition: all 0.1s ease;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+      border: 2px solid rgba(255, 255, 255, 0.3);
     }
     
     /* Mobile Action Buttons */
     #mobile-buttons {
       position: absolute;
-      bottom: 50px;
+      bottom: 40px;
       right: 20px;
       display: flex;
       flex-direction: column;
-      gap: 15px;
+      gap: 20px;
       pointer-events: auto;
     }
     
     .mobile-btn {
-      width: 60px;
-      height: 60px;
+      width: 75px;
+      height: 75px;
       background: rgba(0, 0, 0, 0.6);
       color: white;
-      border: 2px solid rgba(255, 255, 255, 0.3);
+      border: 3px solid rgba(255, 107, 53, 0.5);
       border-radius: 50%;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      font-size: 18px;
+      font-size: 20px;
       font-weight: bold;
       cursor: pointer;
       user-select: none;
       transition: all 0.2s ease;
       touch-action: manipulation;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+      position: relative;
+    }
+    
+    .mobile-btn .btn-label {
+      font-size: 8px;
+      font-weight: bold;
+      letter-spacing: 0.5px;
+      margin-top: 2px;
+      opacity: 0.8;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
     }
     
     .mobile-btn:active {
-      background: rgba(255, 107, 53, 0.8);
-      transform: scale(0.95);
+      background: rgba(255, 107, 53, 0.9);
+      transform: scale(0.9);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
     }
     
     .mobile-btn:hover {
-      background: rgba(255, 107, 53, 0.6);
+      background: rgba(255, 107, 53, 0.7);
+      border-color: rgba(255, 107, 53, 0.8);
     }
     
     /* Touch Camera Controls */
@@ -296,6 +314,51 @@
       bottom: 200px;
       pointer-events: auto;
       touch-action: none;
+    }
+    
+    /* Desktop optimizations */
+    @media (min-width: 769px) {
+      /* Hide mobile-specific elements on desktop */
+      #mobile-controls {
+        display: none !important;
+      }
+      
+      /* Better desktop positioning */
+      #youtube-audio-container {
+        bottom: 30px;
+        right: 30px;
+        padding: 12px 16px;
+        font-size: 13px;
+      }
+      
+      #youtube-controls {
+        gap: 12px;
+      }
+      
+      #youtube-controls button {
+        padding: 6px 12px;
+        font-size: 12px;
+      }
+      
+      #youtube-controls input {
+        width: 80px;
+        height: 18px;
+      }
+      
+      #youtube-title {
+        max-width: 150px;
+        font-size: 12px;
+      }
+      
+      .settings-toggle {
+        padding: 12px 18px;
+        font-size: 15px;
+      }
+      
+      .controls {
+        padding: 12px 16px;
+        font-size: 14px;
+      }
     }
     
     /* Mobile HUD adjustments */
@@ -312,34 +375,59 @@
       }
       
       .controls {
-        bottom: 200px !important;
+        bottom: 240px !important;
         font-size: 12px;
         padding: 8px;
+        left: 10px;
+        right: 10px;
+        width: auto;
+        text-align: center;
       }
       
       #youtube-audio-container {
-        bottom: 10px;
+        bottom: 200px;
         right: 10px;
         font-size: 10px;
+        padding: 6px 10px;
       }
       
       #youtube-controls {
         gap: 6px;
+        flex-wrap: wrap;
       }
       
       #youtube-controls button {
-        padding: 3px 6px;
+        padding: 4px 8px;
         font-size: 10px;
       }
       
       #youtube-controls input {
-        width: 50px;
-        height: 14px;
+        width: 40px;
+        height: 12px;
       }
       
       #youtube-title {
-        max-width: 100px;
-        font-size: 10px;
+        max-width: 80px;
+        font-size: 9px;
+      }
+      
+      /* Larger mobile buttons for better touch */
+      .mobile-btn {
+        width: 80px;
+        height: 80px;
+        font-size: 26px;
+      }
+      
+      #virtual-joystick {
+        width: 150px;
+        height: 150px;
+        bottom: 30px;
+        left: 30px;
+      }
+      
+      #joystick-knob {
+        width: 55px;
+        height: 55px;
       }
     }
     
@@ -347,18 +435,38 @@
     #virtual-joystick::before {
       content: '';
       position: absolute;
-      top: -10px;
-      left: -10px;
-      right: -10px;
-      bottom: -10px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
+      top: -8px;
+      left: -8px;
+      right: -8px;
+      bottom: -8px;
+      border: 2px solid rgba(255, 107, 53, 0.2);
       border-radius: 50%;
-      animation: pulse 2s infinite;
+      animation: joystickPulse 3s infinite;
     }
     
-    @keyframes pulse {
-      0%, 100% { opacity: 0.3; transform: scale(1); }
-      50% { opacity: 0.6; transform: scale(1.05); }
+    #virtual-joystick::after {
+      content: 'MOVE';
+      position: absolute;
+      bottom: -25px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 10px;
+      color: rgba(255, 255, 255, 0.6);
+      font-weight: bold;
+      letter-spacing: 1px;
+    }
+    
+    @keyframes joystickPulse {
+      0%, 100% { 
+        opacity: 0.3; 
+        transform: scale(1); 
+        border-color: rgba(255, 107, 53, 0.2);
+      }
+      50% { 
+        opacity: 0.8; 
+        transform: scale(1.05); 
+        border-color: rgba(255, 107, 53, 0.5);
+      }
     }
   </style>
   <!-- Load Three.js libraries as regular scripts -->
@@ -433,8 +541,14 @@
     
     <!-- Mobile Action Buttons -->
     <div id="mobile-buttons">
-      <button class="mobile-btn" id="mobile-camera-btn" title="Switch Camera">📷</button>
-      <button class="mobile-btn" id="mobile-brake-btn" title="Brake">🛑</button>
+      <button class="mobile-btn" id="mobile-camera-btn" title="Switch Camera">
+        📷
+        <span class="btn-label">CAM</span>
+      </button>
+      <button class="mobile-btn" id="mobile-brake-btn" title="Brake">
+        🛑
+        <span class="btn-label">STOP</span>
+      </button>
     </div>
   </div>
 
@@ -848,11 +962,29 @@
           loadButton.style.display = 'none';
         }
         
-        // Hide settings button on mobile for cleaner UI
+        // Platform-specific cleanup
         if (this.deviceSpecs.isMobile) {
+          // Mobile cleanup
           const settingsToggle = document.getElementById('settings-toggle');
           if (settingsToggle) {
             settingsToggle.style.display = 'none';
+          }
+          
+          // Show mobile instructions after a delay
+          setTimeout(() => {
+            this.showMobileInstructions();
+          }, 3000);
+        } else {
+          // Desktop cleanup
+          const mobileControls = document.getElementById('mobile-controls');
+          if (mobileControls) {
+            mobileControls.remove();
+          }
+          
+          // Keep settings available on desktop
+          const settingsToggle = document.getElementById('settings-toggle');
+          if (settingsToggle) {
+            settingsToggle.style.display = 'block';
           }
         }
         
@@ -869,6 +1001,70 @@
         }
         
         console.log('UI cleaned up for better gaming experience');
+      }
+      
+      // Show mobile instructions
+      showMobileInstructions() {
+        const instructions = document.createElement('div');
+        instructions.style.cssText = `
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          background: rgba(0, 0, 0, 0.9);
+          color: white;
+          padding: 20px;
+          border-radius: 15px;
+          z-index: 10002;
+          text-align: center;
+          max-width: 320px;
+          font-size: 14px;
+          border: 2px solid rgba(255, 107, 53, 0.5);
+          backdrop-filter: blur(15px);
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+        `;
+        instructions.innerHTML = `
+          <div style="font-size: 18px; font-weight: bold; margin-bottom: 20px; color: #ff6b35;">🎮 Mobile Controls</div>
+          <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 20px;">🕹️</span>
+            <span>Use left joystick to move rover</span>
+          </div>
+          <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 20px;">👆</span>
+            <span>Swipe anywhere to look around</span>
+          </div>
+          <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 20px;">📷</span>
+            <span>Right buttons for camera & brake</span>
+          </div>
+          <div style="margin-bottom: 20px; font-size: 12px; opacity: 0.7;">
+            🎧 Ambient Mars music is now playing
+          </div>
+          <button onclick="this.parentNode.remove()" style="
+            background: linear-gradient(145deg, #ff6b35, #e55a2b);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 14px;
+            box-shadow: 0 4px 15px rgba(255, 107, 53, 0.3);
+          ">Start Exploring! 🚀</button>
+        `;
+        
+        document.body.appendChild(instructions);
+        
+        // Auto-remove after 12 seconds
+        setTimeout(() => {
+          if (instructions.parentNode) {
+            instructions.style.opacity = '0';
+            instructions.style.transform = 'translate(-50%, -50%) scale(0.9)';
+            setTimeout(() => {
+              instructions.remove();
+            }, 300);
+          }
+        }, 12000);
       }
     }
     
@@ -927,7 +1123,6 @@
           this.initializeJoystick();
           this.initializeTouchCamera();
           this.initializeMobileButtons();
-          this.addMobileInstructions();
         }
         
         initializeJoystick() {
@@ -1161,49 +1356,7 @@
            }, 1500);
         }
         
-        addMobileInstructions() {
-          setTimeout(() => {
-            const instructions = document.createElement('div');
-            instructions.style.cssText = `
-              position: fixed;
-              top: 50%;
-              left: 50%;
-              transform: translate(-50%, -50%);
-              background: rgba(0, 0, 0, 0.8);
-              color: white;
-              padding: 20px;
-              border-radius: 8px;
-              z-index: 10002;
-              text-align: center;
-              max-width: 300px;
-              font-size: 14px;
-            `;
-            instructions.innerHTML = `
-              <div style="font-weight: bold; margin-bottom: 15px;">Mobile Controls</div>
-              <div style="margin-bottom: 10px;">🕹️ Use joystick to move rover</div>
-              <div style="margin-bottom: 10px;">👆 Swipe screen to look around</div>
-              <div style="margin-bottom: 10px;">📷 Tap camera button to switch views</div>
-              <div style="margin-bottom: 15px;">🛑 Tap brake to stop</div>
-              <button onclick="this.parentNode.remove()" style="
-                background: #ff6b35;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                cursor: pointer;
-              ">Got it!</button>
-            `;
-            
-            document.body.appendChild(instructions);
-            
-            // Auto-remove after 8 seconds
-            setTimeout(() => {
-              if (instructions.parentNode) {
-                instructions.parentNode.removeChild(instructions);
-              }
-            }, 8000);
-          }, 2000);
-        }
+
       }
       
       // Initialize optimizer when DOM is ready
