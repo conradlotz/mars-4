@@ -6873,6 +6873,8 @@ function initializeEnhancedSystems() {
   window.missionSystem = new MissionSystem();
   window.sampleSystem = new SampleCollectionSystem(scene);
   window.showNotification = showNotification;
+  window.showAnalysisDialog = showAnalysisDialog; // Make analysis dialog globally accessible for mobile
+  window.rover = rover; // Make rover globally accessible for mobile controls
   
   // Initialize enhanced UI
   createEnhancedHUD();

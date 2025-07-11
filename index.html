@@ -257,10 +257,11 @@
       position: absolute;
       bottom: 40px;
       right: 20px;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
       pointer-events: auto;
+      max-width: 180px;
     }
     
     .mobile-btn {
@@ -413,9 +414,14 @@
       
       /* Larger mobile buttons for better touch */
       .mobile-btn {
-        width: 80px;
-        height: 80px;
-        font-size: 26px;
+        width: 75px;
+        height: 75px;
+        font-size: 24px;
+      }
+      
+      #mobile-buttons {
+        gap: 12px;
+        max-width: 170px;
       }
       
       #virtual-joystick {
@@ -553,13 +559,21 @@
     
     <!-- Mobile Action Buttons -->
     <div id="mobile-buttons">
+      <button class="mobile-btn" id="mobile-sample-btn" title="Collect Sample">
+        💎
+        <span class="btn-label">SAMPLE</span>
+      </button>
+      <button class="mobile-btn" id="mobile-analyze-btn" title="Analyze Sample">
+        🔬
+        <span class="btn-label">ANALYZE</span>
+      </button>
+      <button class="mobile-btn" id="mobile-rocket-btn" title="Launch Rocket">
+        🚀
+        <span class="btn-label">ROCKET</span>
+      </button>
       <button class="mobile-btn" id="mobile-camera-btn" title="Switch Camera">
         📷
-        <span class="btn-label">CAM</span>
-      </button>
-      <button class="mobile-btn" id="mobile-brake-btn" title="Brake">
-        🛑
-        <span class="btn-label">STOP</span>
+        <span class="btn-label">CAMERA</span>
       </button>
     </div>
   </div>
@@ -1178,20 +1192,32 @@
         `;
         instructions.innerHTML = `
           <div style="font-size: 18px; font-weight: bold; margin-bottom: 20px; color: #ff6b35;">🎮 Mobile Controls</div>
-          <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 20px;">🕹️</span>
-            <span>Use left joystick to move rover</span>
+          <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 18px;">🕹️</span>
+            <span style="font-size: 13px;">Use left joystick to move rover</span>
           </div>
-          <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 20px;">👆</span>
-            <span>Swipe anywhere to look around</span>
+          <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 18px;">👆</span>
+            <span style="font-size: 13px;">Swipe anywhere to look around</span>
           </div>
-          <div style="margin-bottom: 12px; display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 20px;">📷</span>
-            <span>Right buttons for camera & brake</span>
+          <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 18px;">💎</span>
+            <span style="font-size: 13px;">Tap SAMPLE to collect glowing objects</span>
           </div>
-          <div style="margin-bottom: 20px; font-size: 12px; opacity: 0.7;">
-            🎧 Click the music notification to enable audio
+          <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 18px;">🔬</span>
+            <span style="font-size: 13px;">Tap ANALYZE to study collected samples</span>
+          </div>
+          <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 18px;">🚀</span>
+            <span style="font-size: 13px;">Tap ROCKET for SpaceX launches</span>
+          </div>
+          <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 18px;">📷</span>
+            <span style="font-size: 13px;">Tap CAMERA to switch views</span>
+          </div>
+          <div style="margin-bottom: 20px; font-size: 11px; opacity: 0.7; text-align: center;">
+            🎧 Music auto-loads | 🌟 Look for glowing samples to collect!
           </div>
           <button onclick="this.parentNode.remove()" style="
             background: linear-gradient(145deg, #ff6b35, #e55a2b);
@@ -1203,7 +1229,7 @@
             font-weight: bold;
             font-size: 14px;
             box-shadow: 0 4px 15px rgba(255, 107, 53, 0.3);
-          ">Start Exploring! 🚀</button>
+          ">Start Exploring Mars! 🚀</button>
         `;
         
         document.body.appendChild(instructions);
@@ -1435,58 +1461,104 @@
         }
         
         initializeMobileButtons() {
+          const sampleBtn = document.getElementById('mobile-sample-btn');
+          const analyzeBtn = document.getElementById('mobile-analyze-btn');
+          const rocketBtn = document.getElementById('mobile-rocket-btn');
           const cameraBtn = document.getElementById('mobile-camera-btn');
-          const brakeBtn = document.getElementById('mobile-brake-btn');
           
-                     if (cameraBtn) {
-             cameraBtn.addEventListener('touchstart', (e) => {
-               e.preventDefault();
-               
-               // Haptic feedback
-               if (navigator.vibrate) {
-                 navigator.vibrate(100);
-               }
-               
-               if (typeof window.toggleCameraMode === 'function') {
-                 window.toggleCameraMode();
-                 
-                 // Show current camera mode
-                 this.showCameraModeIndicator();
-               }
-             });
-           }
+          // Sample Collection Button (E key equivalent)
+          if (sampleBtn) {
+            sampleBtn.addEventListener('touchstart', (e) => {
+              e.preventDefault();
+              
+              // Haptic feedback
+              if (navigator.vibrate) {
+                navigator.vibrate(100);
+              }
+              
+              // Trigger sample collection
+              if (window.keys && window.sampleSystem && window.rover) {
+                const collected = window.sampleSystem.collectSample(window.rover.position);
+                if (collected) {
+                  this.showMobileNotification('💎 Sample Collected!', '#00ff88');
+                } else {
+                  this.showMobileNotification('No samples nearby', '#ffaa44');
+                }
+              }
+            });
+          }
           
-                     if (brakeBtn) {
-             brakeBtn.addEventListener('touchstart', (e) => {
-               e.preventDefault();
-               
-               // Haptic feedback
-               if (navigator.vibrate) {
-                 navigator.vibrate(50);
-               }
-               
-               this.resetVirtualKeys();
-             });
-           }
-         }
+          // Sample Analysis Button (Q key equivalent)
+          if (analyzeBtn) {
+            analyzeBtn.addEventListener('touchstart', (e) => {
+              e.preventDefault();
+              
+              // Haptic feedback
+              if (navigator.vibrate) {
+                navigator.vibrate(100);
+              }
+              
+              // Trigger sample analysis
+              if (window.sampleSystem) {
+                const samples = window.sampleSystem.getCollectedSamples();
+                if (samples.length > 0) {
+                  const lastSample = samples[samples.length - 1];
+                  const analysis = window.sampleSystem.analyzeSample(lastSample.id);
+                  if (analysis && window.showAnalysisDialog) {
+                    window.showAnalysisDialog(analysis);
+                    this.showMobileNotification('🔬 Analysis Ready!', '#00ff88');
+                  }
+                } else {
+                  this.showMobileNotification('No samples to analyze', '#ffaa44');
+                }
+              }
+            });
+          }
+          
+          // Rocket Launch Button (R key equivalent)
+          if (rocketBtn) {
+            rocketBtn.addEventListener('touchstart', (e) => {
+              e.preventDefault();
+              
+              // Haptic feedback
+              if (navigator.vibrate) {
+                navigator.vibrate(150);
+              }
+              
+              // Trigger rocket launch
+              if (window.marsSceneManager && window.marsSceneManager.rocketLaunchActive) {
+                if (!window.lastManualRocketLaunch || Date.now() - window.lastManualRocketLaunch > 3000) {
+                  window.lastManualRocketLaunch = Date.now();
+                  window.marsSceneManager.triggerManualLaunch();
+                  this.showMobileNotification('🚀 Rocket Launched!', '#ff6b35');
+                } else {
+                  this.showMobileNotification('Rocket cooldown...', '#ffaa44');
+                }
+              }
+            });
+          }
+          
+          // Camera Toggle Button (C key equivalent)
+          if (cameraBtn) {
+            cameraBtn.addEventListener('touchstart', (e) => {
+              e.preventDefault();
+              
+              // Haptic feedback
+              if (navigator.vibrate) {
+                navigator.vibrate(100);
+              }
+              
+              if (typeof window.toggleCameraMode === 'function') {
+                window.toggleCameraMode();
+                
+                // Show current camera mode
+                this.showCameraModeIndicator();
+              }
+            });
+          }
+        }
          
          showCameraModeIndicator() {
-           const indicator = document.createElement('div');
-           indicator.style.cssText = `
-             position: fixed;
-             top: 20px;
-             left: 50%;
-             transform: translateX(-50%);
-             background: rgba(0, 0, 0, 0.8);
-             color: white;
-             padding: 10px 20px;
-             border-radius: 20px;
-             z-index: 10003;
-             font-size: 14px;
-             font-weight: bold;
-             transition: all 0.3s ease;
-           `;
-           
            const cameraMode = window.cameraMode || 'thirdPerson';
            const modeNames = {
              'orbit': '🌍 Orbit View',
@@ -1494,20 +1566,43 @@
              'firstPerson': '👁️ First Person'
            };
            
-           indicator.textContent = modeNames[cameraMode] || '📷 Camera Mode';
-           document.body.appendChild(indicator);
+           this.showMobileNotification(modeNames[cameraMode] || '📷 Camera Mode', '#00ff88');
+         }
+         
+         showMobileNotification(message, color = '#00ff88') {
+           const notification = document.createElement('div');
+           notification.style.cssText = `
+             position: fixed;
+             top: 20px;
+             left: 50%;
+             transform: translateX(-50%);
+             background: rgba(0, 0, 0, 0.9);
+             color: white;
+             padding: 12px 24px;
+             border-radius: 25px;
+             z-index: 10003;
+             font-size: 16px;
+             font-weight: bold;
+             transition: all 0.3s ease;
+             border: 2px solid ${color};
+             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+             backdrop-filter: blur(10px);
+           `;
+           
+           notification.textContent = message;
+           document.body.appendChild(notification);
            
            // Fade out and remove
            setTimeout(() => {
-             indicator.style.opacity = '0';
-             indicator.style.transform = 'translateX(-50%) translateY(-20px)';
+             notification.style.opacity = '0';
+             notification.style.transform = 'translateX(-50%) translateY(-20px)';
              setTimeout(() => {
-               if (indicator.parentNode) {
-                 indicator.parentNode.removeChild(indicator);
+               if (notification.parentNode) {
+                 notification.parentNode.removeChild(notification);
                }
              }, 300);
-           }, 1500);
-        }
+           }, 2000);
+         }
         
 
       }
