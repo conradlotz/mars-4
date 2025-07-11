@@ -1,5 +1,34 @@
-// Performance-aware initialization
+// Performance-aware initialization with mobile detection
 function getPerformanceSettings() {
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  
+      // Mobile-specific low settings
+  const mobileSettings = {
+    textureSize: 512,
+    particleCount: 50,
+    renderDistance: 2000,
+    shadowQuality: 'none',
+    antialiasing: false,
+    skyboxResolution: 1024,
+    detailLevel: 'low',
+    fogDistance: 1500,
+    graphicsQuality: 'low',
+    isMobile: true,
+    disableRockets: true,
+    disableMeteors: true,
+    disableAtmosphericEffects: true,
+    terrainSegments: 64,
+    frameThrottle: 4,
+    enableCulling: true,
+    maxLights: 3
+  };
+  
+  // Return mobile settings if on mobile device
+  if (isMobile) {
+    return mobileSettings;
+  }
+  
+  // Desktop settings
   return window.GAME_PERFORMANCE_SETTINGS || {
     textureSize: 1024,
     particleCount: 500,
@@ -9,7 +38,15 @@ function getPerformanceSettings() {
     skyboxResolution: 2048,
     detailLevel: 'normal',
     fogDistance: 4000,
-    graphicsQuality: 'medium'
+    graphicsQuality: 'medium',
+    isMobile: false,
+    disableRockets: false,
+    disableMeteors: false,
+    disableAtmosphericEffects: false,
+    terrainSegments: 128,
+    frameThrottle: 2,
+    enableCulling: false,
+    maxLights: 8
   };
 }
 
@@ -22,13 +59,30 @@ camera.position.set(0, 10, 20);
 const perfSettings = getPerformanceSettings();
 const renderer = new THREE.WebGLRenderer({
   antialias: perfSettings.antialiasing,
-  powerPreference: perfSettings.graphicsQuality === 'high' ? 'high-performance' : 'default',
-  precision: perfSettings.graphicsQuality === 'high' ? 'highp' : 'mediump'
+  powerPreference: perfSettings.isMobile ? 'low-power' : 
+                   perfSettings.graphicsQuality === 'high' ? 'high-performance' : 'default',
+  precision: perfSettings.isMobile ? 'lowp' : 
+            perfSettings.graphicsQuality === 'high' ? 'highp' : 'mediump',
+  alpha: false,
+  stencil: false,
+  depth: true,
+  logarithmicDepthBuffer: false,
+  preserveDrawingBuffer: false
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
 // Limit pixel ratio for better performance on high-DPI displays
-const pixelRatio = Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1);
+const pixelRatio = perfSettings.isMobile ? 1 : 
+                   Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1);
 renderer.setPixelRatio(pixelRatio);
+
+// Mobile-specific renderer optimizations
+if (perfSettings.isMobile) {
+  renderer.shadowMap.enabled = false;
+  renderer.setPixelRatio(1); // Force 1x pixel ratio on mobile
+  // Use standard encoding for compatibility
+  renderer.outputEncoding = THREE.LinearEncoding;
+  renderer.gammaFactor = 2.2;
+}
 document.body.appendChild(renderer.domElement);
 
 // Adaptive fog based on performance settings
@@ -57,9 +111,20 @@ const terrainSystem = {
 
   // Update visible chunks based on rover position
   update: function (roverPosition) {
+    const perfSettings = getPerformanceSettings();
+    
+    // More aggressive throttling for mobile devices
+    const throttleTime = perfSettings.isMobile ? 5000 : 1000; // 5 seconds on mobile, 1 second on desktop
+    
     // Throttle updates based on time instead of frames for more consistent performance
     const now = performance.now();
-    if (now - this.lastUpdateTime < 1000) return; // Only update once per second
+    if (now - this.lastUpdateTime < throttleTime) return;
+
+    // Skip terrain updates entirely on mobile to save performance
+    if (perfSettings.isMobile) {
+      this.lastUpdateTime = now;
+      return;
+    }
 
     // Get current chunk from rover position
     const newChunk = this.getChunkCoords(roverPosition.x, roverPosition.z);
@@ -543,6 +608,44 @@ let roverYaw = window.roverYaw;
 let frameCount = 0;
 let lastTime = 0;
 const FRAME_THROTTLE = 3; // Only perform heavy operations every N frames
+
+// Mobile performance monitoring
+const mobilePerformanceMonitor = {
+  frameRates: [],
+  lastFrameTime: 0,
+  targetFPS: 30, // Target 30 FPS on mobile
+  frameDropCount: 0,
+  
+  update: function(currentTime) {
+    if (this.lastFrameTime > 0) {
+      const frameDelta = currentTime - this.lastFrameTime;
+      const fps = 1000 / frameDelta;
+      
+      this.frameRates.push(fps);
+      if (this.frameRates.length > 30) {
+        this.frameRates.shift();
+      }
+      
+      // Check if we're dropping frames
+      if (fps < this.targetFPS * 0.8) {
+        this.frameDropCount++;
+      } else {
+        this.frameDropCount = Math.max(0, this.frameDropCount - 1);
+      }
+    }
+    
+    this.lastFrameTime = currentTime;
+  },
+  
+  getAverageFPS: function() {
+    if (this.frameRates.length === 0) return 0;
+    return this.frameRates.reduce((a, b) => a + b, 0) / this.frameRates.length;
+  },
+  
+  isPerformancePoor: function() {
+    return this.frameDropCount > 10;
+  }
+};
 
 // Add previousPosition variable for collision detection
 let previousPosition = new THREE.Vector3(0, 0, 0);
@@ -3383,26 +3486,45 @@ function animate(time) {
   // Skip frames if browser tab is inactive or delta is too large (indicating lag)
   if (delta > 100) return;
 
-  frameCount++;
-
-  // Performance-based frame throttling
+  // Mobile performance monitoring
   const perfSettings = getPerformanceSettings();
-  const frameThrottle = perfSettings.detailLevel === 'high' ? 1 : 
-                       perfSettings.detailLevel === 'normal' ? 2 : 3;
-
-  // // Make the skybox follow the camera ONLY if it exists
-  // if (window.spaceSkybox) {
-  //   window.spaceSkybox.position.copy(camera.position);
-  // }
-
-  // Update meteor system if it exists and we're in night mode (throttled)
-  if (window.meteorSystem && (!isDaytime || isTransitioning) && frameCount % frameThrottle === 0) {
-    window.meteorSystem.update(delta);
+  if (perfSettings.isMobile) {
+    mobilePerformanceMonitor.update(time);
+    
+    // Skip frames more conservatively if performance is poor
+    if (mobilePerformanceMonitor.isPerformancePoor() && frameCount % 3 === 0) {
+      return;
+    }
   }
 
-  // Update Mars Scene Manager if it exists (heavily throttled for performance)
-  if (window.marsSceneManager && rover && frameCount % (frameThrottle * 4) === 0) {
-    window.marsSceneManager.update(rover.position);
+  frameCount++;
+
+  // Performance-based frame throttling with mobile optimization
+  const frameThrottle = perfSettings.isMobile ? 8 : 
+                       perfSettings.detailLevel === 'high' ? 1 : 
+                       perfSettings.detailLevel === 'normal' ? 2 : 3;
+
+  // Optimize operations for mobile
+  if (perfSettings.isMobile) {
+    // On mobile, update Mars Scene Manager with heavy throttling
+    if (window.marsSceneManager && rover && frameCount % (frameThrottle * 8) === 0) {
+      window.marsSceneManager.update(rover.position);
+    }
+  } else {
+    // // Make the skybox follow the camera ONLY if it exists
+    // if (window.spaceSkybox) {
+    //   window.spaceSkybox.position.copy(camera.position);
+    // }
+
+    // Update meteor system if it exists and we're in night mode (throttled)
+    if (window.meteorSystem && (!isDaytime || isTransitioning) && frameCount % frameThrottle === 0) {
+      window.meteorSystem.update(delta);
+    }
+
+    // Update Mars Scene Manager if it exists (heavily throttled for performance)
+    if (window.marsSceneManager && rover && frameCount % (frameThrottle * 4) === 0) {
+      window.marsSceneManager.update(rover.position);
+    }
   }
 
   // Rover Movement
@@ -3516,7 +3638,13 @@ function animate(time) {
 
   // Update enhanced systems (missions, samples, etc.) - throttled for performance
   if (typeof updateEnhancedSystems === 'function' && rover && frameCount % (frameThrottle * 3) === 0) {
-    updateEnhancedSystems(deltaTime, rover.position);
+    // Update enhanced systems with reduced frequency on mobile
+    if (!perfSettings.isMobile) {
+      updateEnhancedSystems(deltaTime, rover.position);
+    } else {
+      // Mobile: Update with reduced functionality but keep essential systems working
+      updateEnhancedSystems(deltaTime, rover.position);
+    }
   }
 
   // Calculate distance based on current speed with scaling factor
@@ -3832,14 +3960,16 @@ window.addEventListener('resize', () => {
 });
 
 function createRealisticMarsTerrain() {
-  // Performance-adaptive terrain creation
+  // Performance-adaptive terrain creation with mobile optimization
   const perfSettings = getPerformanceSettings();
   
   // Adaptive terrain parameters based on performance
-  const terrainSize = perfSettings.detailLevel === 'high' ? 5000 : 
+  const terrainSize = perfSettings.isMobile ? 3000 : 
+                     perfSettings.detailLevel === 'high' ? 5000 : 
                      perfSettings.detailLevel === 'normal' ? 3000 : 2000;
   
-  const segments = perfSettings.detailLevel === 'high' ? 256 : 
+  const segments = perfSettings.isMobile ? 64 : 
+                   perfSettings.detailLevel === 'high' ? 256 : 
                    perfSettings.detailLevel === 'normal' ? 128 : 64;
   
   const geometry = new THREE.PlaneGeometry(
@@ -3859,26 +3989,36 @@ function createRealisticMarsTerrain() {
     const z = positions[i + 2];
 
     // Multi-layered noise for more realistic terrain (adaptive)
-    // Large features (mountains and valleys) - always included
-    const largeFeatures = Math.sin(x * 0.01) * Math.cos(z * 0.01) * 8 +
-      Math.sin(x * 0.02 + 10) * Math.cos(z * 0.015) * 6;
+    let elevation = 0;
+    
+    if (perfSettings.isMobile) {
+      // Mobile: Simplified but visible terrain generation
+      elevation = Math.sin(x * 0.01) * Math.cos(z * 0.01) * 6 +
+                 Math.sin(x * 0.02 + 5) * Math.cos(z * 0.015) * 4 +
+                 Math.sin(x * 0.04 + 2) * Math.cos(z * 0.03) * 2;
+    } else {
+      // Desktop: Full terrain generation
+      // Large features (mountains and valleys) - always included
+      const largeFeatures = Math.sin(x * 0.01) * Math.cos(z * 0.01) * 8 +
+        Math.sin(x * 0.02 + 10) * Math.cos(z * 0.015) * 6;
 
-    // Medium features (hills and craters) - included based on performance
-    const mediumFeatures = perfSettings.detailLevel !== 'low' ? 
-      Math.sin(x * 0.05) * Math.cos(z * 0.04) * 3 +
-      Math.sin(x * 0.07 + 1) * Math.cos(z * 0.06) * 2 : 0;
+      // Medium features (hills and craters) - included based on performance
+      const mediumFeatures = perfSettings.detailLevel !== 'low' ? 
+        Math.sin(x * 0.05) * Math.cos(z * 0.04) * 3 +
+        Math.sin(x * 0.07 + 1) * Math.cos(z * 0.06) * 2 : 0;
 
-    // Small features (bumps and rocks) - only for high performance
-    const smallFeatures = perfSettings.detailLevel === 'high' ? 
-      Math.sin(x * 0.2 + 2) * Math.cos(z * 0.15) * 1 +
-      Math.sin(x * 0.3 + 3) * Math.cos(z * 0.25) * 0.5 : 0;
+      // Small features (bumps and rocks) - only for high performance
+      const smallFeatures = perfSettings.detailLevel === 'high' ? 
+        Math.sin(x * 0.2 + 2) * Math.cos(z * 0.15) * 1 +
+        Math.sin(x * 0.3 + 3) * Math.cos(z * 0.25) * 0.5 : 0;
 
-    // Micro details - only for high performance
-    const microDetails = perfSettings.detailLevel === 'high' ? 
-      Math.sin(x * 0.8 + 4) * Math.cos(z * 0.6) * 0.3 : 0;
+      // Micro details - only for high performance
+      const microDetails = perfSettings.detailLevel === 'high' ? 
+        Math.sin(x * 0.8 + 4) * Math.cos(z * 0.6) * 0.3 : 0;
 
-    // Combine all features with different weights
-    let elevation = largeFeatures + mediumFeatures + smallFeatures + microDetails;
+      // Combine all features with different weights
+      elevation = largeFeatures + mediumFeatures + smallFeatures + microDetails;
+    }
 
     // Add some random variation for more natural look
     const randomVariation = Math.random() * 0.5 - 0.25;
@@ -5323,6 +5463,27 @@ function loadCoreComponents() {
 
 function loadNonEssentialComponents() {
   const perfSettings = getPerformanceSettings();
+  
+  // Load reduced systems on mobile for better performance
+  if (perfSettings.isMobile) {
+    console.log("Mobile device detected - loading essential systems only");
+    
+    // Load basic Mars scene manager but with reduced features
+    setTimeout(() => {
+      lazyLoader.loadInBackground('marsSceneManager', () => {
+        // Create a mobile-optimized scene manager
+        window.marsSceneManager = new MarsSceneManager(scene, 2000); // Smaller terrain size
+        // Disable rocket launches immediately for mobile
+        if (window.marsSceneManager.disableRocketLaunches) {
+          window.marsSceneManager.disableRocketLaunches();
+        }
+        return Promise.resolve();
+      });
+    }, 2000); // Shorter delay for mobile
+    
+    console.log("Essential mobile components queued for loading");
+    return;
+  }
   
   // Load meteor system only on high performance devices
   if (perfSettings.detailLevel === 'high') {
@@ -7177,20 +7338,38 @@ function showNotification(message, duration = 3000) {
 
 // Initialize enhanced systems
 function initializeEnhancedSystems() {
-  // Initialize global systems
-  window.missionSystem = new MissionSystem();
-  window.sampleSystem = new SampleCollectionSystem(scene);
-  window.showNotification = showNotification;
-  window.showAnalysisDialog = showAnalysisDialog; // Make analysis dialog globally accessible for mobile
-  window.rover = rover; // Make rover globally accessible for mobile controls
+  const perfSettings = getPerformanceSettings();
   
-  // Initialize enhanced UI
-  createEnhancedHUD();
-  
-  // Add enhanced controls information
-  addEnhancedControlsInfo();
-  
-  console.log('Enhanced systems initialized successfully!');
+  // On mobile, only initialize essential systems
+  if (perfSettings.isMobile) {
+    // Mobile: Essential systems for basic functionality
+    window.missionSystem = new MissionSystem(); // Keep for basic functionality
+    window.sampleSystem = new SampleCollectionSystem(scene); // Keep for mobile buttons
+    window.showNotification = showNotification;
+    window.showAnalysisDialog = showAnalysisDialog; // Keep for mobile analysis
+    window.rover = rover; // Make rover globally accessible for mobile controls
+    
+    // Initialize essential UI
+    createEnhancedHUD();
+    addEnhancedControlsInfo(); // Keep for mobile instructions
+    
+    console.log('Mobile enhanced systems initialized (essential mode)');
+  } else {
+    // Desktop: Full systems
+    window.missionSystem = new MissionSystem();
+    window.sampleSystem = new SampleCollectionSystem(scene);
+    window.showNotification = showNotification;
+    window.showAnalysisDialog = showAnalysisDialog; // Make analysis dialog globally accessible for mobile
+    window.rover = rover; // Make rover globally accessible for mobile controls
+    
+    // Initialize enhanced UI
+    createEnhancedHUD();
+    
+    // Add enhanced controls information
+    addEnhancedControlsInfo();
+    
+    console.log('Enhanced systems initialized successfully!');
+  }
 }
 
 // Enhanced HUD with new features
@@ -7422,24 +7601,36 @@ function updateEnhancedHUD() {
   // Update mission status
   if (window.missionSystem) {
     const status = window.missionSystem.getMissionStatus();
-    document.getElementById('player-level').textContent = status.level;
-    document.getElementById('player-xp').textContent = status.xp;
-    document.getElementById('active-missions').textContent = status.active;
-    document.getElementById('completed-missions').textContent = status.completed;
-    document.getElementById('achievements-count').textContent = status.achievements;
+    const levelEl = document.getElementById('player-level');
+    const xpEl = document.getElementById('player-xp');
+    const activeMissionsEl = document.getElementById('active-missions');
+    const completedMissionsEl = document.getElementById('completed-missions');
+    const achievementsEl = document.getElementById('achievements-count');
+    
+    if (levelEl) levelEl.textContent = status.level;
+    if (xpEl) xpEl.textContent = status.xp;
+    if (activeMissionsEl) activeMissionsEl.textContent = status.active;
+    if (completedMissionsEl) completedMissionsEl.textContent = status.completed;
+    if (achievementsEl) achievementsEl.textContent = status.achievements;
   }
   
   // Update sample status
   if (window.sampleSystem) {
     const samples = window.sampleSystem.getCollectedSamples();
     const analyzedCount = samples.filter(s => window.sampleSystem.getSampleAnalysis(s.id)).length;
-    document.getElementById('samples-collected').textContent = samples.length;
-    document.getElementById('samples-analyzed').textContent = analyzedCount;
+    const collectedEl = document.getElementById('samples-collected');
+    const analyzedEl = document.getElementById('samples-analyzed');
+    
+    if (collectedEl) collectedEl.textContent = samples.length;
+    if (analyzedEl) analyzedEl.textContent = analyzedCount;
   }
   
   // Update other status
-  document.getElementById('distance-traveled').textContent = Math.round(distanceTraveled);
-  document.getElementById('current-speed').textContent = currentSpeed.toFixed(1);
+  const distanceEl = document.getElementById('distance-traveled');
+  const speedEl = document.getElementById('current-speed');
+  
+  if (distanceEl) distanceEl.textContent = Math.round(distanceTraveled);
+  if (speedEl) speedEl.textContent = currentSpeed.toFixed(1);
   
   // Update camera mode with compact text for mobile
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
@@ -7532,12 +7723,20 @@ setTimeout(() => {
   // Show welcome message
   setTimeout(() => {
     if (window.showNotification) {
-      window.showNotification('🚀 Mars Rover Ready! WASD to move, C for camera, R for rockets!', 5000);
+      const perfSettings = getPerformanceSettings();
+      if (perfSettings.isMobile) {
+        console.log('Mobile mode initialized with settings:', perfSettings);
+        window.showNotification('📱 Mobile Optimized! Use touch controls to drive the rover!', 5000);
+      } else {
+        window.showNotification('🚀 Mars Rover Ready! WASD to move, C for camera, R for rockets!', 5000);
+      }
     }
   }, 2000);
   
   // Set up global controls for easy access (only after mars scene manager is ready)
   setTimeout(() => {
+    const perfSettings = getPerformanceSettings();
+    
     if (window.marsSceneManager) {
       // Global rocket launch controls
       window.rocketLaunchControls = {
@@ -7547,9 +7746,14 @@ setTimeout(() => {
         setInterval: (ms) => window.marsSceneManager.setRocketLaunchInterval(ms)
       };
       
-      // Show rocket system ready message
-      if (window.showNotification) {
+      // Show rocket system ready message (desktop only)
+      if (window.showNotification && !perfSettings.isMobile) {
         window.showNotification('🚀 Rocket System Ready! Press R for manual launch!', 4000);
+      }
+    } else if (perfSettings.isMobile) {
+      // Mobile-specific performance notification
+      if (window.showNotification) {
+        window.showNotification('⚡ Mobile Performance Mode - Heavy effects disabled for smoother gameplay!', 4000);
       }
     }
     
