@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="permissions-policy" content="accelerometer=*, autoplay=*, camera=*, clipboard-write=*, encrypted-media=*, fullscreen=*, geolocation=*, gyroscope=*, magnetometer=*, microphone=*, midi=*, payment=*, picture-in-picture=*, publickey-credentials-get=*, screen-wake-lock=*, sync-xhr=*, usb=*, web-share=*, xr-spatial-tracking=*">
   <title>Drive on Mars</title>
   <style>
     body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
@@ -738,14 +739,48 @@
           tipText.textContent = '🎮 Tip: Use virtual joystick to move and swipe to look around';
         }
         
-        // Show device info
+        // Show device info with enhanced mobile detection
         const deviceInfo = document.getElementById('device-info');
         const deviceSpecs = document.getElementById('device-specs');
+        
+        // Get mobile tier if applicable
+        let mobileTierInfo = '';
+        if (this.deviceSpecs.isMobile) {
+          // Simulate mobile tier detection (matching the logic in mars.js)
+          const deviceMemory = navigator.deviceMemory || 4;
+          const hardwareConcurrency = navigator.hardwareConcurrency || 4;
+          const screenSize = Math.max(window.screen.width, window.screen.height);
+          const pixelRatio = window.devicePixelRatio || 1;
+          
+          let mobileScore = 0;
+          if (deviceMemory >= 8) mobileScore += 30;
+          else if (deviceMemory >= 6) mobileScore += 20;
+          else if (deviceMemory >= 4) mobileScore += 10;
+          
+          if (hardwareConcurrency >= 8) mobileScore += 25;
+          else if (hardwareConcurrency >= 6) mobileScore += 15;
+          else if (hardwareConcurrency >= 4) mobileScore += 10;
+          
+          if (screenSize >= 1920) mobileScore += 20;
+          else if (screenSize >= 1440) mobileScore += 15;
+          else if (screenSize >= 1080) mobileScore += 10;
+          
+          if (pixelRatio >= 3) mobileScore += 10;
+          else if (pixelRatio >= 2) mobileScore += 5;
+          
+          const mobileTier = mobileScore >= 60 ? 'high' : mobileScore >= 30 ? 'medium' : 'low';
+          const tierEmoji = mobileTier === 'high' ? '🔥' : mobileTier === 'medium' ? '⚡' : '📱';
+          const tierName = mobileTier === 'high' ? 'High-End' : mobileTier === 'medium' ? 'Mid-Range' : 'Budget';
+          
+          mobileTierInfo = `<br>Mobile Tier: ${tierEmoji} ${tierName} (Score: ${mobileScore})`;
+        }
+        
         deviceSpecs.innerHTML = `
           Device: ${this.deviceSpecs.isMobile ? 'Mobile' : 'Desktop'}<br>
           Performance: ${this.deviceSpecs.performanceLevel.toUpperCase()}<br>
           Memory: ${this.deviceSpecs.deviceMemory}GB<br>
           CPU Cores: ${this.deviceSpecs.hardwareConcurrency}
+          ${mobileTierInfo}
           ${this.deviceSpecs.isMobile ? '<br><span style="color: #ff6b35;">🎮 Touch controls enabled</span>' : ''}
         `;
         
@@ -1710,6 +1745,12 @@
       _initPlayer: function(options) {
         try {
           console.log('Initializing YouTube player with video ID:', this.videoId);
+          
+          // Set iframe permissions before creating player
+          const iframeElement = document.getElementById('youtube-iframe');
+          if (iframeElement) {
+            iframeElement.setAttribute('allow', 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share');
+          }
           
           this.player = new YT.Player('youtube-iframe', {
             height: '1',

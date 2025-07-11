@@ -2,30 +2,109 @@
 function getPerformanceSettings() {
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   
-      // Mobile-specific low settings
-  const mobileSettings = {
-    textureSize: 512,
-    particleCount: 50,
-    renderDistance: 2000,
-    shadowQuality: 'none',
-    antialiasing: false,
-    skyboxResolution: 1024,
-    detailLevel: 'low',
-    fogDistance: 1500,
-    graphicsQuality: 'low',
-    isMobile: true,
-    disableRockets: true,
-    disableMeteors: true,
-    disableAtmosphericEffects: true,
-    terrainSegments: 64,
-    frameThrottle: 4,
-    enableCulling: true,
-    maxLights: 3
-  };
+  // Enhanced mobile device capability detection
+  function getMobileDeviceCapabilities() {
+    const deviceMemory = navigator.deviceMemory || 4;
+    const hardwareConcurrency = navigator.hardwareConcurrency || 4;
+    const screenSize = Math.max(window.screen.width, window.screen.height);
+    const pixelRatio = window.devicePixelRatio || 1;
+    
+    // Calculate mobile device tier
+    let mobileScore = 0;
+    if (deviceMemory >= 8) mobileScore += 30;
+    else if (deviceMemory >= 6) mobileScore += 20;
+    else if (deviceMemory >= 4) mobileScore += 10;
+    
+    if (hardwareConcurrency >= 8) mobileScore += 25;
+    else if (hardwareConcurrency >= 6) mobileScore += 15;
+    else if (hardwareConcurrency >= 4) mobileScore += 10;
+    
+    if (screenSize >= 1920) mobileScore += 20;
+    else if (screenSize >= 1440) mobileScore += 15;
+    else if (screenSize >= 1080) mobileScore += 10;
+    
+    if (pixelRatio >= 3) mobileScore += 10;
+    else if (pixelRatio >= 2) mobileScore += 5;
+    
+    // Classify mobile device tier
+    if (mobileScore >= 60) return 'high';
+    if (mobileScore >= 30) return 'medium';
+    return 'low';
+  }
   
-  // Return mobile settings if on mobile device
+  // Mobile-specific settings with device tier adaptation
   if (isMobile) {
-    return mobileSettings;
+    const mobileTier = getMobileDeviceCapabilities();
+    
+    // High-end mobile devices (flagship phones/tablets)
+    if (mobileTier === 'high') {
+      return {
+        textureSize: 1024,
+        particleCount: 150,
+        renderDistance: 3000,
+        shadowQuality: 'low',
+        antialiasing: false,
+        skyboxResolution: 2048,
+        detailLevel: 'medium',
+        fogDistance: 2500,
+        graphicsQuality: 'medium',
+        isMobile: true,
+        mobileTier: 'high',
+        disableRockets: false,
+        disableMeteors: true,
+        disableAtmosphericEffects: false,
+        terrainSegments: 96,
+        frameThrottle: 3,
+        enableCulling: true,
+        maxLights: 5
+      };
+    }
+    
+    // Mid-range mobile devices
+    if (mobileTier === 'medium') {
+      return {
+        textureSize: 768,
+        particleCount: 100,
+        renderDistance: 2500,
+        shadowQuality: 'none',
+        antialiasing: false,
+        skyboxResolution: 1536,
+        detailLevel: 'low',
+        fogDistance: 2000,
+        graphicsQuality: 'low',
+        isMobile: true,
+        mobileTier: 'medium',
+        disableRockets: true,
+        disableMeteors: true,
+        disableAtmosphericEffects: true,
+        terrainSegments: 80,
+        frameThrottle: 4,
+        enableCulling: true,
+        maxLights: 4
+      };
+    }
+    
+    // Low-end mobile devices (budget phones)
+    return {
+      textureSize: 512,
+      particleCount: 50,
+      renderDistance: 2000,
+      shadowQuality: 'none',
+      antialiasing: false,
+      skyboxResolution: 1024,
+      detailLevel: 'low',
+      fogDistance: 1500,
+      graphicsQuality: 'low',
+      isMobile: true,
+      mobileTier: 'low',
+      disableRockets: true,
+      disableMeteors: true,
+      disableAtmosphericEffects: true,
+      terrainSegments: 64,
+      frameThrottle: 6,
+      enableCulling: true,
+      maxLights: 3
+    };
   }
   
   // Desktop settings
@@ -3486,29 +3565,48 @@ function animate(time) {
   // Skip frames if browser tab is inactive or delta is too large (indicating lag)
   if (delta > 100) return;
 
-  // Mobile performance monitoring
+  // Mobile performance monitoring with adaptive throttling
   const perfSettings = getPerformanceSettings();
   if (perfSettings.isMobile) {
     mobilePerformanceMonitor.update(time);
     
-    // Skip frames more conservatively if performance is poor
-    if (mobilePerformanceMonitor.isPerformancePoor() && frameCount % 3 === 0) {
-      return;
+    // Adaptive frame skipping based on performance and device tier
+    const mobileTier = perfSettings.mobileTier || 'low';
+    const performanceThreshold = mobileTier === 'high' ? 25 : 
+                                mobileTier === 'medium' ? 20 : 15;
+    
+    // Skip frames more intelligently based on actual performance
+    if (mobilePerformanceMonitor.isPerformancePoor() && 
+        mobilePerformanceMonitor.getAverageFPS() < performanceThreshold) {
+      if (frameCount % (mobileTier === 'high' ? 2 : 3) === 0) {
+        return;
+      }
     }
   }
 
   frameCount++;
 
-  // Performance-based frame throttling with mobile optimization
-  const frameThrottle = perfSettings.isMobile ? 8 : 
+  // Adaptive frame throttling based on mobile device capabilities
+  const frameThrottle = perfSettings.isMobile ? 
+                       (perfSettings.mobileTier === 'high' ? 3 : 
+                        perfSettings.mobileTier === 'medium' ? 4 : 6) :
                        perfSettings.detailLevel === 'high' ? 1 : 
                        perfSettings.detailLevel === 'normal' ? 2 : 3;
 
-  // Optimize operations for mobile
+  // Optimize operations for mobile with tier-based updates
   if (perfSettings.isMobile) {
-    // On mobile, update Mars Scene Manager with heavy throttling
-    if (window.marsSceneManager && rover && frameCount % (frameThrottle * 8) === 0) {
+    // Mobile scene manager updates with reduced throttling for better visuals
+    const sceneUpdateThrottle = perfSettings.mobileTier === 'high' ? 4 : 
+                               perfSettings.mobileTier === 'medium' ? 6 : 8;
+    
+    if (window.marsSceneManager && rover && frameCount % (frameThrottle * sceneUpdateThrottle) === 0) {
       window.marsSceneManager.update(rover.position);
+    }
+    
+    // Enable some atmospheric effects on high-end mobile devices
+    if (!perfSettings.disableAtmosphericEffects && window.atmosphericEffects && 
+        frameCount % (frameThrottle * 6) === 0) {
+      window.atmosphericEffects.update(delta, rover.position);
     }
   } else {
     // // Make the skybox follow the camera ONLY if it exists
@@ -3992,10 +4090,28 @@ function createRealisticMarsTerrain() {
     let elevation = 0;
     
     if (perfSettings.isMobile) {
-      // Mobile: Simplified but visible terrain generation
-      elevation = Math.sin(x * 0.01) * Math.cos(z * 0.01) * 6 +
-                 Math.sin(x * 0.02 + 5) * Math.cos(z * 0.015) * 4 +
-                 Math.sin(x * 0.04 + 2) * Math.cos(z * 0.03) * 2;
+      // Mobile: Enhanced terrain generation based on device tier
+      const mobileTier = perfSettings.mobileTier || 'low';
+      
+      // Base terrain features for all mobile devices
+      const baseElevation = Math.sin(x * 0.01) * Math.cos(z * 0.01) * 8 +
+                           Math.sin(x * 0.02 + 5) * Math.cos(z * 0.015) * 6;
+      
+      // Add medium features for mid-range and high-end mobile
+      const mediumFeatures = (mobileTier === 'medium' || mobileTier === 'high') ? 
+        Math.sin(x * 0.03 + 2) * Math.cos(z * 0.025) * 4 +
+        Math.sin(x * 0.05 + 1) * Math.cos(z * 0.04) * 2 : 0;
+      
+      // Add fine details for high-end mobile devices
+      const fineFeatures = (mobileTier === 'high') ? 
+        Math.sin(x * 0.08 + 3) * Math.cos(z * 0.06) * 1.5 +
+        Math.sin(x * 0.12 + 4) * Math.cos(z * 0.09) * 1 : 0;
+      
+      // Add crater-like features for more interesting terrain
+      const craterFeatures = Math.sin(x * 0.006) * Math.cos(z * 0.006) * 
+                            Math.sin(x * 0.004 + 1) * Math.cos(z * 0.008) * 3;
+      
+      elevation = baseElevation + mediumFeatures + fineFeatures + craterFeatures;
     } else {
       // Desktop: Full terrain generation
       // Large features (mountains and valleys) - always included
@@ -7387,6 +7503,10 @@ function createEnhancedHUD() {
   
   // Mobile-specific styles
   if (isMobile) {
+    const perfSettings = getPerformanceSettings();
+    const mobileTier = perfSettings.mobileTier || 'low';
+    const tierColor = mobileTier === 'high' ? '#ff6b35' : mobileTier === 'medium' ? '#ffa500' : '#00ff88';
+    
     hud.style.cssText = `
       position: fixed;
       top: 10px;
@@ -7402,9 +7522,13 @@ function createEnhancedHUD() {
       max-width: 160px;
       max-height: 40vh;
       overflow-y: auto;
-      border: 1px solid #00ff88;
+      border: 1px solid ${tierColor};
       transition: all 0.3s ease;
     `;
+    
+    // Mobile tier information
+    const tierEmoji = mobileTier === 'high' ? '🔥' : mobileTier === 'medium' ? '⚡' : '📱';
+    const tierName = mobileTier === 'high' ? 'High-End' : mobileTier === 'medium' ? 'Mid-Range' : 'Budget';
     
     hud.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
@@ -7412,6 +7536,9 @@ function createEnhancedHUD() {
         <button id="hud-toggle" style="background: none; border: none; color: #00ff88; cursor: pointer; font-size: 10px; padding: 0;">−</button>
       </div>
       <div id="hud-content">
+        <div style="color: ${tierColor}; font-size: 8px; margin-bottom: 6px; text-align: center; border-bottom: 1px solid ${tierColor}; padding-bottom: 3px;">
+          ${tierEmoji} ${tierName} Mobile
+        </div>
         <div id="hud-status">
           <div>Dist: <span id="distance-traveled">0</span>m</div>
           <div>Speed: <span id="current-speed">0</span>m/s</div>
@@ -7720,13 +7847,18 @@ function showAnalysisDialog(analysis) {
 setTimeout(() => {
   initializeEnhancedSystems();
   
-  // Show welcome message
+  // Show welcome message with device-specific information
   setTimeout(() => {
     if (window.showNotification) {
       const perfSettings = getPerformanceSettings();
       if (perfSettings.isMobile) {
         console.log('Mobile mode initialized with settings:', perfSettings);
-        window.showNotification('📱 Mobile Optimized! Use touch controls to drive the rover!', 5000);
+        const mobileTier = perfSettings.mobileTier || 'low';
+        const tierEmoji = mobileTier === 'high' ? '🔥' : mobileTier === 'medium' ? '⚡' : '📱';
+        const tierMessage = mobileTier === 'high' ? 'High-End Mobile' : 
+                           mobileTier === 'medium' ? 'Mid-Range Mobile' : 'Mobile Optimized';
+        
+        window.showNotification(`${tierEmoji} ${tierMessage}! Enhanced visuals enabled. Use touch controls to drive!`, 5000);
       } else {
         window.showNotification('🚀 Mars Rover Ready! WASD to move, C for camera, R for rockets!', 5000);
       }
@@ -7751,9 +7883,20 @@ setTimeout(() => {
         window.showNotification('🚀 Rocket System Ready! Press R for manual launch!', 4000);
       }
     } else if (perfSettings.isMobile) {
-      // Mobile-specific performance notification
+      // Mobile-specific performance notification with feature details
       if (window.showNotification) {
-        window.showNotification('⚡ Mobile Performance Mode - Heavy effects disabled for smoother gameplay!', 4000);
+        const mobileTier = perfSettings.mobileTier || 'low';
+        let featureMessage = '';
+        
+        if (mobileTier === 'high') {
+          featureMessage = '🔥 High-End Mobile: Enhanced terrain, rockets enabled, atmospheric effects active!';
+        } else if (mobileTier === 'medium') {
+          featureMessage = '⚡ Mid-Range Mobile: Improved terrain, optimized effects for smooth gameplay!';
+        } else {
+          featureMessage = '📱 Mobile Optimized: Essential features enabled for best performance!';
+        }
+        
+        window.showNotification(featureMessage, 4000);
       }
     }
     
