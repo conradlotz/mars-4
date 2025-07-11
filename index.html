@@ -468,6 +468,18 @@
         border-color: rgba(255, 107, 53, 0.5);
       }
     }
+    
+    /* Hide bottom mode buttons (day/night, stylized mode) */
+    .hidden-mode-button {
+      display: none !important;
+    }
+    
+    /* Target specific bottom positioned buttons */
+    button[style*="bottom: 20px"][style*="right: 20px"],
+    button[style*="bottom: 20px"][style*="right: 180px"],
+    button[style*="bottom: 60px"][style*="right: 20px"] {
+      display: none !important;
+    }
   </style>
   <!-- Load Three.js libraries as regular scripts -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
@@ -913,45 +925,108 @@
           // Show audio container
           document.getElementById('youtube-audio-container').style.display = 'block';
           
-          // Show subtle music notification
-          this.showMusicNotification();
+          // Show click-to-play notification since autoplay might be blocked
+          this.showClickToPlayNotification();
           
         }, 1000); // Wait 1 second after game loads
       }
       
-      // Show subtle music notification
-      showMusicNotification() {
+      // Show click-to-play notification
+      showClickToPlayNotification() {
         const notification = document.createElement('div');
         notification.style.cssText = `
           position: fixed;
           top: 20px;
           left: 50%;
           transform: translateX(-50%);
-          background: rgba(0, 0, 0, 0.8);
+          background: rgba(0, 0, 0, 0.9);
           color: white;
-          padding: 12px 20px;
+          padding: 15px 25px;
           border-radius: 25px;
           z-index: 10001;
           font-size: 14px;
           text-align: center;
-          border: 1px solid rgba(255, 107, 53, 0.3);
-          backdrop-filter: blur(10px);
+          border: 2px solid rgba(255, 107, 53, 0.6);
+          backdrop-filter: blur(15px);
           transition: all 0.3s ease;
+          cursor: pointer;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
         `;
         
-        notification.innerHTML = `🎵 Mars ambient music started`;
+        notification.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 20px; animation: pulse 2s infinite;">🎵</span>
+            <div>
+              <div style="font-weight: bold; margin-bottom: 3px;">Click to Enable Mars Music</div>
+              <div style="font-size: 12px; opacity: 0.8;">Ambient sounds ready to play</div>
+            </div>
+          </div>
+        `;
+        
+        // Add pulsing animation
+        const style = document.createElement('style');
+        style.textContent = `
+          @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+          }
+        `;
+        document.head.appendChild(style);
+        
         document.body.appendChild(notification);
         
-        // Auto-remove after 3 seconds
-        setTimeout(() => {
-          notification.style.opacity = '0';
-          notification.style.transform = 'translateX(-50%) translateY(-20px)';
+        // Enable audio on click
+        const enableAudio = () => {
+          console.log('User clicked to enable audio');
+          
+          // Try to start YouTube audio using force play
+          if (youtubePlayer && typeof youtubePlayer.forcePlay === 'function') {
+            youtubePlayer.forcePlay();
+          } else if (youtubePlayer && typeof youtubePlayer.togglePlayback === 'function') {
+            youtubePlayer.togglePlayback();
+          }
+          
+          // Update notification
+          notification.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 20px;">🎶</span>
+              <div style="font-weight: bold; color: #4CAF50;">Mars Music Playing!</div>
+            </div>
+          `;
+          notification.style.background = 'rgba(76, 175, 80, 0.9)';
+          notification.style.borderColor = 'rgba(76, 175, 80, 0.6)';
+          notification.style.cursor = 'default';
+          
+          // Remove after success
           setTimeout(() => {
-            if (notification.parentNode) {
-              notification.parentNode.removeChild(notification);
-            }
-          }, 300);
-        }, 3000);
+            notification.style.opacity = '0';
+            notification.style.transform = 'translateX(-50%) translateY(-20px)';
+            setTimeout(() => {
+              if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+              }
+            }, 300);
+          }, 2000);
+          
+          // Remove click listener
+          notification.removeEventListener('click', enableAudio);
+        };
+        
+        // Add click listener
+        notification.addEventListener('click', enableAudio);
+        
+        // Auto-remove after 12 seconds if not clicked
+        setTimeout(() => {
+          if (notification.parentNode) {
+            notification.style.opacity = '0';
+            notification.style.transform = 'translateX(-50%) translateY(-20px)';
+            setTimeout(() => {
+              if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+              }
+            }, 300);
+          }
+        }, 12000);
       }
       
       // Clean up UI elements after loading
@@ -961,6 +1036,9 @@
         if (loadButton) {
           loadButton.style.display = 'none';
         }
+        
+        // Hide bottom mode buttons (keep code intact, just hide UI)
+        this.hideBottomModeButtons();
         
         // Platform-specific cleanup
         if (this.deviceSpecs.isMobile) {
@@ -1003,6 +1081,81 @@
         console.log('UI cleaned up for better gaming experience');
       }
       
+      // Hide the bottom mode buttons (day/night, stylized mode)
+      hideBottomModeButtons() {
+        // Use a setTimeout to ensure the buttons are created first
+        setTimeout(() => {
+          // Find and hide buttons positioned at the bottom of the screen
+          const buttons = document.querySelectorAll('button');
+          buttons.forEach(button => {
+            const computedStyle = window.getComputedStyle(button);
+            const position = computedStyle.position;
+            const bottom = computedStyle.bottom;
+            const right = computedStyle.right;
+            
+            // Check if button is positioned at bottom of screen
+            if (position === 'absolute' && 
+                (bottom === '20px' || bottom === '60px') && 
+                (right === '20px' || right === '180px')) {
+              
+              // Check button text to identify the mode buttons
+              const buttonText = button.textContent.toLowerCase();
+              if (buttonText.includes('day') || 
+                  buttonText.includes('night') || 
+                  buttonText.includes('stylized') || 
+                  buttonText.includes('realistic') || 
+                  buttonText.includes('force')) {
+                
+                // Hide the button but keep it functional
+                button.style.display = 'none';
+                console.log('Hidden mode button:', button.textContent);
+              }
+            }
+          });
+          
+          console.log('Bottom mode buttons hidden');
+        }, 2000); // Wait 2 seconds for buttons to be created
+        
+        // Set up a periodic check to catch any buttons created later
+        const checkInterval = setInterval(() => {
+          const buttons = document.querySelectorAll('button');
+          let foundNewButtons = false;
+          
+          buttons.forEach(button => {
+            const computedStyle = window.getComputedStyle(button);
+            const position = computedStyle.position;
+            const bottom = computedStyle.bottom;
+            const right = computedStyle.right;
+            
+            if (position === 'absolute' && 
+                (bottom === '20px' || bottom === '60px') && 
+                (right === '20px' || right === '180px') &&
+                button.style.display !== 'none') {
+              
+              const buttonText = button.textContent.toLowerCase();
+              if (buttonText.includes('day') || 
+                  buttonText.includes('night') || 
+                  buttonText.includes('stylized') || 
+                  buttonText.includes('realistic') || 
+                  buttonText.includes('force')) {
+                
+                button.style.display = 'none';
+                foundNewButtons = true;
+                console.log('Hidden newly created mode button:', button.textContent);
+              }
+            }
+          });
+          
+          // Stop checking after 30 seconds
+          if (Date.now() - this.cleanupStartTime > 30000) {
+            clearInterval(checkInterval);
+          }
+        }, 1000);
+        
+        // Record start time for cleanup
+        this.cleanupStartTime = Date.now();
+      }
+      
       // Show mobile instructions
       showMobileInstructions() {
         const instructions = document.createElement('div');
@@ -1038,7 +1191,7 @@
             <span>Right buttons for camera & brake</span>
           </div>
           <div style="margin-bottom: 20px; font-size: 12px; opacity: 0.7;">
-            🎧 Ambient Mars music is now playing
+            🎧 Click the music notification to enable audio
           </div>
           <button onclick="this.parentNode.remove()" style="
             background: linear-gradient(145deg, #ff6b35, #e55a2b);
@@ -1455,11 +1608,35 @@
                   event.target.setVolume(parseInt(volumeSlider.value));
                 }
                 
-                // Auto-play if specified
+                // Try to auto-play if specified
                 if (options.autoplay && typeof event.target.playVideo === 'function') {
-                  event.target.playVideo();
-                  this.isPlaying = true;
-                  document.getElementById('youtube-play-pause').textContent = 'Pause';
+                  console.log('Attempting to autoplay...');
+                  
+                  // Try to play immediately
+                  setTimeout(() => {
+                    try {
+                      event.target.playVideo();
+                      this.isPlaying = true;
+                      document.getElementById('youtube-play-pause').textContent = 'Pause';
+                      console.log('Autoplay successful');
+                    } catch (error) {
+                      console.log('Autoplay blocked by browser policy:', error);
+                    }
+                  }, 100);
+                  
+                  // Also try after a short delay
+                  setTimeout(() => {
+                    if (!this.isPlaying) {
+                      try {
+                        event.target.playVideo();
+                        this.isPlaying = true;
+                        document.getElementById('youtube-play-pause').textContent = 'Pause';
+                        console.log('Delayed autoplay successful');
+                      } catch (error) {
+                        console.log('Delayed autoplay also blocked');
+                      }
+                    }
+                  }, 1000);
                 }
                 
                 // Get video title
@@ -1477,9 +1654,14 @@
                 if (event.data === YT.PlayerState.PLAYING) {
                   this.isPlaying = true;
                   document.getElementById('youtube-play-pause').textContent = 'Pause';
+                  console.log('YouTube audio is now playing');
+                  
+                  // Hide any click-to-play notifications when audio starts
+                  this.hideClickToPlayNotifications();
                 } else if (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) {
                   this.isPlaying = false;
                   document.getElementById('youtube-play-pause').textContent = 'Play';
+                  console.log('YouTube audio paused/ended');
                 }
               },
               'onError': (event) => {
@@ -1506,14 +1688,17 @@
               this.player.pauseVideo();
               this.isPlaying = false;
               document.getElementById('youtube-play-pause').textContent = 'Play';
+              console.log('YouTube playback paused');
             } else {
               console.error('pauseVideo method not available on player object');
             }
           } else {
             if (typeof this.player.playVideo === 'function') {
+              console.log('Starting YouTube playback...');
               this.player.playVideo();
               this.isPlaying = true;
               document.getElementById('youtube-play-pause').textContent = 'Pause';
+              console.log('YouTube playback started');
             } else {
               console.error('playVideo method not available on player object');
             }
@@ -1521,11 +1706,61 @@
         } catch (error) {
           console.error('Error toggling YouTube playback:', error);
         }
+      },
+      
+      // Force start playback (for user-initiated actions)
+      forcePlay: function() {
+        if (!this.player) {
+          console.error('YouTube player not initialized for force play');
+          return;
+        }
+        
+        try {
+          if (typeof this.player.playVideo === 'function') {
+            console.log('Force starting YouTube playback...');
+            this.player.playVideo();
+            this.isPlaying = true;
+            document.getElementById('youtube-play-pause').textContent = 'Pause';
+            console.log('YouTube playback force started');
+          } else {
+            console.error('playVideo method not available for force play');
+          }
+        } catch (error) {
+          console.error('Error force starting YouTube playback:', error);
+        }
+      },
+      
+      // Hide click-to-play notifications when audio starts
+      hideClickToPlayNotifications: function() {
+        const notifications = document.querySelectorAll('div');
+        notifications.forEach(notification => {
+          if (notification.innerHTML && notification.innerHTML.includes('Click to Enable Mars Music')) {
+            notification.style.opacity = '0';
+            notification.style.transform = 'translateX(-50%) translateY(-20px)';
+            setTimeout(() => {
+              if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+              }
+            }, 300);
+          }
+        });
       }
     };
     
     // YouTube button is now hidden as audio auto-loads
     // Event listener removed to clean up the interface
+    
+    // Add click listener to YouTube controls for easier access
+    setTimeout(() => {
+      const playPauseButton = document.getElementById('youtube-play-pause');
+      if (playPauseButton) {
+        playPauseButton.addEventListener('click', () => {
+          if (youtubePlayer && youtubePlayer.player) {
+            youtubePlayer.togglePlayback();
+          }
+        });
+      }
+    }, 3000);
   </script>
 </body>
 </html>
