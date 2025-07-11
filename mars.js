@@ -3909,7 +3909,7 @@ function createHUD() {
   hudElement.style.borderRadius = '5px';
   hudElement.style.pointerEvents = 'none'; // Don't interfere with mouse events
   hudElement.id = 'cameraHUD';
-  hudElement.innerHTML = '<p>Camera: Third Person Mode (Press C to change)<br /><br />Controls: W/A/S/D to move, Arrow keys to rotate camera</p>';
+  // hudElement.innerHTML = '<p>Camera: Third Person Mode (Press C to change)<br /><br />Controls: W/A/S/D to move, Arrow keys to rotate camera</p>';
   document.body.appendChild(hudElement);
 
   // Create a text element for distance traveled
