@@ -1,20 +1,38 @@
+// Performance-aware initialization
+function getPerformanceSettings() {
+  return window.GAME_PERFORMANCE_SETTINGS || {
+    textureSize: 1024,
+    particleCount: 500,
+    renderDistance: 5000,
+    shadowQuality: 'low',
+    antialiasing: true,
+    skyboxResolution: 2048,
+    detailLevel: 'normal',
+    fogDistance: 4000,
+    graphicsQuality: 'medium'
+  };
+}
+
 // Scene, Camera, Renderer
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
 camera.position.set(0, 10, 20);
 
-// Performance-optimized renderer with better quality settings for visibility
+// Performance-optimized renderer with adaptive settings
+const perfSettings = getPerformanceSettings();
 const renderer = new THREE.WebGLRenderer({
-  antialias: true, // Enable antialiasing for better star visibility
-  powerPreference: 'high-performance',
-  precision: 'highp' // Higher precision for better visibility
+  antialias: perfSettings.antialiasing,
+  powerPreference: perfSettings.graphicsQuality === 'high' ? 'high-performance' : 'default',
+  precision: perfSettings.graphicsQuality === 'high' ? 'highp' : 'mediump'
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setPixelRatio(window.devicePixelRatio); // Use device pixel ratio for sharper rendering
+// Limit pixel ratio for better performance on high-DPI displays
+const pixelRatio = Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1);
+renderer.setPixelRatio(pixelRatio);
 document.body.appendChild(renderer.domElement);
 
-// Fog for distance culling - more distant and less intense for better star visibility
-scene.fog = new THREE.Fog(0xb77c5a, 1000, 7000);
+// Adaptive fog based on performance settings
+scene.fog = new THREE.Fog(0xb77c5a, perfSettings.fogDistance * 0.2, perfSettings.renderDistance);
 
 // Endless terrain system with reduced complexity
 const terrainSystem = {
@@ -366,7 +384,8 @@ scene.add(rover);
 
 // Dust Particle System
 const createDustParticles = () => {
-  const particleCount = 500;
+  const perfSettings = getPerformanceSettings();
+  const particleCount = Math.min(perfSettings.particleCount || 300, 500);
   const particles = new THREE.BufferGeometry();
   const positions = new Float32Array(particleCount * 3);
   const sizes = new Float32Array(particleCount);
@@ -536,13 +555,17 @@ function toggleRealisticMode() {
 
 // Meteor System - Create shooting stars in the night sky
 class MeteorSystem {
-  constructor(skyRadius = 5000, count = 25) {
+  constructor(skyRadius = 5000, count = null) {
+    const perfSettings = getPerformanceSettings();
+    const adaptiveCount = count || Math.floor((perfSettings.particleCount || 300) / 12); // Fewer meteors on lower settings
+    
     this.skyRadius = skyRadius;
     this.meteors = [];
     this.meteorPool = [];
-    this.maxMeteors = count;
+    this.maxMeteors = adaptiveCount;
     this.activeMeteors = 0;
-    this.meteorProbability = 0.03; // Probability of a new meteor each frame
+    this.meteorProbability = perfSettings.detailLevel === 'high' ? 0.03 : 
+                           perfSettings.detailLevel === 'normal' ? 0.02 : 0.01;
 
     // Create meteor textures
     this.createMeteorTextures();
@@ -2051,18 +2074,23 @@ function animate(time) {
 
   frameCount++;
 
+  // Performance-based frame throttling
+  const perfSettings = getPerformanceSettings();
+  const frameThrottle = perfSettings.detailLevel === 'high' ? 1 : 
+                       perfSettings.detailLevel === 'normal' ? 2 : 3;
+
   // // Make the skybox follow the camera ONLY if it exists
   // if (window.spaceSkybox) {
   //   window.spaceSkybox.position.copy(camera.position);
   // }
 
-  // // Update meteor system if it exists and we're in night mode
-  if (window.meteorSystem && (!isDaytime || isTransitioning)) {
+  // Update meteor system if it exists and we're in night mode (throttled)
+  if (window.meteorSystem && (!isDaytime || isTransitioning) && frameCount % frameThrottle === 0) {
     window.meteorSystem.update(delta);
   }
 
-  // Update Mars Scene Manager if it exists
-  if (window.marsSceneManager && rover) {
+  // Update Mars Scene Manager if it exists (throttled for performance)
+  if (window.marsSceneManager && rover && frameCount % (frameThrottle * 2) === 0) {
     window.marsSceneManager.update(rover.position);
   }
 
@@ -2130,20 +2158,22 @@ function animate(time) {
   }
 
   // Position rover on terrain - throttle for performance
-  if (frameCount % FRAME_THROTTLE === 0) {
+  if (frameCount % (frameThrottle * 2) === 0) {
     positionRoverOnTerrain();
   }
 
-  // Update wheel suspension for realistic terrain following - already throttled internally
-  updateWheelSuspension(wheels, originalWheelPositions);
+  // Update wheel suspension for realistic terrain following - throttled based on performance
+  if (frameCount % frameThrottle === 0) {
+    updateWheelSuspension(wheels, originalWheelPositions);
+  }
 
   // Update camera position based on mode - throttle for performance
-  if (frameCount % 2 === 0) {
+  if (frameCount % frameThrottle === 0) {
     updateCamera();
   }
 
-  // Update dust particles - only when moving and throttled
-  if (isMoving && frameCount % 4 === 0) {
+  // Update dust particles - only when moving and throttled based on performance
+  if (isMoving && frameCount % (frameThrottle * 2) === 0) {
     dustParticles.update(rover.position, isMoving);
   }
 
@@ -2474,40 +2504,50 @@ window.addEventListener('resize', () => {
 });
 
 function createRealisticMarsTerrain() {
-  // Create a much larger terrain with more detailed features
-  const terrainSize = 5000; // Increased size for more exploration area
-  const resolution = 1024; // Higher resolution for more detail
+  // Performance-adaptive terrain creation
+  const perfSettings = getPerformanceSettings();
+  
+  // Adaptive terrain parameters based on performance
+  const terrainSize = perfSettings.detailLevel === 'high' ? 5000 : 
+                     perfSettings.detailLevel === 'normal' ? 3000 : 2000;
+  
+  const segments = perfSettings.detailLevel === 'high' ? 256 : 
+                   perfSettings.detailLevel === 'normal' ? 128 : 64;
+  
   const geometry = new THREE.PlaneGeometry(
     terrainSize,
     terrainSize,
-    256,  // increase segments for smoother terrain
-    256   // increase segments for smoother terrain
+    segments,
+    segments
   );
   geometry.rotateX(-Math.PI / 2);
 
-  // Apply more complex noise to create realistic terrain elevation
+  // Apply performance-optimized noise to create realistic terrain elevation
   const positions = geometry.attributes.position.array;
 
-  // Create a more varied and realistic terrain with multiple noise frequencies
+  // Create terrain with adaptive detail based on performance settings
   for (let i = 0; i < positions.length; i += 3) {
     const x = positions[i];
     const z = positions[i + 2];
 
-    // Multi-layered noise for more realistic terrain
-    // Large features (mountains and valleys)
+    // Multi-layered noise for more realistic terrain (adaptive)
+    // Large features (mountains and valleys) - always included
     const largeFeatures = Math.sin(x * 0.01) * Math.cos(z * 0.01) * 8 +
       Math.sin(x * 0.02 + 10) * Math.cos(z * 0.015) * 6;
 
-    // Medium features (hills and craters)
-    const mediumFeatures = Math.sin(x * 0.05) * Math.cos(z * 0.04) * 3 +
-      Math.sin(x * 0.07 + 1) * Math.cos(z * 0.06) * 2;
+    // Medium features (hills and craters) - included based on performance
+    const mediumFeatures = perfSettings.detailLevel !== 'low' ? 
+      Math.sin(x * 0.05) * Math.cos(z * 0.04) * 3 +
+      Math.sin(x * 0.07 + 1) * Math.cos(z * 0.06) * 2 : 0;
 
-    // Small features (bumps and rocks)
-    const smallFeatures = Math.sin(x * 0.2 + 2) * Math.cos(z * 0.15) * 1 +
-      Math.sin(x * 0.3 + 3) * Math.cos(z * 0.25) * 0.5;
+    // Small features (bumps and rocks) - only for high performance
+    const smallFeatures = perfSettings.detailLevel === 'high' ? 
+      Math.sin(x * 0.2 + 2) * Math.cos(z * 0.15) * 1 +
+      Math.sin(x * 0.3 + 3) * Math.cos(z * 0.25) * 0.5 : 0;
 
-    // Micro details
-    const microDetails = Math.sin(x * 0.8 + 4) * Math.cos(z * 0.6) * 0.3;
+    // Micro details - only for high performance
+    const microDetails = perfSettings.detailLevel === 'high' ? 
+      Math.sin(x * 0.8 + 4) * Math.cos(z * 0.6) * 0.3 : 0;
 
     // Combine all features with different weights
     let elevation = largeFeatures + mediumFeatures + smallFeatures + microDetails;
@@ -2516,10 +2556,12 @@ function createRealisticMarsTerrain() {
     const randomVariation = Math.random() * 0.5 - 0.25;
     elevation += randomVariation;
 
-    // Add specific Martian features
+    // Add specific Martian features (adaptive based on performance)
+    const featureMultiplier = perfSettings.detailLevel === 'high' ? 1.0 : 
+                              perfSettings.detailLevel === 'normal' ? 0.6 : 0.3;
 
     // 1. Add impact craters
-    const craterCount = 15;
+    const craterCount = Math.floor(15 * featureMultiplier);
     for (let c = 0; c < craterCount; c++) {
       const craterX = Math.sin(c * 1.1) * terrainSize * 0.4;
       const craterZ = Math.cos(c * 1.7) * terrainSize * 0.4;
@@ -2544,7 +2586,7 @@ function createRealisticMarsTerrain() {
     }
 
     // 2. Add dried river beds
-    const riverCount = 5;
+    const riverCount = Math.floor(5 * featureMultiplier);
     for (let r = 0; r < riverCount; r++) {
       const riverStartX = Math.sin(r * 2.1) * terrainSize * 0.4;
       const riverStartZ = Math.cos(r * 3.7) * terrainSize * 0.4;
@@ -2577,7 +2619,7 @@ function createRealisticMarsTerrain() {
     }
 
     // 3. Add sand dunes
-    const duneCount = 10;
+    const duneCount = Math.floor(10 * featureMultiplier);
     for (let d = 0; d < duneCount; d++) {
       const duneX = Math.sin(d * 4.3) * terrainSize * 0.3;
       const duneZ = Math.cos(d * 5.9) * terrainSize * 0.3;
@@ -2599,7 +2641,7 @@ function createRealisticMarsTerrain() {
     }
 
     // 4. Add mountain ranges
-    const mountainRangeCount = 5;
+    const mountainRangeCount = Math.floor(5 * featureMultiplier);
     for (let m = 0; m < mountainRangeCount; m++) {
       // Define mountain range parameters
       const rangeStartX = Math.sin(m * 2.7) * terrainSize * 0.4;
@@ -2654,7 +2696,7 @@ function createRealisticMarsTerrain() {
     }
 
     // 4.5 Add occasional very high mountains (rare and random)
-    const highMountainCount = 30; // Small number of high mountains
+    const highMountainCount = Math.floor(30 * featureMultiplier);
     for (let hm = 0; hm < highMountainCount; hm++) {
       // Random position for high mountains
       const mountainX = Math.sin(hm * 7.3 + 2.1) * terrainSize * 0.4;
@@ -2696,7 +2738,7 @@ function createRealisticMarsTerrain() {
     }
 
     // 5. Add impact craters
-    const impactCraterCount = 25;
+    const impactCraterCount = Math.floor(25 * featureMultiplier);
     for (let c = 0; c < impactCraterCount; c++) {
       // Random crater position
       const craterX = (Math.random() * 2 - 1) * terrainSize * 0.8;
@@ -2844,9 +2886,12 @@ function createRealisticMarsTerrain() {
 
 // Create a realistic Mars texture
 function createRealisticMarsTexture() {
+  const perfSettings = getPerformanceSettings();
+  const textureSize = perfSettings.textureSize || 1024;
+  
   const canvas = document.createElement('canvas');
-  canvas.width = 2048;
-  canvas.height = 2048;
+  canvas.width = textureSize;
+  canvas.height = textureSize;
   const context = canvas.getContext('2d');
 
   // Base color - deeper reddish-orange like in the reference image
@@ -2952,9 +2997,12 @@ function createRealisticMarsTexture() {
 
 // Create a normal map for Mars terrain
 function createMarsNormalMap() {
+  const perfSettings = getPerformanceSettings();
+  const textureSize = Math.min(perfSettings.textureSize || 1024, 1024); // Cap at 1024 for normal maps
+  
   const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 1024;
+  canvas.width = textureSize;
+  canvas.height = textureSize;
   const context = canvas.getContext('2d');
 
   // Fill with neutral normal (128, 128, 255)
@@ -3018,9 +3066,12 @@ function createMarsNormalMap() {
 
 // Create a roughness map
 function createMarsRoughnessMap() {
+  const perfSettings = getPerformanceSettings();
+  const textureSize = Math.min(perfSettings.textureSize || 1024, 1024); // Cap at 1024 for roughness maps
+  
   const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 1024;
+  canvas.width = textureSize;
+  canvas.height = textureSize;
   const context = canvas.getContext('2d');
 
   // Fill with neutral roughness (0.85)
@@ -3084,8 +3135,14 @@ function createSpaceSkybox() {
 }
 
 // Create a single spherical texture for the dome-like skybox
-function createSphericalSkyTexture(size = 8192) {
-  // Create a high-resolution canvas
+function createSphericalSkyTexture(size = null) {
+  // Use performance-appropriate size
+  const perfSettings = getPerformanceSettings();
+  if (!size) {
+    size = perfSettings.skyboxResolution || 2048;
+  }
+  
+  // Create a performance-appropriate canvas
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -3127,8 +3184,11 @@ function createSphericalSkyTexture(size = 8192) {
 
 // Add much brighter background stars
 function addBrighterBackgroundStars(context, size) {
-  // Very dense star field
-  const starCount = Math.floor(size * size / 50);
+  // Adaptive star density based on performance settings
+  const perfSettings = getPerformanceSettings();
+  const densityMultiplier = perfSettings.detailLevel === 'high' ? 1.0 : 
+                            perfSettings.detailLevel === 'normal' ? 0.6 : 0.3;
+  const starCount = Math.floor(size * size / 50 * densityMultiplier);
 
   for (let i = 0; i < starCount; i++) {
     // Create cluster-like distribution
@@ -3189,8 +3249,11 @@ function addBrighterBackgroundStars(context, size) {
 
 // Add brighter mid-layer stars
 function addBrighterMidLayerStars(context, size) {
-  // Medium density star layer
-  const starCount = Math.floor(size * size / 300);
+  // Adaptive medium density star layer
+  const perfSettings = getPerformanceSettings();
+  const densityMultiplier = perfSettings.detailLevel === 'high' ? 1.0 : 
+                            perfSettings.detailLevel === 'normal' ? 0.6 : 0.3;
+  const starCount = Math.floor(size * size / 300 * densityMultiplier);
 
   for (let i = 0; i < starCount; i++) {
     let x, y;
@@ -3247,8 +3310,11 @@ function addBrighterMidLayerStars(context, size) {
 
 // Add brighter foreground stars
 function addBrighterForegroundStars(context, size) {
-  // Brighter stars - increased number
-  const brightStarCount = Math.floor(size * size / 3000);
+  // Adaptive brighter stars count
+  const perfSettings = getPerformanceSettings();
+  const densityMultiplier = perfSettings.detailLevel === 'high' ? 1.0 : 
+                            perfSettings.detailLevel === 'normal' ? 0.6 : 0.3;
+  const brightStarCount = Math.floor(size * size / 3000 * densityMultiplier);
 
   for (let i = 0; i < brightStarCount; i++) {
     const x = Math.random() * size;
@@ -3633,31 +3699,84 @@ function darkenColor(color, percent) {
   return `#${(1 << 24 | R << 16 | G << 8 | B).toString(16).slice(1)}`;
 }
 
-// Initialize scene elements in the correct order
-function initializeScene() {
-  console.log("Initializing scene elements...");
+// Lazy loading system for non-essential components
+class LazyLoader {
+  constructor() {
+    this.loadedComponents = new Set();
+    this.loadingPromises = new Map();
+    this.loadQueue = [];
+    this.isLoading = false;
+  }
 
+  async loadComponent(componentName, loadFunction, priority = 'normal') {
+    if (this.loadedComponents.has(componentName)) {
+      return Promise.resolve();
+    }
+
+    if (this.loadingPromises.has(componentName)) {
+      return this.loadingPromises.get(componentName);
+    }
+
+    const promise = new Promise(async (resolve, reject) => {
+      try {
+        console.log(`Loading component: ${componentName}`);
+        await loadFunction();
+        this.loadedComponents.add(componentName);
+        console.log(`Component loaded: ${componentName}`);
+        resolve();
+      } catch (error) {
+        console.error(`Error loading component ${componentName}:`, error);
+        reject(error);
+      } finally {
+        this.loadingPromises.delete(componentName);
+      }
+    });
+
+    this.loadingPromises.set(componentName, promise);
+    return promise;
+  }
+
+  async loadInBackground(componentName, loadFunction) {
+    // Load component in the background without blocking
+    setTimeout(() => {
+      this.loadComponent(componentName, loadFunction, 'background');
+    }, 100);
+  }
+}
+
+// Initialize lazy loader
+const lazyLoader = new LazyLoader();
+
+// Initialize scene elements with lazy loading
+function initializeScene() {
+  console.log("Initializing core scene elements...");
+
+  // Load essential components immediately
+  loadCoreComponents();
+  
+  // Load non-essential components in background
+  setTimeout(() => {
+    loadNonEssentialComponents();
+  }, 1000);
+}
+
+function loadCoreComponents() {
   // Create the HUD
   createHUD();
   console.log("HUD created");
 
-  // Create the skybox first and make it globally accessible
-  window.spaceSkybox = createSpaceSkybox();
-  scene.add(window.spaceSkybox);
-  console.log("Skybox added to scene");
-
-  // Initialize meteor system
-  window.meteorSystem = new MeteorSystem(5000, 25);
-  console.log("Meteor system initialized");
-
-
-  // Initialize the terrain system
-  //terrainSystem.init();
-  console.log("Terrain system initialized");
-
-  // Initialize Mars Scene Manager and make it globally accessible
-  window.marsSceneManager = new MarsSceneManager(scene, 5000);
-  console.log("Mars Scene Manager initialized");
+  // Create basic skybox (lightweight version first)
+  const perfSettings = getPerformanceSettings();
+  if (perfSettings.detailLevel === 'low') {
+    // Create a simple gradient sky for low-end devices
+    scene.background = new THREE.Color(0x87CEEB);
+    console.log("Simple sky background created");
+  } else {
+    // Create the skybox and make it globally accessible
+    window.spaceSkybox = createSpaceSkybox();
+    scene.add(window.spaceSkybox);
+    console.log("Skybox added to scene");
+  }
 
   // Create the sun directional light
   sun = new THREE.DirectionalLight(0xffffff, 1);
@@ -3665,8 +3784,8 @@ function initializeScene() {
   scene.add(sun);
   console.log("Sun light added to scene");
 
-  // Create a visible sun sphere
-  const sunGeometry = new THREE.SphereGeometry(50, 32, 32);
+  // Create a simple sun sphere for immediate visibility
+  const sunGeometry = new THREE.SphereGeometry(50, 16, 16); // Reduced geometry complexity
   const sunMaterial = new THREE.MeshBasicMaterial({
     color: 0xffee66,
     transparent: true,
@@ -3675,29 +3794,56 @@ function initializeScene() {
   sunSphere = new THREE.Mesh(sunGeometry, sunMaterial);
   sunSphere.position.set(500, 300, -1000);
   scene.add(sunSphere);
-
-  // Add a glow effect to the sun
-  const sunGlowGeometry = new THREE.SphereGeometry(60, 32, 32);
-  const sunGlowMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffdd44,
-    transparent: true,
-    opacity: 0.4,
-    side: THREE.BackSide
-  });
-  const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
-  sunSphere.add(sunGlow);
-
   console.log("Sun sphere added to scene");
 
-  // // Initialize sound system
-  // if (typeof soundSystem !== 'undefined') {
-  //   soundSystem.initialize();
-  //   console.log("Sound system initialized");
-  // }
-
-  // Initialize UI elements including realistic mode toggle
+  // Initialize basic UI elements
   initializeUI();
   console.log("UI elements initialized");
+}
+
+function loadNonEssentialComponents() {
+  const perfSettings = getPerformanceSettings();
+  
+  // Load meteor system only if performance allows
+  if (perfSettings.detailLevel !== 'low') {
+    lazyLoader.loadInBackground('meteorSystem', () => {
+      window.meteorSystem = new MeteorSystem(5000);
+      return Promise.resolve();
+    });
+  }
+
+  // Load Mars scene manager with delay
+  lazyLoader.loadInBackground('marsSceneManager', () => {
+    window.marsSceneManager = new MarsSceneManager(scene, 5000);
+    return Promise.resolve();
+  });
+
+  // Add sun glow effect only for higher performance settings
+  if (perfSettings.detailLevel === 'high') {
+    lazyLoader.loadInBackground('sunGlow', () => {
+      const sunGlowGeometry = new THREE.SphereGeometry(60, 32, 32);
+      const sunGlowMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffdd44,
+        transparent: true,
+        opacity: 0.4,
+        side: THREE.BackSide
+      });
+      const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
+      sunSphere.add(sunGlow);
+      return Promise.resolve();
+    });
+  }
+
+  // Load additional visual effects based on performance
+  if (perfSettings.detailLevel === 'high') {
+    // Load advanced particle effects
+    lazyLoader.loadInBackground('advancedEffects', () => {
+      // Additional visual enhancements can be added here
+      return Promise.resolve();
+    });
+  }
+
+  console.log("Non-essential components queued for background loading");
 }
 
 // Add a day/night toggle and cycle

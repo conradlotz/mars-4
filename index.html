@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Drive on Mars</title>
   <style>
-    body { margin: 0; overflow: hidden; }
+    body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
     canvas { display: block; }
     .controls {
       position: absolute;
@@ -54,6 +54,281 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    
+    /* Preloader Styles */
+    #preloader {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #1a1a1a 0%, #2d1810 100%);
+      z-index: 10000;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      color: white;
+    }
+    
+    #preloader h1 {
+      font-size: 2.5rem;
+      margin-bottom: 20px;
+      text-shadow: 0 0 10px rgba(255, 255, 255, 0.3);
+    }
+    
+    #loading-progress {
+      width: 400px;
+      height: 20px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+      overflow: hidden;
+      margin: 20px 0;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+    }
+    
+    #loading-bar {
+      height: 100%;
+      background: linear-gradient(90deg, #ff6b35 0%, #f7931e 100%);
+      border-radius: 8px;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+    
+    #loading-text {
+      font-size: 1.2rem;
+      margin-top: 10px;
+      opacity: 0.8;
+    }
+    
+    #loading-tips {
+      position: absolute;
+      bottom: 50px;
+      text-align: center;
+      opacity: 0.6;
+      font-size: 0.9rem;
+    }
+    
+    /* Performance Settings */
+    #performance-settings {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      background-color: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 15px;
+      border-radius: 8px;
+      z-index: 1000;
+      display: none;
+      min-width: 250px;
+    }
+    
+    #performance-settings h3 {
+      margin-top: 0;
+      margin-bottom: 15px;
+      color: #ff6b35;
+    }
+    
+    #performance-settings select,
+    #performance-settings input {
+      width: 100%;
+      padding: 5px;
+      margin: 5px 0;
+      border: 1px solid #555;
+      background: #333;
+      color: white;
+      border-radius: 4px;
+    }
+    
+    #performance-settings button {
+      background: #ff6b35;
+      color: white;
+      border: none;
+      padding: 8px 15px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-top: 10px;
+      width: 100%;
+    }
+    
+    #performance-settings button:hover {
+      background: #e55a2b;
+    }
+    
+    .settings-toggle {
+      position: absolute;
+      top: 70px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.5);
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    
+    .settings-toggle:hover {
+      background: rgba(0, 0, 0, 0.7);
+    }
+    
+    /* Device indicator */
+    #device-info {
+      position: absolute;
+      top: 120px;
+      left: 20px;
+      background: rgba(0, 0, 0, 0.5);
+      color: white;
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 12px;
+      display: none;
+    }
+    
+    /* Mobile Controls */
+    #mobile-controls {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      top: 0;
+      z-index: 1000;
+      pointer-events: none;
+    }
+    
+    #mobile-controls.show {
+      display: block;
+    }
+    
+    /* Virtual Joystick */
+    #virtual-joystick {
+      position: absolute;
+      bottom: 50px;
+      left: 50px;
+      width: 120px;
+      height: 120px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      pointer-events: auto;
+      touch-action: none;
+    }
+    
+    #joystick-knob {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 40px;
+      height: 40px;
+      background: rgba(255, 255, 255, 0.8);
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      transition: all 0.1s ease;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    }
+    
+    /* Mobile Action Buttons */
+    #mobile-buttons {
+      position: absolute;
+      bottom: 50px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      pointer-events: auto;
+    }
+    
+    .mobile-btn {
+      width: 60px;
+      height: 60px;
+      background: rgba(0, 0, 0, 0.6);
+      color: white;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.2s ease;
+      touch-action: manipulation;
+    }
+    
+    .mobile-btn:active {
+      background: rgba(255, 107, 53, 0.8);
+      transform: scale(0.95);
+    }
+    
+    .mobile-btn:hover {
+      background: rgba(255, 107, 53, 0.6);
+    }
+    
+    /* Touch Camera Controls */
+    #touch-camera-area {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 200px;
+      pointer-events: auto;
+      touch-action: none;
+    }
+    
+    /* Mobile HUD adjustments */
+    @media (max-width: 768px) {
+      #preloader h1 { font-size: 2rem; }
+      #loading-progress { width: 300px; }
+      #performance-settings { 
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        right: 10px;
+        width: auto;
+        min-width: auto;
+      }
+      
+      .controls {
+        bottom: 200px !important;
+        font-size: 12px;
+        padding: 8px;
+      }
+      
+      .youtube-button {
+        top: 60px !important;
+      }
+      
+      .settings-toggle {
+        top: 110px !important;
+      }
+      
+      #device-info {
+        top: 160px !important;
+        left: 10px !important;
+        right: 10px !important;
+        width: auto;
+      }
+    }
+    
+    /* Joystick touch feedback */
+    #virtual-joystick::before {
+      content: '';
+      position: absolute;
+      top: -10px;
+      left: -10px;
+      right: -10px;
+      bottom: -10px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 0.3; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.05); }
+    }
   </style>
   <!-- Load Three.js libraries as regular scripts -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
@@ -61,6 +336,60 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
 </head>
 <body>
+  <!-- Preloader -->
+  <div id="preloader">
+    <h1>Drive on Mars</h1>
+    <div id="loading-progress">
+      <div id="loading-bar"></div>
+    </div>
+    <div id="loading-text">Loading Mars Environment...</div>
+    <div id="loading-tips">
+      💡 Tip: Use WASD keys to drive the rover and mouse to look around
+    </div>
+  </div>
+
+  <!-- Performance Settings -->
+  <div id="performance-settings">
+    <h3>Performance Settings</h3>
+    <label>Graphics Quality:</label>
+    <select id="graphics-quality">
+      <option value="low">Low (Mobile/Weak PC)</option>
+      <option value="medium">Medium (Most PCs)</option>
+      <option value="high">High (Powerful PC)</option>
+      <option value="auto">Auto Detect</option>
+    </select>
+    
+    <label>Texture Quality:</label>
+    <select id="texture-quality">
+      <option value="low">Low (512px)</option>
+      <option value="medium">Medium (1024px)</option>
+      <option value="high">High (2048px)</option>
+      <option value="ultra">Ultra (4096px)</option>
+    </select>
+    
+    <label>Particle Count:</label>
+    <select id="particle-count">
+      <option value="low">Low (100)</option>
+      <option value="medium">Medium (500)</option>
+      <option value="high">High (1000)</option>
+    </select>
+    
+    <label>Render Distance:</label>
+    <select id="render-distance">
+      <option value="low">Low (3000m)</option>
+      <option value="medium">Medium (5000m)</option>
+      <option value="high">High (7000m)</option>
+    </select>
+    
+    <button id="apply-settings">Apply Settings</button>
+  </div>
+
+  <button class="settings-toggle" id="settings-toggle">⚙️ Settings</button>
+  
+  <div id="device-info">
+    <div id="device-specs"></div>
+  </div>
+
   <div class="controls">
    
   </div>
@@ -79,7 +408,336 @@
     </div>
   </div>
   
-  <script src="mars.js"></script>
+  <script>
+    // Performance optimization and preloader system
+    class GameOptimizer {
+      constructor() {
+        this.deviceSpecs = this.detectDeviceSpecs();
+        this.performanceSettings = this.getOptimalSettings();
+        this.loadingProgress = 0;
+        this.loadingSteps = [
+          'Detecting device capabilities...',
+          'Loading 3D engine...',
+          'Generating Mars terrain...',
+          'Creating rover model...',
+          'Generating space environment...',
+          'Initializing physics...',
+          'Loading audio systems...',
+          'Final optimization...'
+        ];
+        this.currentStep = 0;
+        
+        this.initializePreloader();
+        this.initializePerformanceSettings();
+        this.startOptimizedLoading();
+      }
+      
+      detectDeviceSpecs() {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        
+        const specs = {
+          isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
+          deviceMemory: navigator.deviceMemory || 4,
+          hardwareConcurrency: navigator.hardwareConcurrency || 4,
+          maxTextureSize: gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 2048,
+          renderer: gl ? gl.getParameter(gl.getExtension('WEBGL_debug_renderer_info')?.UNMASKED_RENDERER_WEBGL) : 'Unknown',
+          maxViewportDims: gl ? gl.getParameter(gl.MAX_VIEWPORT_DIMS) : [1920, 1080],
+          pixelRatio: window.devicePixelRatio || 1,
+          screenSize: Math.max(window.screen.width, window.screen.height),
+          connectionType: navigator.connection?.effectiveType || 'unknown'
+        };
+        
+        // Calculate performance score
+        let performanceScore = 0;
+        if (!specs.isMobile) performanceScore += 30;
+        if (specs.deviceMemory >= 8) performanceScore += 25;
+        if (specs.hardwareConcurrency >= 4) performanceScore += 20;
+        if (specs.maxTextureSize >= 4096) performanceScore += 15;
+        if (specs.screenSize >= 1920) performanceScore += 10;
+        
+        specs.performanceScore = performanceScore;
+        specs.performanceLevel = this.getPerformanceLevel(performanceScore);
+        
+        return specs;
+      }
+      
+      getPerformanceLevel(score) {
+        if (score >= 70) return 'high';
+        if (score >= 40) return 'medium';
+        return 'low';
+      }
+      
+      getOptimalSettings() {
+        const level = this.deviceSpecs.performanceLevel;
+        const isMobile = this.deviceSpecs.isMobile;
+        
+        const settings = {
+          low: {
+            textureSize: 512,
+            particleCount: 100,
+            renderDistance: 3000,
+            shadowQuality: 'none',
+            antialiasing: false,
+            skyboxResolution: 1024,
+            detailLevel: 'basic',
+            fogDistance: 2000
+          },
+          medium: {
+            textureSize: 1024,
+            particleCount: 500,
+            renderDistance: 5000,
+            shadowQuality: 'low',
+            antialiasing: true,
+            skyboxResolution: 2048,
+            detailLevel: 'normal',
+            fogDistance: 4000
+          },
+          high: {
+            textureSize: 2048,
+            particleCount: 1000,
+            renderDistance: 7000,
+            shadowQuality: 'high',
+            antialiasing: true,
+            skyboxResolution: 4096,
+            detailLevel: 'high',
+            fogDistance: 6000
+          }
+        };
+        
+        return settings[level];
+      }
+      
+      initializePreloader() {
+        const preloader = document.getElementById('preloader');
+        const loadingBar = document.getElementById('loading-bar');
+        const loadingText = document.getElementById('loading-text');
+        
+        // Show device info
+        const deviceInfo = document.getElementById('device-info');
+        const deviceSpecs = document.getElementById('device-specs');
+        deviceSpecs.innerHTML = `
+          Device: ${this.deviceSpecs.isMobile ? 'Mobile' : 'Desktop'}<br>
+          Performance: ${this.deviceSpecs.performanceLevel.toUpperCase()}<br>
+          Memory: ${this.deviceSpecs.deviceMemory}GB<br>
+          CPU Cores: ${this.deviceSpecs.hardwareConcurrency}
+        `;
+        
+        // Auto-hide device info after 3 seconds
+        setTimeout(() => {
+          deviceInfo.style.display = 'none';
+        }, 3000);
+      }
+      
+      initializePerformanceSettings() {
+        const settingsToggle = document.getElementById('settings-toggle');
+        const performanceSettings = document.getElementById('performance-settings');
+        const applySettings = document.getElementById('apply-settings');
+        
+        // Set default values based on device
+        document.getElementById('graphics-quality').value = this.deviceSpecs.performanceLevel;
+        document.getElementById('texture-quality').value = this.deviceSpecs.performanceLevel;
+        document.getElementById('particle-count').value = this.deviceSpecs.performanceLevel;
+        document.getElementById('render-distance').value = this.deviceSpecs.performanceLevel;
+        
+        settingsToggle.addEventListener('click', () => {
+          performanceSettings.style.display = performanceSettings.style.display === 'none' ? 'block' : 'none';
+        });
+        
+        applySettings.addEventListener('click', () => {
+          this.applyPerformanceSettings();
+          performanceSettings.style.display = 'none';
+        });
+      }
+      
+      applyPerformanceSettings() {
+        const graphicsQuality = document.getElementById('graphics-quality').value;
+        const textureQuality = document.getElementById('texture-quality').value;
+        const particleCount = document.getElementById('particle-count').value;
+        const renderDistance = document.getElementById('render-distance').value;
+        
+        // Update global performance settings
+        window.GAME_PERFORMANCE_SETTINGS = {
+          graphicsQuality,
+          textureQuality,
+          particleCount,
+          renderDistance,
+          ...this.performanceSettings
+        };
+        
+        console.log('Performance settings applied:', window.GAME_PERFORMANCE_SETTINGS);
+        
+        // Show restart notification
+        this.showRestartNotification();
+      }
+      
+      showRestartNotification() {
+        const notification = document.createElement('div');
+        notification.style.cssText = `
+          position: fixed;
+          top: 20px;
+          right: 20px;
+          background: rgba(255, 107, 53, 0.9);
+          color: white;
+          padding: 15px;
+          border-radius: 8px;
+          z-index: 10001;
+          font-size: 14px;
+          max-width: 300px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        `;
+        notification.innerHTML = `
+          <div style="font-weight: bold; margin-bottom: 5px;">Settings Applied</div>
+          <div>Some changes may require a page refresh for full effect.</div>
+          <button onclick="location.reload()" style="
+            background: white;
+            color: #ff6b35;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+            font-size: 12px;
+          ">Refresh Page</button>
+        `;
+        
+        document.body.appendChild(notification);
+        
+        // Auto-remove after 5 seconds
+        setTimeout(() => {
+          if (notification.parentNode) {
+            notification.parentNode.removeChild(notification);
+          }
+        }, 5000);
+      }
+      
+      async startOptimizedLoading() {
+        const loadingBar = document.getElementById('loading-bar');
+        const loadingText = document.getElementById('loading-text');
+        
+        // Check WebGL support first
+        if (!this.checkWebGLSupport()) {
+          return;
+        }
+        
+        // Set initial global settings
+        window.GAME_PERFORMANCE_SETTINGS = {
+          ...this.performanceSettings,
+          graphicsQuality: this.deviceSpecs.performanceLevel,
+          textureQuality: this.deviceSpecs.performanceLevel,
+          particleCount: this.deviceSpecs.performanceLevel,
+          renderDistance: this.deviceSpecs.performanceLevel
+        };
+        
+        // Simulate loading steps with actual progress
+        for (let i = 0; i < this.loadingSteps.length; i++) {
+          loadingText.textContent = this.loadingSteps[i];
+          
+          // Simulate processing time
+          await new Promise(resolve => setTimeout(resolve, 200 + Math.random() * 400));
+          
+          this.loadingProgress = ((i + 1) / this.loadingSteps.length) * 100;
+          loadingBar.style.width = this.loadingProgress + '%';
+        }
+        
+        // Load the main game script
+        try {
+          await this.loadGameScript();
+          
+          // Hide preloader with fade out
+          setTimeout(() => {
+            const preloader = document.getElementById('preloader');
+            preloader.style.opacity = '0';
+            preloader.style.transition = 'opacity 0.5s ease';
+            setTimeout(() => {
+              preloader.style.display = 'none';
+              
+              // Show device info briefly after loading
+              const deviceInfo = document.getElementById('device-info');
+              if (deviceInfo) {
+                deviceInfo.style.display = 'block';
+                setTimeout(() => {
+                  deviceInfo.style.display = 'none';
+                }, 3000);
+              }
+            }, 500);
+          }, 500);
+        } catch (error) {
+          console.error('Failed to load game:', error);
+          document.getElementById('loading-text').textContent = 'Failed to load game. Please refresh the page.';
+        }
+      }
+      
+      async loadGameScript() {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'mars.js';
+          script.onload = () => {
+            console.log('Game script loaded successfully');
+            resolve();
+          };
+          script.onerror = (error) => {
+            console.error('Failed to load game script:', error);
+            this.showErrorMessage('Failed to load game. Please refresh the page.');
+            reject(error);
+          };
+          document.head.appendChild(script);
+        });
+      }
+      
+      showErrorMessage(message) {
+        const errorDiv = document.createElement('div');
+        errorDiv.style.cssText = `
+          position: fixed;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          background: rgba(255, 0, 0, 0.9);
+          color: white;
+          padding: 20px;
+          border-radius: 8px;
+          z-index: 10001;
+          text-align: center;
+          max-width: 400px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        `;
+        errorDiv.innerHTML = `
+          <div style="font-weight: bold; margin-bottom: 10px;">Error</div>
+          <div style="margin-bottom: 15px;">${message}</div>
+          <button onclick="location.reload()" style="
+            background: white;
+            color: red;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+          ">Refresh Page</button>
+        `;
+        
+        document.body.appendChild(errorDiv);
+      }
+      
+      // Add WebGL compatibility check
+      checkWebGLSupport() {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        
+        if (!gl) {
+          this.showErrorMessage('WebGL is not supported on this device. Please use a modern browser with WebGL support.');
+          return false;
+        }
+        
+        return true;
+      }
+    }
+    
+    // Initialize optimizer when DOM is ready
+    document.addEventListener('DOMContentLoaded', () => {
+      new GameOptimizer();
+    });
+  </script>
+  
   <script>
     // Simple YouTube audio player implementation
     const youtubePlayer = {
