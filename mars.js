@@ -466,8 +466,9 @@ scene.add(sunLight);
 const hemisphereLight = new THREE.HemisphereLight(0xff6633, 0xaa4400, 0.4);
 scene.add(hemisphereLight);
 
-// Orbit Controls
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
+// Orbit Controls - Make globally accessible for mobile controls
+window.controls = new THREE.OrbitControls(camera, renderer.domElement);
+const controls = window.controls;
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
 controls.minDistance = 10;
@@ -475,8 +476,9 @@ controls.maxDistance = 100;
 controls.maxPolarAngle = Math.PI / 2 - 0.1; // Prevent going below the ground
 controls.enabled = false; // Disable orbit controls since we're starting in third-person mode
 
-// Movement Logic
-const keys = { w: false, a: false, s: false, d: false };
+// Movement Logic - Make keys globally accessible for mobile controls
+window.keys = { w: false, a: false, s: false, d: false };
+const keys = window.keys; // Keep local reference for backward compatibility
 const speed = 0.2;
 const rotationSpeed = 0.03;
 let isMoving = false;
@@ -498,29 +500,33 @@ window.addEventListener('keyup', (event) => {
 // Add camera modes and third-person view
 const cameraOffset = new THREE.Vector3(0, 7, 15); // Positive Z to position behind the rover
 
-// Change default camera mode to thirdPerson
-let cameraMode = 'thirdPerson'; // 'orbit', 'thirdPerson', 'firstPerson'
+// Change default camera mode to thirdPerson - Make globally accessible for mobile controls
+window.cameraMode = 'thirdPerson'; // 'orbit', 'thirdPerson', 'firstPerson'
+let cameraMode = window.cameraMode;
 
-// Function to toggle between camera modes
-function toggleCameraMode() {
+// Function to toggle between camera modes - Make globally accessible for mobile controls
+window.toggleCameraMode = function toggleCameraMode() {
   switch (cameraMode) {
     case 'orbit':
       cameraMode = 'thirdPerson';
+      window.cameraMode = cameraMode;
       controls.enabled = false; // Disable orbit controls in third-person mode
       console.log('Camera Mode: Third Person');
       break;
     case 'thirdPerson':
       cameraMode = 'firstPerson';
+      window.cameraMode = cameraMode;
       controls.enabled = false; // Disable orbit controls in first-person mode
       console.log('Camera Mode: First Person');
       break;
     case 'firstPerson':
       cameraMode = 'orbit';
+      window.cameraMode = cameraMode;
       controls.enabled = true; // Enable orbit controls in orbit mode
       console.log('Camera Mode: Orbit');
       break;
   }
-}
+};
 
 // Add key listener for camera toggle (press 'c' to change camera mode)
 window.addEventListener('keydown', (event) => {
@@ -529,8 +535,9 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
-// Add a variable to track the rover's yaw rotation separately
-let roverYaw = 0;
+// Add a variable to track the rover's yaw rotation separately - Make globally accessible for mobile controls
+window.roverYaw = 0;
+let roverYaw = window.roverYaw;
 
 // Add a frame counter for performance optimization
 let frameCount = 0;
@@ -2140,6 +2147,9 @@ function animate(time) {
     // Normalize roverYaw to keep it within 0-2π range to prevent floating point issues
     roverYaw = roverYaw % (Math.PI * 2);
     if (roverYaw < 0) roverYaw += Math.PI * 2;
+    
+    // Keep global variable in sync for mobile controls
+    window.roverYaw = roverYaw;
 
     // Differential wheel rotation for turning - only update if moving
     if (isMoving) {

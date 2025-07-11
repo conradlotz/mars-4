@@ -344,7 +344,7 @@
     </div>
     <div id="loading-text">Loading Mars Environment...</div>
     <div id="loading-tips">
-      💡 Tip: Use WASD keys to drive the rover and mouse to look around
+      <span id="loading-tip-text">💡 Tip: Use WASD keys to drive the rover and mouse to look around</span>
     </div>
   </div>
 
@@ -390,6 +390,23 @@
     <div id="device-specs"></div>
   </div>
 
+  <!-- Mobile Controls -->
+  <div id="mobile-controls">
+    <!-- Touch Camera Area -->
+    <div id="touch-camera-area"></div>
+    
+    <!-- Virtual Joystick -->
+    <div id="virtual-joystick">
+      <div id="joystick-knob"></div>
+    </div>
+    
+    <!-- Mobile Action Buttons -->
+    <div id="mobile-buttons">
+      <button class="mobile-btn" id="mobile-camera-btn" title="Switch Camera">📷</button>
+      <button class="mobile-btn" id="mobile-brake-btn" title="Brake">🛑</button>
+    </div>
+  </div>
+
   <div class="controls">
    
   </div>
@@ -423,7 +440,7 @@
           'Generating space environment...',
           'Initializing physics...',
           'Loading audio systems...',
-          'Final optimization...'
+          this.deviceSpecs.isMobile ? 'Setting up touch controls...' : 'Final optimization...'
         ];
         this.currentStep = 0;
         
@@ -513,6 +530,12 @@
         const loadingBar = document.getElementById('loading-bar');
         const loadingText = document.getElementById('loading-text');
         
+        // Update tip text for mobile devices
+        const tipText = document.getElementById('loading-tip-text');
+        if (tipText && this.deviceSpecs.isMobile) {
+          tipText.textContent = '🎮 Tip: Use virtual joystick to move and swipe to look around';
+        }
+        
         // Show device info
         const deviceInfo = document.getElementById('device-info');
         const deviceSpecs = document.getElementById('device-specs');
@@ -521,6 +544,7 @@
           Performance: ${this.deviceSpecs.performanceLevel.toUpperCase()}<br>
           Memory: ${this.deviceSpecs.deviceMemory}GB<br>
           CPU Cores: ${this.deviceSpecs.hardwareConcurrency}
+          ${this.deviceSpecs.isMobile ? '<br><span style="color: #ff6b35;">🎮 Touch controls enabled</span>' : ''}
         `;
         
         // Auto-hide device info after 3 seconds
@@ -732,10 +756,345 @@
       }
     }
     
-    // Initialize optimizer when DOM is ready
-    document.addEventListener('DOMContentLoaded', () => {
-      new GameOptimizer();
-    });
+          // Mobile Controls Class
+      class MobileControls {
+        constructor() {
+          this.joystick = {
+            element: null,
+            knob: null,
+            active: false,
+            startX: 0,
+            startY: 0,
+            currentX: 0,
+            currentY: 0,
+            maxDistance: 40
+          };
+          
+          this.camera = {
+            element: null,
+            startX: 0,
+            startY: 0,
+            sensitivity: 0.003
+          };
+          
+          this.virtualKeys = {
+            w: false,
+            a: false,
+            s: false,
+            d: false
+          };
+          
+          this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+          
+          if (this.isMobile) {
+            this.initializeMobileControls();
+          }
+        }
+        
+        initializeMobileControls() {
+          const mobileControls = document.getElementById('mobile-controls');
+          if (!mobileControls) return;
+          
+          mobileControls.classList.add('show');
+          
+          // Prevent page scrolling on mobile
+          document.body.style.overflow = 'hidden';
+          document.body.style.position = 'fixed';
+          document.body.style.width = '100%';
+          document.body.style.height = '100%';
+          
+          // Prevent pull-to-refresh on mobile
+          document.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+          }, { passive: false });
+          
+          this.initializeJoystick();
+          this.initializeTouchCamera();
+          this.initializeMobileButtons();
+          this.addMobileInstructions();
+        }
+        
+        initializeJoystick() {
+          this.joystick.element = document.getElementById('virtual-joystick');
+          this.joystick.knob = document.getElementById('joystick-knob');
+          
+          if (!this.joystick.element || !this.joystick.knob) return;
+          
+                     // Touch start
+           this.joystick.element.addEventListener('touchstart', (e) => {
+             e.preventDefault();
+             const touch = e.touches[0];
+             const rect = this.joystick.element.getBoundingClientRect();
+             
+             this.joystick.active = true;
+             this.joystick.startX = rect.left + rect.width / 2;
+             this.joystick.startY = rect.top + rect.height / 2;
+             
+             // Add haptic feedback if available
+             if (navigator.vibrate) {
+               navigator.vibrate(50);
+             }
+             
+             // Visual feedback
+             this.joystick.element.style.background = 'rgba(255, 107, 53, 0.3)';
+             
+             this.updateJoystick(touch.clientX, touch.clientY);
+           });
+          
+          // Touch move
+          this.joystick.element.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (!this.joystick.active) return;
+            
+            const touch = e.touches[0];
+            this.updateJoystick(touch.clientX, touch.clientY);
+          });
+          
+                     // Touch end
+           const endTouch = () => {
+             this.joystick.active = false;
+             this.joystick.knob.style.transform = 'translate(-50%, -50%)';
+             
+             // Reset visual feedback
+             this.joystick.element.style.background = 'rgba(255, 255, 255, 0.1)';
+             
+             this.resetVirtualKeys();
+           };
+          
+          this.joystick.element.addEventListener('touchend', endTouch);
+          this.joystick.element.addEventListener('touchcancel', endTouch);
+        }
+        
+        updateJoystick(clientX, clientY) {
+          const deltaX = clientX - this.joystick.startX;
+          const deltaY = clientY - this.joystick.startY;
+          const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+          
+          if (distance <= this.joystick.maxDistance) {
+            this.joystick.currentX = deltaX;
+            this.joystick.currentY = deltaY;
+          } else {
+            const angle = Math.atan2(deltaY, deltaX);
+            this.joystick.currentX = Math.cos(angle) * this.joystick.maxDistance;
+            this.joystick.currentY = Math.sin(angle) * this.joystick.maxDistance;
+          }
+          
+          // Update knob position
+          this.joystick.knob.style.transform = 
+            `translate(${-50 + this.joystick.currentX}%, ${-50 + this.joystick.currentY}%)`;
+          
+          // Update virtual keys based on joystick position
+          this.updateVirtualKeys();
+        }
+        
+        updateVirtualKeys() {
+          const threshold = 15;
+          
+          this.virtualKeys.w = this.joystick.currentY < -threshold;
+          this.virtualKeys.s = this.joystick.currentY > threshold;
+          this.virtualKeys.a = this.joystick.currentX < -threshold;
+          this.virtualKeys.d = this.joystick.currentX > threshold;
+          
+          // Update the global keys object if it exists
+          if (typeof window.keys !== 'undefined') {
+            Object.assign(window.keys, this.virtualKeys);
+          }
+          
+          // Dispatch key events for compatibility
+          this.dispatchKeyEvents();
+        }
+        
+        dispatchKeyEvents() {
+          Object.keys(this.virtualKeys).forEach(key => {
+            if (this.virtualKeys[key] !== this.lastKeys?.[key]) {
+              const event = new KeyboardEvent(
+                this.virtualKeys[key] ? 'keydown' : 'keyup',
+                { key: key, bubbles: true }
+              );
+              document.dispatchEvent(event);
+            }
+          });
+          
+          this.lastKeys = { ...this.virtualKeys };
+        }
+        
+        resetVirtualKeys() {
+          Object.keys(this.virtualKeys).forEach(key => {
+            this.virtualKeys[key] = false;
+          });
+          
+          if (typeof window.keys !== 'undefined') {
+            Object.assign(window.keys, this.virtualKeys);
+          }
+          
+          this.dispatchKeyEvents();
+        }
+        
+        initializeTouchCamera() {
+          this.camera.element = document.getElementById('touch-camera-area');
+          if (!this.camera.element) return;
+          
+          let lastTouchX = 0;
+          let lastTouchY = 0;
+          
+          this.camera.element.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+              lastTouchX = e.touches[0].clientX;
+              lastTouchY = e.touches[0].clientY;
+            }
+          });
+          
+          this.camera.element.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            
+            if (e.touches.length === 1) {
+              const touch = e.touches[0];
+              const deltaX = touch.clientX - lastTouchX;
+              const deltaY = touch.clientY - lastTouchY;
+              
+              // Simulate mouse movement for camera controls
+              if (window.cameraMode === 'orbit' && window.controls) {
+                // For orbit controls
+                window.controls.object.rotation.y -= deltaX * this.camera.sensitivity;
+                window.controls.object.rotation.x -= deltaY * this.camera.sensitivity;
+              } else {
+                // For other camera modes, update rover rotation
+                if (typeof window.roverYaw !== 'undefined') {
+                  window.roverYaw -= deltaX * this.camera.sensitivity;
+                }
+              }
+              
+              lastTouchX = touch.clientX;
+              lastTouchY = touch.clientY;
+            }
+          });
+        }
+        
+        initializeMobileButtons() {
+          const cameraBtn = document.getElementById('mobile-camera-btn');
+          const brakeBtn = document.getElementById('mobile-brake-btn');
+          
+                     if (cameraBtn) {
+             cameraBtn.addEventListener('touchstart', (e) => {
+               e.preventDefault();
+               
+               // Haptic feedback
+               if (navigator.vibrate) {
+                 navigator.vibrate(100);
+               }
+               
+               if (typeof window.toggleCameraMode === 'function') {
+                 window.toggleCameraMode();
+                 
+                 // Show current camera mode
+                 this.showCameraModeIndicator();
+               }
+             });
+           }
+          
+                     if (brakeBtn) {
+             brakeBtn.addEventListener('touchstart', (e) => {
+               e.preventDefault();
+               
+               // Haptic feedback
+               if (navigator.vibrate) {
+                 navigator.vibrate(50);
+               }
+               
+               this.resetVirtualKeys();
+             });
+           }
+         }
+         
+         showCameraModeIndicator() {
+           const indicator = document.createElement('div');
+           indicator.style.cssText = `
+             position: fixed;
+             top: 20px;
+             left: 50%;
+             transform: translateX(-50%);
+             background: rgba(0, 0, 0, 0.8);
+             color: white;
+             padding: 10px 20px;
+             border-radius: 20px;
+             z-index: 10003;
+             font-size: 14px;
+             font-weight: bold;
+             transition: all 0.3s ease;
+           `;
+           
+           const cameraMode = window.cameraMode || 'thirdPerson';
+           const modeNames = {
+             'orbit': '🌍 Orbit View',
+             'thirdPerson': '🚗 Third Person',
+             'firstPerson': '👁️ First Person'
+           };
+           
+           indicator.textContent = modeNames[cameraMode] || '📷 Camera Mode';
+           document.body.appendChild(indicator);
+           
+           // Fade out and remove
+           setTimeout(() => {
+             indicator.style.opacity = '0';
+             indicator.style.transform = 'translateX(-50%) translateY(-20px)';
+             setTimeout(() => {
+               if (indicator.parentNode) {
+                 indicator.parentNode.removeChild(indicator);
+               }
+             }, 300);
+           }, 1500);
+        }
+        
+        addMobileInstructions() {
+          setTimeout(() => {
+            const instructions = document.createElement('div');
+            instructions.style.cssText = `
+              position: fixed;
+              top: 50%;
+              left: 50%;
+              transform: translate(-50%, -50%);
+              background: rgba(0, 0, 0, 0.8);
+              color: white;
+              padding: 20px;
+              border-radius: 8px;
+              z-index: 10002;
+              text-align: center;
+              max-width: 300px;
+              font-size: 14px;
+            `;
+            instructions.innerHTML = `
+              <div style="font-weight: bold; margin-bottom: 15px;">Mobile Controls</div>
+              <div style="margin-bottom: 10px;">🕹️ Use joystick to move rover</div>
+              <div style="margin-bottom: 10px;">👆 Swipe screen to look around</div>
+              <div style="margin-bottom: 10px;">📷 Tap camera button to switch views</div>
+              <div style="margin-bottom: 15px;">🛑 Tap brake to stop</div>
+              <button onclick="this.parentNode.remove()" style="
+                background: #ff6b35;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                cursor: pointer;
+              ">Got it!</button>
+            `;
+            
+            document.body.appendChild(instructions);
+            
+            // Auto-remove after 8 seconds
+            setTimeout(() => {
+              if (instructions.parentNode) {
+                instructions.parentNode.removeChild(instructions);
+              }
+            }, 8000);
+          }, 2000);
+        }
+      }
+      
+      // Initialize optimizer when DOM is ready
+      document.addEventListener('DOMContentLoaded', () => {
+        new GameOptimizer();
+        new MobileControls();
+      });
   </script>
   
   <script>
