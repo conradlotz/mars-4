@@ -7331,99 +7331,47 @@ function addEnhancedControlsInfo() {
   // Detect mobile device
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   
+  // Skip creating controls panel on mobile devices
+  if (isMobile) {
+    return; // Don't create controls panel on mobile
+  }
+  
   const controls = document.createElement('div');
   controls.id = 'controls';
   
-  if (isMobile) {
-    // Mobile: Make controls collapsible and position away from navigation
-    controls.style.cssText = `
-      position: fixed;
-      bottom: 10px;
-      left: 10px;
-      color: white;
-      font-family: monospace;
-      font-size: 9px;
-      z-index: 100;
-      background: rgba(0, 0, 0, 0.8);
-      padding: 8px;
-      border-radius: 6px;
-      border: 1px solid #00ff88;
-      max-width: 180px;
-      transition: all 0.3s ease;
-    `;
-    
-    controls.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-        <div style="color: #00ff88; font-weight: bold; font-size: 8px;">🎮 CONTROLS</div>
-        <button id="controls-toggle" style="background: none; border: none; color: #00ff88; cursor: pointer; font-size: 8px; padding: 0;">−</button>
-      </div>
-      <div id="controls-content">
-        <div style="font-size: 8px; color: #aaa; margin-bottom: 4px;">Use touch controls below!</div>
-        <div style="font-size: 8px;"><strong>Joystick:</strong> Move</div>
-        <div style="font-size: 8px;"><strong>💎:</strong> Collect samples</div>
-        <div style="font-size: 8px;"><strong>🔬:</strong> Analyze samples</div>
-        <div style="font-size: 8px;"><strong>🚀:</strong> Launch rockets</div>
-        <div style="font-size: 8px;"><strong>📷:</strong> Switch camera</div>
-        <div style="margin-top: 6px; font-size: 7px; color: #aaa;">
-          Look for glowing objects!<br>
-          Swipe screen to look around!
-        </div>
-      </div>
-    `;
-  } else {
-    // Desktop: Keep original layout
-    controls.style.cssText = `
-      position: fixed;
-      bottom: 10px;
-      right: 10px;
-      color: white;
-      font-family: monospace;
-      font-size: 12px;
-      z-index: 100;
-      background: rgba(0, 0, 0, 0.7);
-      padding: 15px;
-      border-radius: 8px;
-      border: 2px solid #00ff88;
-      max-width: 300px;
-    `;
-    
-    controls.innerHTML = `
-      <div style="color: #00ff88; font-weight: bold; margin-bottom: 10px;">🎮 ENHANCED CONTROLS</div>
-      <div><strong>Movement:</strong> WASD</div>
-      <div><strong>Camera:</strong> C to cycle modes</div>
-      <div><strong>Day/Night:</strong> L to toggle</div>
-      <div><strong>Samples:</strong> E to collect</div>
-      <div><strong>Analysis:</strong> Q to analyze</div>
-      <div><strong>Rockets:</strong> R to launch SpaceX rockets</div>
-      <div style="margin-top: 10px; font-size: 10px; color: #aaa;">
-        Look for glowing objects to collect samples!<br>
-        Watch for meteor showers at night!<br>
-        Press R to trigger manual rocket launches!<br>
-        Explore to find Mars colonies!
-      </div>
-    `;
-  }
+  // Desktop: Keep original layout
+  controls.style.cssText = `
+    position: fixed;
+    bottom: 10px;
+    right: 10px;
+    color: white;
+    font-family: monospace;
+    font-size: 12px;
+    z-index: 100;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 15px;
+    border-radius: 8px;
+    border: 2px solid #00ff88;
+    max-width: 300px;
+  `;
+  
+  controls.innerHTML = `
+    <div style="color: #00ff88; font-weight: bold; margin-bottom: 10px;">🎮 ENHANCED CONTROLS</div>
+    <div><strong>Movement:</strong> WASD</div>
+    <div><strong>Camera:</strong> C to cycle modes</div>
+    <div><strong>Day/Night:</strong> L to toggle</div>
+    <div><strong>Samples:</strong> E to collect</div>
+    <div><strong>Analysis:</strong> Q to analyze</div>
+    <div><strong>Rockets:</strong> R to launch SpaceX rockets</div>
+    <div style="margin-top: 10px; font-size: 10px; color: #aaa;">
+      Look for glowing objects to collect samples!<br>
+      Watch for meteor showers at night!<br>
+      Press R to trigger manual rocket launches!<br>
+      Explore to find Mars colonies!
+    </div>
+  `;
   
   document.body.appendChild(controls);
-  
-  // Add toggle functionality for mobile
-  if (isMobile) {
-    const toggleBtn = document.getElementById('controls-toggle');
-    const controlsContent = document.getElementById('controls-content');
-    let isCollapsed = false;
-    
-    toggleBtn.addEventListener('click', () => {
-      if (isCollapsed) {
-        controlsContent.style.display = 'block';
-        toggleBtn.textContent = '−';
-        isCollapsed = false;
-      } else {
-        controlsContent.style.display = 'none';
-        toggleBtn.textContent = '+';
-        isCollapsed = true;
-      }
-    });
-  }
 }
 
 // Enhanced update function for all systems
