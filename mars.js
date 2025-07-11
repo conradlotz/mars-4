@@ -564,15 +564,24 @@ function toggleRealisticMode() {
 class MeteorSystem {
   constructor(skyRadius = 5000, count = null) {
     const perfSettings = getPerformanceSettings();
-    const adaptiveCount = count || Math.floor((perfSettings.particleCount || 300) / 12); // Fewer meteors on lower settings
+    const adaptiveCount = count || Math.floor((perfSettings.particleCount || 300) / 8); // More meteors for better effect
     
     this.skyRadius = skyRadius;
     this.meteors = [];
     this.meteorPool = [];
     this.maxMeteors = adaptiveCount;
     this.activeMeteors = 0;
-    this.meteorProbability = perfSettings.detailLevel === 'high' ? 0.03 : 
-                           perfSettings.detailLevel === 'normal' ? 0.02 : 0.01;
+    this.meteorProbability = perfSettings.detailLevel === 'high' ? 0.05 : 
+                           perfSettings.detailLevel === 'normal' ? 0.03 : 0.02;
+
+    // Meteor shower system
+    this.meteorShowerActive = false;
+    this.meteorShowerDuration = 0;
+    this.meteorShowerMaxDuration = 30; // 30 seconds
+    this.meteorShowerCooldown = 0;
+    this.meteorShowerMaxCooldown = 120; // 2 minutes between showers
+    this.meteorShowerIntensity = 1.0;
+    this.lastMeteorShowerTime = 0;
 
     // Create meteor textures
     this.createMeteorTextures();
@@ -583,7 +592,7 @@ class MeteorSystem {
 
   createMeteorTextures() {
     // Create a glow texture for the meteor head
-    const glowSize = 64;
+    const glowSize = 128;
     const glowCanvas = document.createElement('canvas');
     glowCanvas.width = glowSize;
     glowCanvas.height = glowSize;
@@ -595,14 +604,61 @@ class MeteorSystem {
       glowSize / 2, glowSize / 2, glowSize / 2
     );
     gradient.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
-    gradient.addColorStop(0.3, 'rgba(255, 240, 220, 0.8)');
-    gradient.addColorStop(0.7, 'rgba(255, 220, 200, 0.3)');
-    gradient.addColorStop(1, 'rgba(255, 220, 200, 0.0)');
+    gradient.addColorStop(0.2, 'rgba(255, 240, 220, 0.9)');
+    gradient.addColorStop(0.5, 'rgba(255, 220, 200, 0.5)');
+    gradient.addColorStop(0.8, 'rgba(255, 180, 150, 0.2)');
+    gradient.addColorStop(1, 'rgba(255, 120, 100, 0.0)');
 
     glowContext.fillStyle = gradient;
     glowContext.fillRect(0, 0, glowSize, glowSize);
 
     this.glowTexture = new THREE.CanvasTexture(glowCanvas);
+
+    // Create a fireball texture for special meteors
+    const fireballSize = 128;
+    const fireballCanvas = document.createElement('canvas');
+    fireballCanvas.width = fireballSize;
+    fireballCanvas.height = fireballSize;
+    const fireballContext = fireballCanvas.getContext('2d');
+
+    // Create fireball gradient
+    const fireballGradient = fireballContext.createRadialGradient(
+      fireballSize / 2, fireballSize / 2, 0,
+      fireballSize / 2, fireballSize / 2, fireballSize / 2
+    );
+    fireballGradient.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+    fireballGradient.addColorStop(0.1, 'rgba(255, 255, 200, 0.9)');
+    fireballGradient.addColorStop(0.3, 'rgba(255, 200, 100, 0.8)');
+    fireballGradient.addColorStop(0.6, 'rgba(255, 100, 50, 0.5)');
+    fireballGradient.addColorStop(0.9, 'rgba(255, 50, 0, 0.2)');
+    fireballGradient.addColorStop(1, 'rgba(255, 0, 0, 0.0)');
+
+    fireballContext.fillStyle = fireballGradient;
+    fireballContext.fillRect(0, 0, fireballSize, fireballSize);
+
+    this.fireballTexture = new THREE.CanvasTexture(fireballCanvas);
+
+    // Create a spark texture for trail effects
+    const sparkSize = 32;
+    const sparkCanvas = document.createElement('canvas');
+    sparkCanvas.width = sparkSize;
+    sparkCanvas.height = sparkSize;
+    const sparkContext = sparkCanvas.getContext('2d');
+
+    // Create spark gradient
+    const sparkGradient = sparkContext.createRadialGradient(
+      sparkSize / 2, sparkSize / 2, 0,
+      sparkSize / 2, sparkSize / 2, sparkSize / 2
+    );
+    sparkGradient.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+    sparkGradient.addColorStop(0.3, 'rgba(255, 220, 150, 0.6)');
+    sparkGradient.addColorStop(0.7, 'rgba(255, 180, 100, 0.3)');
+    sparkGradient.addColorStop(1, 'rgba(255, 150, 50, 0.0)');
+
+    sparkContext.fillStyle = sparkGradient;
+    sparkContext.fillRect(0, 0, sparkSize, sparkSize);
+
+    this.sparkTexture = new THREE.CanvasTexture(sparkCanvas);
   }
 
   createMeteorPool() {
@@ -673,15 +729,62 @@ class MeteorSystem {
     }
   }
 
-  activateMeteor() {
+  activateMeteor(meteorType = 'normal') {
     // Find an inactive meteor from the pool
     for (let i = 0; i < this.meteorPool.length; i++) {
       const meteorGroup = this.meteorPool[i];
 
       if (!meteorGroup.userData.active) {
-        // Randomize meteor properties
-        const phi = Math.random() * Math.PI * 2; // Random angle around the sky
-        const theta = Math.random() * Math.PI * 0.5; // Angle from zenith (top half of sky)
+        // Determine meteor properties based on type
+        let speed, size, brightness, color, texture, lifespan;
+        
+        switch (meteorType) {
+          case 'fireball':
+            speed = 80 + Math.random() * 200;
+            size = 3 + Math.random() * 5;
+            brightness = 1.5 + Math.random() * 1.5;
+            color = new THREE.Color(`hsl(${15 + Math.random() * 15}, 90%, 80%)`); // Red-orange
+            texture = this.fireballTexture;
+            lifespan = 2 + Math.random() * 3;
+            break;
+          case 'bright':
+            speed = 100 + Math.random() * 300;
+            size = 2 + Math.random() * 3;
+            brightness = 2 + Math.random() * 2;
+            color = new THREE.Color(`hsl(${200 + Math.random() * 60}, 70%, 85%)`); // Blue-white
+            texture = this.glowTexture;
+            lifespan = 1 + Math.random() * 2;
+            break;
+          case 'shower':
+            speed = 60 + Math.random() * 150;
+            size = 1 + Math.random() * 2;
+            brightness = 1 + Math.random() * 1;
+            color = new THREE.Color(`hsl(${30 + Math.random() * 30}, 80%, 75%)`); // Yellow-orange
+            texture = this.sparkTexture;
+            lifespan = 1 + Math.random() * 1.5;
+            break;
+          default: // normal
+            speed = 50 + Math.random() * 200;
+            size = 1 + Math.random() * 2.5;
+            brightness = 0.8 + Math.random() * 1.2;
+            color = new THREE.Color(`hsl(${30 + Math.random() * 20}, 80%, 70%)`); // Orange-yellow
+            texture = this.glowTexture;
+            lifespan = 1.5 + Math.random() * 2;
+        }
+
+        // Randomize meteor trajectory
+        let phi, theta;
+        if (this.meteorShowerActive && meteorType === 'shower') {
+          // During shower, meteors come from specific radiant point
+          const radiantPhi = Math.PI * 0.75; // Northeast sky
+          const radiantTheta = Math.PI * 0.3;
+          phi = radiantPhi + (Math.random() - 0.5) * Math.PI * 0.3;
+          theta = radiantTheta + (Math.random() - 0.5) * Math.PI * 0.2;
+        } else {
+          // Random positioning for normal meteors
+          phi = Math.random() * Math.PI * 2;
+          theta = Math.random() * Math.PI * 0.5;
+        }
 
         // Calculate start position on the sky dome
         const startX = this.skyRadius * Math.sin(theta) * Math.cos(phi);
@@ -701,21 +804,20 @@ class MeteorSystem {
 
         // Set meteor properties
         meteorGroup.userData.active = true;
-        meteorGroup.userData.speed = 50 + Math.random() * 250; // Random speed
+        meteorGroup.userData.speed = speed;
         meteorGroup.userData.direction = direction;
         meteorGroup.userData.positions = [];
         meteorGroup.userData.positions.push(new THREE.Vector3(startX, startY, startZ));
         meteorGroup.userData.life = 0;
-        meteorGroup.userData.maxLife = 1.5 + Math.random() * 2; // 1.5-3.5 seconds
-        meteorGroup.userData.size = 0.5 + Math.random() * 2.5; // Random size
+        meteorGroup.userData.maxLife = lifespan;
+        meteorGroup.userData.size = size;
+        meteorGroup.userData.brightness = brightness;
+        meteorGroup.userData.meteorType = meteorType;
 
-        // Set meteor color (white to yellow-orange)
-        const colorHue = 30 + Math.random() * 20; // 30-50 (orange-yellow)
-        const colorSaturation = 80 + Math.random() * 20; // 80-100%
-        const colorLightness = 70 + Math.random() * 30; // 70-100%
-        const meteorColor = new THREE.Color(`hsl(${colorHue}, ${colorSaturation}%, ${colorLightness}%)`);
-
-        meteorGroup.userData.trail.material.color = meteorColor;
+        // Set meteor color and texture
+        meteorGroup.userData.trail.material.color = color;
+        meteorGroup.userData.head.material.map = texture;
+        meteorGroup.userData.head.material.needsUpdate = true;
 
         // Initialize the trail with the start position
         const positions = meteorGroup.userData.trail.geometry.attributes.position.array;
@@ -729,8 +831,8 @@ class MeteorSystem {
         // Position the head at the start
         meteorGroup.userData.head.position.set(startX, startY, startZ);
 
-        // Scale the head based on meteor size
-        const headSize = 5 + meteorGroup.userData.size * 10;
+        // Scale the head based on meteor size and brightness
+        const headSize = (5 + size * 8) * brightness;
         meteorGroup.userData.head.scale.set(headSize, headSize, headSize);
 
         // Make meteor visible
@@ -751,9 +853,45 @@ class MeteorSystem {
   }
 
   update(delta) {
+    // Update meteor shower system
+    this.updateMeteorShower(delta);
+
+    // Calculate current meteor probability
+    let currentProbability = this.meteorProbability;
+    
+    if (this.meteorShowerActive) {
+      // During shower, significantly increase meteor frequency
+      currentProbability *= (3 + this.meteorShowerIntensity * 2);
+    }
+
     // Try to activate a new meteor based on probability
-    if (Math.random() < this.meteorProbability && this.activeMeteors < this.maxMeteors) {
-      this.activateMeteor();
+    if (Math.random() < currentProbability && this.activeMeteors < this.maxMeteors) {
+      // Determine meteor type based on current conditions
+      let meteorType = 'normal';
+      
+      if (this.meteorShowerActive) {
+        // During shower, mostly shower meteors with occasional special ones
+        const rand = Math.random();
+        if (rand < 0.7) {
+          meteorType = 'shower';
+        } else if (rand < 0.85) {
+          meteorType = 'bright';
+        } else {
+          meteorType = 'fireball';
+        }
+      } else {
+        // Normal time - rare special meteors
+        const rand = Math.random();
+        if (rand < 0.9) {
+          meteorType = 'normal';
+        } else if (rand < 0.97) {
+          meteorType = 'bright';
+        } else {
+          meteorType = 'fireball';
+        }
+      }
+      
+      this.activateMeteor(meteorType);
     }
 
     // Update active meteors
@@ -825,6 +963,260 @@ class MeteorSystem {
       }
     }
   }
+
+  updateMeteorShower(delta) {
+    const deltaSeconds = delta / 1000;
+    
+    if (this.meteorShowerActive) {
+      // Update shower duration
+      this.meteorShowerDuration += deltaSeconds;
+      
+      // Calculate shower intensity (starts low, peaks in middle, ends low)
+      const progress = this.meteorShowerDuration / this.meteorShowerMaxDuration;
+      if (progress < 0.3) {
+        this.meteorShowerIntensity = progress / 0.3; // Ramp up
+      } else if (progress < 0.7) {
+        this.meteorShowerIntensity = 1.0; // Peak
+      } else {
+        this.meteorShowerIntensity = (1.0 - progress) / 0.3; // Ramp down
+      }
+      
+      // End shower when duration exceeded
+      if (this.meteorShowerDuration >= this.meteorShowerMaxDuration) {
+        this.meteorShowerActive = false;
+        this.meteorShowerDuration = 0;
+        this.meteorShowerCooldown = 0;
+        this.meteorShowerIntensity = 0;
+        
+        // Show notification (if HUD system exists)
+        if (window.showNotification) {
+          window.showNotification('Meteor shower ended', 3000);
+        }
+      }
+    } else {
+      // Update cooldown
+      this.meteorShowerCooldown += deltaSeconds;
+      
+      // Start new shower when cooldown finished
+      if (this.meteorShowerCooldown >= this.meteorShowerMaxCooldown) {
+        this.startMeteorShower();
+      }
+    }
+  }
+
+  startMeteorShower() {
+    this.meteorShowerActive = true;
+    this.meteorShowerDuration = 0;
+    this.meteorShowerIntensity = 0;
+    this.meteorShowerMaxDuration = 20 + Math.random() * 30; // 20-50 seconds
+    this.meteorShowerMaxCooldown = 60 + Math.random() * 120; // 1-3 minutes until next shower
+    
+    // Show notification (if HUD system exists)
+    if (window.showNotification) {
+      window.showNotification('Meteor shower beginning! Look up!', 4000);
+    }
+  }
+}
+
+// Mars Atmospheric Effects System
+class MarsAtmosphericEffects {
+  constructor(scene) {
+    this.scene = scene;
+    this.dustDevils = [];
+    this.dustDevilPool = [];
+    this.maxDustDevils = 3;
+    this.dustDevilSpawnRate = 0.001; // Very rare
+    this.atmosphericHaze = null;
+    this.lastWeatherUpdate = 0;
+    this.weatherCycle = 0;
+    
+    this.createAtmosphericHaze();
+    this.createDustDevilPool();
+  }
+
+  createAtmosphericHaze() {
+    // Create dynamic atmospheric haze that changes based on weather
+    const hazeGeometry = new THREE.PlaneGeometry(8000, 8000);
+    const hazeMaterial = new THREE.MeshBasicMaterial({
+      color: 0xd08050,
+      transparent: true,
+      opacity: 0.1,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending
+    });
+    
+    this.atmosphericHaze = new THREE.Mesh(hazeGeometry, hazeMaterial);
+    this.atmosphericHaze.rotation.x = -Math.PI / 2;
+    this.atmosphericHaze.position.y = 200;
+    this.atmosphericHaze.renderOrder = -1;
+    this.scene.add(this.atmosphericHaze);
+  }
+
+  createDustDevilPool() {
+    for (let i = 0; i < this.maxDustDevils; i++) {
+      const dustDevil = this.createDustDevil();
+      dustDevil.visible = false;
+      dustDevil.userData = { active: false };
+      this.dustDevilPool.push(dustDevil);
+      this.scene.add(dustDevil);
+    }
+  }
+
+  createDustDevil() {
+    const dustDevilGroup = new THREE.Group();
+    
+    // Create spiral particle system for dust devil
+    const particleCount = 200;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const colors = new Float32Array(particleCount * 3);
+    const sizes = new Float32Array(particleCount);
+    
+    for (let i = 0; i < particleCount; i++) {
+      // Initialize particles in a spiral pattern
+      const height = (i / particleCount) * 100;
+      const angle = (i / particleCount) * Math.PI * 8;
+      const radius = Math.sin(height * 0.1) * 15;
+      
+      positions[i * 3] = Math.cos(angle) * radius;
+      positions[i * 3 + 1] = height;
+      positions[i * 3 + 2] = Math.sin(angle) * radius;
+      
+      // Dust color - reddish brown
+      colors[i * 3] = 0.7 + Math.random() * 0.3;
+      colors[i * 3 + 1] = 0.4 + Math.random() * 0.2;
+      colors[i * 3 + 2] = 0.2 + Math.random() * 0.1;
+      
+      sizes[i] = 2 + Math.random() * 4;
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+    
+    const material = new THREE.PointsMaterial({
+      size: 3,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.6,
+      blending: THREE.AdditiveBlending
+    });
+    
+    const dustParticles = new THREE.Points(geometry, material);
+    dustDevilGroup.add(dustParticles);
+    
+    return dustDevilGroup;
+  }
+
+  spawnDustDevil() {
+    // Find inactive dust devil
+    for (let i = 0; i < this.dustDevilPool.length; i++) {
+      const dustDevil = this.dustDevilPool[i];
+      if (!dustDevil.userData.active) {
+        // Spawn dust devil at random location
+        const spawnRadius = 2000;
+        const angle = Math.random() * Math.PI * 2;
+        const distance = Math.random() * spawnRadius;
+        
+        dustDevil.position.x = Math.cos(angle) * distance;
+        dustDevil.position.z = Math.sin(angle) * distance;
+        dustDevil.position.y = 0;
+        
+        dustDevil.userData.active = true;
+        dustDevil.userData.life = 0;
+        dustDevil.userData.maxLife = 15 + Math.random() * 20; // 15-35 seconds
+        dustDevil.userData.speed = 5 + Math.random() * 10; // Movement speed
+        dustDevil.userData.direction = Math.random() * Math.PI * 2;
+        dustDevil.userData.rotationSpeed = 0.2 + Math.random() * 0.3;
+        
+        dustDevil.visible = true;
+        this.dustDevils.push(dustDevil);
+        
+        return true;
+      }
+    }
+    return false;
+  }
+
+  update(delta, roverPosition) {
+    const deltaSeconds = delta / 1000;
+    
+    // Update weather cycle
+    this.weatherCycle += deltaSeconds * 0.1;
+    
+    // Update atmospheric haze based on weather
+    if (this.atmosphericHaze) {
+      const hazeTurbulence = Math.sin(this.weatherCycle) * 0.5 + 0.5;
+      this.atmosphericHaze.material.opacity = 0.05 + hazeTurbulence * 0.1;
+      this.atmosphericHaze.rotation.z += deltaSeconds * 0.01;
+    }
+    
+    // Spawn dust devils occasionally
+    if (Math.random() < this.dustDevilSpawnRate) {
+      this.spawnDustDevil();
+    }
+    
+    // Update active dust devils
+    for (let i = this.dustDevils.length - 1; i >= 0; i--) {
+      const dustDevil = this.dustDevils[i];
+      
+      if (dustDevil.userData.active) {
+        dustDevil.userData.life += deltaSeconds;
+        
+        // Move dust devil
+        dustDevil.position.x += Math.cos(dustDevil.userData.direction) * dustDevil.userData.speed * deltaSeconds;
+        dustDevil.position.z += Math.sin(dustDevil.userData.direction) * dustDevil.userData.speed * deltaSeconds;
+        
+        // Rotate dust devil
+        dustDevil.rotation.y += dustDevil.userData.rotationSpeed * deltaSeconds;
+        
+        // Update particle positions for spiral effect
+        const particles = dustDevil.children[0];
+        if (particles && particles.geometry) {
+          const positions = particles.geometry.attributes.position.array;
+          const time = dustDevil.userData.life;
+          
+          for (let j = 0; j < positions.length; j += 3) {
+            const height = positions[j + 1];
+            const angle = (height * 0.1) + (time * 2);
+            const radius = Math.sin(height * 0.1) * (10 + Math.sin(time * 0.5) * 5);
+            
+            positions[j] = Math.cos(angle) * radius;
+            positions[j + 2] = Math.sin(angle) * radius;
+          }
+          
+          particles.geometry.attributes.position.needsUpdate = true;
+        }
+        
+        // Fade out near end of life
+        const lifeFactor = dustDevil.userData.life / dustDevil.userData.maxLife;
+        if (lifeFactor > 0.8) {
+          const fadeOpacity = (1 - lifeFactor) / 0.2;
+          if (particles && particles.material) {
+            particles.material.opacity = 0.6 * fadeOpacity;
+          }
+        }
+        
+        // Remove if expired
+        if (dustDevil.userData.life >= dustDevil.userData.maxLife) {
+          dustDevil.userData.active = false;
+          dustDevil.visible = false;
+          this.dustDevils.splice(i, 1);
+        }
+        
+        // Change direction occasionally
+        if (Math.random() < 0.01) {
+          dustDevil.userData.direction += (Math.random() - 0.5) * 0.5;
+        }
+      }
+    }
+    
+    // Position atmospheric haze around rover
+    if (this.atmosphericHaze && roverPosition) {
+      this.atmosphericHaze.position.x = roverPosition.x;
+      this.atmosphericHaze.position.z = roverPosition.z;
+    }
+  }
 }
 
 
@@ -850,16 +1242,47 @@ class MarsSceneManager {
     // Focus only on the city - removed rocket launch sites for simplicity
   }
 
-  createSingleBase(x, z) {
+  createSingleBase(x, z, type = 'metropolis') {
     const baseGroup = new THREE.Group();
     baseGroup.position.set(x, 0, z);
 
-    // Add base structures
-    const structures = this.createBaseStructures();
+    // Add base structures based on type
+    const structures = this.createBaseStructures(type);
     baseGroup.add(...structures);
 
-    // Add atmospheric lighting
-    const baseLight = new THREE.PointLight(0x88aaff, 1, 500);
+    // Add appropriate lighting based on colony type
+    let lightColor, lightIntensity;
+    switch (type) {
+      case 'metropolis':
+        lightColor = 0x88aaff;
+        lightIntensity = 1.5;
+        break;
+      case 'research':
+        lightColor = 0xaaffaa;
+        lightIntensity = 1.0;
+        break;
+      case 'mining':
+        lightColor = 0xffaa88;
+        lightIntensity = 1.2;
+        break;
+      case 'agricultural':
+        lightColor = 0xaaffcc;
+        lightIntensity = 0.8;
+        break;
+      case 'industrial':
+        lightColor = 0xff8888;
+        lightIntensity = 1.3;
+        break;
+      case 'outpost':
+        lightColor = 0xccccff;
+        lightIntensity = 0.6;
+        break;
+      default:
+        lightColor = 0x88aaff;
+        lightIntensity = 1.0;
+    }
+
+    const baseLight = new THREE.PointLight(lightColor, lightIntensity, 800);
     baseLight.position.set(0, 100, 0);
     baseGroup.add(baseLight);
 
@@ -883,14 +1306,25 @@ class MarsSceneManager {
     });
     this.marsBases = [];
 
-    // Create a single impressive skyscraper city
-    const cityLocation = { x: 1500, z: 1000 };
-    const city = this.createSingleBase(cityLocation.x, cityLocation.z);
-    this.marsBases.push(city);
-    this.scene.add(city);
+    // Create multiple diverse colonies
+    const colonies = [
+      { x: 1500, z: 1000, type: 'metropolis', name: 'New Olympia' },
+      { x: -2000, z: 1500, type: 'research', name: 'Exploration Base Alpha' },
+      { x: 2500, z: -800, type: 'mining', name: 'Mineral Extraction Complex' },
+      { x: -1200, z: -2000, type: 'agricultural', name: 'Terra Verde Farms' },
+      { x: 800, z: 2200, type: 'industrial', name: 'Manufacturing Hub Beta' },
+      { x: 3000, z: 500, type: 'outpost', name: 'Frontier Station' }
+    ];
 
-    // Add atmospheric effects around the city
-    this.addCityAtmosphere(city);
+    colonies.forEach(colony => {
+      const base = this.createSingleBase(colony.x, colony.z, colony.type);
+      base.userData = { name: colony.name, type: colony.type };
+      this.marsBases.push(base);
+      this.scene.add(base);
+
+      // Add atmospheric effects around each colony
+      this.addCityAtmosphere(base);
+    });
   }
 
   // Add atmospheric effects around the city
@@ -994,7 +1428,28 @@ class MarsSceneManager {
     animateParticles();
   }
 
-  createBaseStructures() {
+  createBaseStructures(type = 'metropolis') {
+    const structures = [];
+
+    switch (type) {
+      case 'metropolis':
+        return this.createMetropolisStructures();
+      case 'research':
+        return this.createResearchStructures();
+      case 'mining':
+        return this.createMiningStructures();
+      case 'agricultural':
+        return this.createAgriculturalStructures();
+      case 'industrial':
+        return this.createIndustrialStructures();
+      case 'outpost':
+        return this.createOutpostStructures();
+      default:
+        return this.createMetropolisStructures();
+    }
+  }
+
+  createMetropolisStructures() {
     const structures = [];
 
     // Create main circular platform foundation
@@ -1023,7 +1478,7 @@ class MarsSceneManager {
       const x = Math.cos(angle) * radius;
       const z = Math.sin(angle) * radius;
       
-      const height = 300 + Math.random() * 200; // Vary heights
+      const height = 300 + Math.random() * 200;
       const width = 40 + Math.random() * 20;
       const color = [0x5566bb, 0x6677cc, 0x7788dd, 0x4455aa][Math.floor(Math.random() * 4)];
       
@@ -1065,6 +1520,263 @@ class MarsSceneManager {
 
     // Add connecting bridges between tall buildings
     this.createSkyBridges(structures);
+
+    return structures;
+  }
+
+  createResearchStructures() {
+    const structures = [];
+
+    // Create research base platform
+    const basePlatform = new THREE.Mesh(
+      new THREE.CylinderGeometry(200, 220, 20, 32),
+      new THREE.MeshStandardMaterial({
+        color: 0x444455,
+        roughness: 0.6,
+        metalness: 0.6
+      })
+    );
+    basePlatform.position.y = 10;
+    basePlatform.castShadow = true;
+    basePlatform.receiveShadow = true;
+    structures.push(basePlatform);
+
+    // Central research tower
+    const centralTower = this.createSkyscraper(0, 0, 40, 200, 0x55aa55, 'research');
+    structures.push(...centralTower);
+
+    // Laboratory domes
+    const domeCount = 6;
+    for (let i = 0; i < domeCount; i++) {
+      const angle = (i / domeCount) * Math.PI * 2;
+      const radius = 120;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(25, 16, 16),
+        new THREE.MeshStandardMaterial({
+          color: 0x77dd77,
+          roughness: 0.3,
+          metalness: 0.8,
+          transparent: true,
+          opacity: 0.8
+        })
+      );
+      dome.position.set(x, 35, z);
+      dome.castShadow = true;
+      structures.push(dome);
+    }
+
+    // Add communication arrays
+    for (let i = 0; i < 3; i++) {
+      const angle = (i / 3) * Math.PI * 2;
+      const radius = 80;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      
+      const array = new THREE.Mesh(
+        new THREE.CylinderGeometry(2, 2, 50, 8),
+        new THREE.MeshStandardMaterial({
+          color: 0xcccccc,
+          roughness: 0.2,
+          metalness: 0.9
+        })
+      );
+      array.position.set(x, 40, z);
+      array.castShadow = true;
+      structures.push(array);
+    }
+
+    return structures;
+  }
+
+  createMiningStructures() {
+    const structures = [];
+
+    // Create mining platform
+    const basePlatform = new THREE.Mesh(
+      new THREE.BoxGeometry(300, 20, 300),
+      new THREE.MeshStandardMaterial({
+        color: 0x553322,
+        roughness: 0.9,
+        metalness: 0.3
+      })
+    );
+    basePlatform.position.y = 10;
+    basePlatform.castShadow = true;
+    basePlatform.receiveShadow = true;
+    structures.push(basePlatform);
+
+    // Mining towers
+    const towerCount = 4;
+    for (let i = 0; i < towerCount; i++) {
+      const angle = (i / towerCount) * Math.PI * 2;
+      const radius = 100;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      
+      const tower = this.createSkyscraper(x, z, 30, 150, 0xaa5522, 'mining');
+      structures.push(...tower);
+    }
+
+    // Add mining drills
+    for (let i = 0; i < 8; i++) {
+      const x = (Math.random() - 0.5) * 200;
+      const z = (Math.random() - 0.5) * 200;
+      
+      const drill = new THREE.Mesh(
+        new THREE.CylinderGeometry(8, 8, 60, 16),
+        new THREE.MeshStandardMaterial({
+          color: 0x666666,
+          roughness: 0.8,
+          metalness: 0.7
+        })
+      );
+      drill.position.set(x, 50, z);
+      drill.castShadow = true;
+      structures.push(drill);
+    }
+
+    return structures;
+  }
+
+  createAgriculturalStructures() {
+    const structures = [];
+
+    // Create agricultural platform
+    const basePlatform = new THREE.Mesh(
+      new THREE.CylinderGeometry(250, 270, 15, 32),
+      new THREE.MeshStandardMaterial({
+        color: 0x335544,
+        roughness: 0.7,
+        metalness: 0.3
+      })
+    );
+    basePlatform.position.y = 7.5;
+    basePlatform.castShadow = true;
+    basePlatform.receiveShadow = true;
+    structures.push(basePlatform);
+
+    // Greenhouse domes
+    const domeCount = 12;
+    for (let i = 0; i < domeCount; i++) {
+      const angle = (i / domeCount) * Math.PI * 2;
+      const radius = 80 + (i % 3) * 40;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      
+      const dome = new THREE.Mesh(
+        new THREE.SphereGeometry(20 + Math.random() * 10, 16, 16),
+        new THREE.MeshStandardMaterial({
+          color: 0x88cc88,
+          roughness: 0.1,
+          metalness: 0.9,
+          transparent: true,
+          opacity: 0.6
+        })
+      );
+      dome.position.set(x, 30, z);
+      dome.castShadow = true;
+      structures.push(dome);
+    }
+
+    // Central processing facility
+    const centralBuilding = this.createSkyscraper(0, 0, 50, 100, 0x66bb66, 'agricultural');
+    structures.push(...centralBuilding);
+
+    return structures;
+  }
+
+  createIndustrialStructures() {
+    const structures = [];
+
+    // Create industrial platform
+    const basePlatform = new THREE.Mesh(
+      new THREE.BoxGeometry(400, 25, 400),
+      new THREE.MeshStandardMaterial({
+        color: 0x442222,
+        roughness: 0.8,
+        metalness: 0.5
+      })
+    );
+    basePlatform.position.y = 12.5;
+    basePlatform.castShadow = true;
+    basePlatform.receiveShadow = true;
+    structures.push(basePlatform);
+
+    // Factory buildings
+    const factoryCount = 8;
+    for (let i = 0; i < factoryCount; i++) {
+      const x = (Math.random() - 0.5) * 300;
+      const z = (Math.random() - 0.5) * 300;
+      
+      const factory = this.createSkyscraper(x, z, 40 + Math.random() * 20, 80 + Math.random() * 60, 0xaa4444, 'industrial');
+      structures.push(...factory);
+    }
+
+    // Add smokestacks
+    for (let i = 0; i < 6; i++) {
+      const x = (Math.random() - 0.5) * 200;
+      const z = (Math.random() - 0.5) * 200;
+      
+      const smokestack = new THREE.Mesh(
+        new THREE.CylinderGeometry(6, 8, 120, 16),
+        new THREE.MeshStandardMaterial({
+          color: 0x666666,
+          roughness: 0.9,
+          metalness: 0.6
+        })
+      );
+      smokestack.position.set(x, 85, z);
+      smokestack.castShadow = true;
+      structures.push(smokestack);
+    }
+
+    return structures;
+  }
+
+  createOutpostStructures() {
+    const structures = [];
+
+    // Create small outpost platform
+    const basePlatform = new THREE.Mesh(
+      new THREE.CylinderGeometry(80, 90, 10, 16),
+      new THREE.MeshStandardMaterial({
+        color: 0x444444,
+        roughness: 0.8,
+        metalness: 0.4
+      })
+    );
+    basePlatform.position.y = 5;
+    basePlatform.castShadow = true;
+    basePlatform.receiveShadow = true;
+    structures.push(basePlatform);
+
+    // Small habitat modules
+    const moduleCount = 4;
+    for (let i = 0; i < moduleCount; i++) {
+      const angle = (i / moduleCount) * Math.PI * 2;
+      const radius = 40;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      
+      const module = new THREE.Mesh(
+        new THREE.CylinderGeometry(12, 12, 30, 16),
+        new THREE.MeshStandardMaterial({
+          color: 0x6666aa,
+          roughness: 0.5,
+          metalness: 0.7
+        })
+      );
+      module.position.set(x, 25, z);
+      module.castShadow = true;
+      structures.push(module);
+    }
+
+    // Central command tower
+    const commandTower = this.createSkyscraper(0, 0, 15, 50, 0x5555aa, 'outpost');
+    structures.push(...commandTower);
 
     return structures;
   }
@@ -1297,159 +2009,361 @@ class MarsSceneManager {
     return supports;
   }
 
-  createRocket() {
+  createRocket(type = 'starship') {
+    if (type === 'starship') {
+      return this.createStarshipRocket();
+    } else if (type === 'superheavy') {
+      return this.createSuperHeavyBooster();
+    } else if (type === 'fullstack') {
+      return this.createFullStackRocket();
+    }
+    return this.createStarshipRocket();
+  }
+
+  createStarshipRocket() {
     const rocketGroup = new THREE.Group();
 
-    // Main body - stainless steel with metallic finish
-    const bodyGeometry = new THREE.CylinderGeometry(10, 10, 150, 32);
+    // Main body - stainless steel with metallic finish (taller for more realistic proportions)
+    const bodyGeometry = new THREE.CylinderGeometry(9, 9, 160, 32);
     const bodyMaterial = new THREE.MeshStandardMaterial({ 
       color: 0xE8E8E8,
       metalness: 0.8,
-      roughness: 0.2,
-      envMapIntensity: 1.0
+      roughness: 0.15,
+      envMapIntensity: 1.2
     });
     const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
 
-    // Nose section - slightly tapered
-    const noseGeometry = new THREE.CylinderGeometry(7, 10, 30, 32);
+    // Nose section - more tapered like real Starship
+    const noseGeometry = new THREE.CylinderGeometry(3, 9, 40, 32);
     const nose = new THREE.Mesh(noseGeometry, bodyMaterial);
-    nose.position.y = 90;
+    nose.position.y = 100;
 
-    // Black thermal protection band near bottom
-    const heatShieldGeometry = new THREE.CylinderGeometry(10.1, 10.1, 40, 32);
+    // Black thermal protection tiles (more realistic pattern)
+    const heatShieldGeometry = new THREE.CylinderGeometry(9.1, 9.1, 50, 32);
     const heatShieldMaterial = new THREE.MeshStandardMaterial({
-      color: 0x222222,
-      roughness: 0.7,
-      metalness: 0.3
+      color: 0x1a1a1a,
+      roughness: 0.9,
+      metalness: 0.1
     });
     const heatShield = new THREE.Mesh(heatShieldGeometry, heatShieldMaterial);
-    heatShield.position.y = -40;
+    heatShield.position.y = -55;
 
-    // Upper flaps (smaller and more angular than previous version)
-    const upperFlapGeometry = new THREE.BoxGeometry(20, 2, 10);
+    // Forward fins (more realistic proportions)
+    const forwardFlapGeometry = new THREE.BoxGeometry(12, 3, 6);
     const flapMaterial = new THREE.MeshStandardMaterial({ 
       color: 0xE8E8E8,
       metalness: 0.8,
-      roughness: 0.2
+      roughness: 0.15
     });
 
-    // Two upper flaps
-    const upperFlapLeft = new THREE.Mesh(upperFlapGeometry, flapMaterial);
-    upperFlapLeft.position.set(-12, 60, 0);
-    upperFlapLeft.rotation.z = -0.2;
+    // Two forward flaps
+    const forwardFlapLeft = new THREE.Mesh(forwardFlapGeometry, flapMaterial);
+    forwardFlapLeft.position.set(-10, 50, 0);
+    forwardFlapLeft.rotation.z = -0.1;
     
-    const upperFlapRight = new THREE.Mesh(upperFlapGeometry, flapMaterial);
-    upperFlapRight.position.set(12, 60, 0);
-    upperFlapRight.rotation.z = 0.2;
+    const forwardFlapRight = new THREE.Mesh(forwardFlapGeometry, flapMaterial);
+    forwardFlapRight.position.set(10, 50, 0);
+    forwardFlapRight.rotation.z = 0.1;
 
-    // Lower flaps (slightly larger than upper)
-    const lowerFlapGeometry = new THREE.BoxGeometry(25, 2, 12);
+    // Aft fins (larger and more prominent)
+    const aftFlapGeometry = new THREE.BoxGeometry(18, 4, 8);
     
-    const lowerFlapLeft = new THREE.Mesh(lowerFlapGeometry, flapMaterial);
-    lowerFlapLeft.position.set(-14, -30, 0);
-    lowerFlapLeft.rotation.z = 0.2;
+    const aftFlapLeft = new THREE.Mesh(aftFlapGeometry, flapMaterial);
+    aftFlapLeft.position.set(-12, -40, 0);
+    aftFlapLeft.rotation.z = 0.15;
     
-    const lowerFlapRight = new THREE.Mesh(lowerFlapGeometry, flapMaterial);
-    lowerFlapRight.position.set(14, -30, 0);
-    lowerFlapRight.rotation.z = -0.2;
+    const aftFlapRight = new THREE.Mesh(aftFlapGeometry, flapMaterial);
+    aftFlapRight.position.set(12, -40, 0);
+    aftFlapRight.rotation.z = -0.15;
 
-    // Engine section with Raptor engines
+    // Engine section with 3 Raptor engines (more detailed)
     const engineSection = new THREE.Group();
-    const engineCount = 3; // Starship has 3 sea-level Raptor engines
-    const engineRadius = 6;
+    const engineCount = 3;
+    const engineRadius = 5;
 
     for (let i = 0; i < engineCount; i++) {
       const angle = (i / engineCount) * Math.PI * 2;
       
-      // Engine bell
-      const engineGeometry = new THREE.CylinderGeometry(2, 3, 8, 16);
+      // Engine bell (more detailed)
+      const engineGeometry = new THREE.CylinderGeometry(1.8, 2.8, 10, 16);
       const engineMaterial = new THREE.MeshStandardMaterial({
-        color: 0x666666,
+        color: 0x444444,
         metalness: 0.9,
-        roughness: 0.3
+        roughness: 0.2
       });
       const engine = new THREE.Mesh(engineGeometry, engineMaterial);
       
       engine.position.x = Math.cos(angle) * engineRadius;
       engine.position.z = Math.sin(angle) * engineRadius;
-      engine.position.y = -78;
+      engine.position.y = -85;
       
       // Add engine detail (injector plate)
-      const injectorGeometry = new THREE.CylinderGeometry(1.5, 1.5, 1, 16);
-      const injector = new THREE.Mesh(injectorGeometry, engineMaterial);
-      injector.position.y = 4;
+      const injectorGeometry = new THREE.CylinderGeometry(1.3, 1.3, 1.5, 16);
+      const injectorMaterial = new THREE.MeshStandardMaterial({
+        color: 0x666666,
+        metalness: 0.8,
+        roughness: 0.3
+      });
+      const injector = new THREE.Mesh(injectorGeometry, injectorMaterial);
+      injector.position.y = 6;
       engine.add(injector);
+      
+      // Add engine gimbal mechanism
+      const gimbalGeometry = new THREE.CylinderGeometry(2.2, 2.2, 3, 16);
+      const gimbal = new THREE.Mesh(gimbalGeometry, engineMaterial);
+      gimbal.position.y = -7;
+      engine.add(gimbal);
       
       engineSection.add(engine);
     }
 
-    // Add surface details - grid pattern for tiles
-    const gridSize = 5;
-    const tileSize = 2;
-    for (let i = 0; i < gridSize; i++) {
-      for (let j = 0; j < gridSize; j++) {
-        const tileGeometry = new THREE.BoxGeometry(tileSize, 0.1, tileSize);
-        const tile = new THREE.Mesh(tileGeometry, heatShieldMaterial);
-        tile.position.set(
-          (i - gridSize/2) * (tileSize + 0.5),
-          -20,
-          (j - gridSize/2) * (tileSize + 0.5)
-        );
-        body.add(tile);
-      }
-    }
+    // Add more detailed surface features
+    this.addStarshipSurfaceDetails(body, bodyMaterial, heatShieldMaterial);
 
-    // Add surface details - pipes and conduits
-    const pipeCount = 8;
-    for (let i = 0; i < pipeCount; i++) {
-      const pipeGeometry = new THREE.CylinderGeometry(0.3, 0.3, 40, 8);
-      const pipe = new THREE.Mesh(pipeGeometry, bodyMaterial);
-      pipe.position.y = -20;
-      pipe.position.x = Math.cos(i * Math.PI / 4) * 9;
-      pipe.position.z = Math.sin(i * Math.PI / 4) * 9;
-      body.add(pipe);
-    }
+    // Add header tank (for realistic Starship appearance)
+    const headerTankGeometry = new THREE.CylinderGeometry(8, 8, 20, 32);
+    const headerTank = new THREE.Mesh(headerTankGeometry, bodyMaterial);
+    headerTank.position.y = 20;
+    rocketGroup.add(headerTank);
+
+    // Add payload bay doors
+    const payloadDoorGeometry = new THREE.BoxGeometry(16, 2, 1);
+    const payloadDoorLeft = new THREE.Mesh(payloadDoorGeometry, bodyMaterial);
+    payloadDoorLeft.position.set(-8.5, 60, 0);
+    payloadDoorLeft.rotation.z = -0.05;
+    
+    const payloadDoorRight = new THREE.Mesh(payloadDoorGeometry, bodyMaterial);
+    payloadDoorRight.position.set(8.5, 60, 0);
+    payloadDoorRight.rotation.z = 0.05;
 
     // Combine all parts
-    rocketGroup.add(body, nose, heatShield, upperFlapLeft, upperFlapRight, 
-                    lowerFlapLeft, lowerFlapRight, engineSection);
+    rocketGroup.add(body, nose, heatShield, forwardFlapLeft, forwardFlapRight, 
+                    aftFlapLeft, aftFlapRight, engineSection, payloadDoorLeft, payloadDoorRight);
 
-    // Add subtle ambient occlusion to the entire rocket
-    const aoMaterial = new THREE.MeshStandardMaterial({
+    // Add SpaceX logo
+    const logoGeometry = new THREE.PlaneGeometry(8, 2);
+    const logoMaterial = new THREE.MeshStandardMaterial({
       color: 0x000000,
       transparent: true,
-      opacity: 0.1
+      opacity: 0.8
     });
-    
-    const aoGeometry = new THREE.CylinderGeometry(10.2, 10.2, 150, 32);
-    const ao = new THREE.Mesh(aoGeometry, aoMaterial);
-    rocketGroup.add(ao);
+    const logo = new THREE.Mesh(logoGeometry, logoMaterial);
+    logo.position.set(0, 40, 9.2);
+    rocketGroup.add(logo);
 
     return rocketGroup;
   }
 
+  createSuperHeavyBooster() {
+    const boosterGroup = new THREE.Group();
+
+    // Main body - larger and more robust
+    const bodyGeometry = new THREE.CylinderGeometry(9, 9, 200, 32);
+    const bodyMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0xE8E8E8,
+      metalness: 0.8,
+      roughness: 0.15,
+      envMapIntensity: 1.2
+    });
+    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+
+    // Engine section with 33 Raptor engines
+    const engineSection = new THREE.Group();
+    const innerEngineCount = 13; // Inner ring
+    const outerEngineCount = 20; // Outer ring
+    const innerRadius = 4;
+    const outerRadius = 7;
+
+    // Inner ring of engines
+    for (let i = 0; i < innerEngineCount; i++) {
+      const angle = (i / innerEngineCount) * Math.PI * 2;
+      const engine = this.createRaptorEngine();
+      engine.position.x = Math.cos(angle) * innerRadius;
+      engine.position.z = Math.sin(angle) * innerRadius;
+      engine.position.y = -105;
+      engineSection.add(engine);
+    }
+
+    // Outer ring of engines
+    for (let i = 0; i < outerEngineCount; i++) {
+      const angle = (i / outerEngineCount) * Math.PI * 2;
+      const engine = this.createRaptorEngine();
+      engine.position.x = Math.cos(angle) * outerRadius;
+      engine.position.z = Math.sin(angle) * outerRadius;
+      engine.position.y = -105;
+      engineSection.add(engine);
+    }
+
+    // Add grid fins for reentry control
+    const gridFinGeometry = new THREE.BoxGeometry(8, 12, 2);
+    const gridFinMaterial = new THREE.MeshStandardMaterial({
+      color: 0xcccccc,
+      metalness: 0.9,
+      roughness: 0.1
+    });
+
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2;
+      const gridFin = new THREE.Mesh(gridFinGeometry, gridFinMaterial);
+      gridFin.position.x = Math.cos(angle) * 10;
+      gridFin.position.z = Math.sin(angle) * 10;
+      gridFin.position.y = 60;
+      gridFin.rotation.y = angle;
+      boosterGroup.add(gridFin);
+    }
+
+    // Add landing legs
+    const legGeometry = new THREE.CylinderGeometry(0.5, 0.5, 15, 8);
+    const legMaterial = new THREE.MeshStandardMaterial({
+      color: 0x888888,
+      metalness: 0.7,
+      roughness: 0.3
+    });
+
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2;
+      const leg = new THREE.Mesh(legGeometry, legMaterial);
+      leg.position.x = Math.cos(angle) * 8;
+      leg.position.z = Math.sin(angle) * 8;
+      leg.position.y = -95;
+      leg.rotation.x = Math.PI / 6;
+      boosterGroup.add(leg);
+    }
+
+    boosterGroup.add(body, engineSection);
+    return boosterGroup;
+  }
+
+  createFullStackRocket() {
+    const fullStackGroup = new THREE.Group();
+    
+    // Create Super Heavy booster
+    const booster = this.createSuperHeavyBooster();
+    fullStackGroup.add(booster);
+    
+    // Create Starship on top
+    const starship = this.createStarshipRocket();
+    starship.position.y = 250; // Position on top of booster
+    fullStackGroup.add(starship);
+    
+    return fullStackGroup;
+  }
+
+  createRaptorEngine() {
+    const engineGroup = new THREE.Group();
+    
+    // Engine bell
+    const engineGeometry = new THREE.CylinderGeometry(1.5, 2.5, 8, 16);
+    const engineMaterial = new THREE.MeshStandardMaterial({
+      color: 0x444444,
+      metalness: 0.9,
+      roughness: 0.2
+    });
+    const engine = new THREE.Mesh(engineGeometry, engineMaterial);
+    engineGroup.add(engine);
+    
+    // Injector plate
+    const injectorGeometry = new THREE.CylinderGeometry(1.2, 1.2, 1, 16);
+    const injector = new THREE.Mesh(injectorGeometry, engineMaterial);
+    injector.position.y = 4.5;
+    engineGroup.add(injector);
+    
+    return engineGroup;
+  }
+
+  addStarshipSurfaceDetails(body, bodyMaterial, heatShieldMaterial) {
+    // Add hexagonal heat shield tiles
+    const tileCount = 200;
+    for (let i = 0; i < tileCount; i++) {
+      const tileGeometry = new THREE.CylinderGeometry(0.8, 0.8, 0.1, 6);
+      const tile = new THREE.Mesh(tileGeometry, heatShieldMaterial);
+      
+      // Random position on lower half of rocket
+      const angle = Math.random() * Math.PI * 2;
+      const height = -80 + Math.random() * 100;
+      const radius = 9.2;
+      
+      tile.position.x = Math.cos(angle) * radius;
+      tile.position.z = Math.sin(angle) * radius;
+      tile.position.y = height;
+      body.add(tile);
+    }
+
+    // Add propellant tank lines
+    const tankLineGeometry = new THREE.CylinderGeometry(0.2, 0.2, 160, 8);
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      const tankLine = new THREE.Mesh(tankLineGeometry, bodyMaterial);
+      tankLine.position.x = Math.cos(angle) * 9.3;
+      tankLine.position.z = Math.sin(angle) * 9.3;
+      body.add(tankLine);
+    }
+
+    // Add RCS thrusters
+    const rcsGeometry = new THREE.CylinderGeometry(0.3, 0.3, 1, 8);
+    const rcsMaterial = new THREE.MeshStandardMaterial({
+      color: 0x666666,
+      metalness: 0.8,
+      roughness: 0.3
+    });
+    
+    for (let i = 0; i < 16; i++) {
+      const angle = (i / 16) * Math.PI * 2;
+      const height = 30 + (i % 4) * 20;
+      const rcs = new THREE.Mesh(rcsGeometry, rcsMaterial);
+      rcs.position.x = Math.cos(angle) * 9.5;
+      rcs.position.z = Math.sin(angle) * 9.5;
+      rcs.position.y = height;
+      body.add(rcs);
+    }
+  }
+
   triggerRocketEvent(type, startPosition) {
-    const rocket = this.createRocket();
+    // Choose rocket type based on probability
+    let rocketType = 'starship';
+    const rand = Math.random();
+    if (rand < 0.6) {
+      rocketType = 'starship';
+    } else if (rand < 0.8) {
+      rocketType = 'superheavy';
+    } else {
+      rocketType = 'fullstack';
+    }
+    
+    const rocket = this.createRocket(rocketType);
     const startPos = startPosition || this.getRandomLaunchSite().position;
     rocket.position.copy(startPos);
   
-    // Increase duration for slower launch/landing
-    const duration = 10000; // 20 seconds for a more dramatic effect
+    // Adjust duration based on rocket type
+    let duration = 10000; // Default 10 seconds
+    if (rocketType === 'fullstack') {
+      duration = 20000; // 20 seconds for full stack
+    } else if (rocketType === 'superheavy') {
+      duration = 15000; // 15 seconds for booster
+    }
   
     const event = {
       type: type,
       rocket: rocket,
+      rocketType: rocketType,
       startTime: Date.now(),
       duration: duration,
       startPos: startPos.clone(),
       endPos: type === 'launch' ?
-        startPos.clone().add(new THREE.Vector3(0, 1000, 0)) :
+        startPos.clone().add(new THREE.Vector3(0, 1500, 0)) :
         startPos.clone(),
       engineParticles: this.createRocketEngineEffect(rocket)
     };
   
     this.scene.add(rocket);
     this.activeEvents.add(event);
+    
+    // Show notification about rocket launch
+    if (window.showNotification) {
+      const rocketName = rocketType === 'fullstack' ? 'Starship + Super Heavy' : 
+                        rocketType === 'superheavy' ? 'Super Heavy Booster' : 'Starship';
+      window.showNotification(`${rocketName} ${type} detected!`, 5000);
+    }
   }
   
   createRocketEngineEffect(rocket) {
@@ -2202,6 +3116,11 @@ function animate(time) {
     const deltaTime = (time - lastUpdateTime) / 1000; // Convert to seconds
     lastUpdateTime = time;
 
+    // Update atmospheric effects system (now that deltaTime is available)
+    if (window.atmosphericEffects && rover) {
+      window.atmosphericEffects.update(deltaTime * 1000, rover.position); // Convert back to milliseconds for consistency
+    }
+
     // Calculate distance based on current speed with scaling factor
     // Only add distance when moving forward (positive speed)
     if (currentSpeed > 0) {
@@ -2647,6 +3566,107 @@ function createRealisticMarsTerrain() {
 
         const duneHeight = (1 - normalizedDistance) * 3 * (1 + windFactor * 0.5);
         elevation += duneHeight;
+      }
+    }
+
+    // 3.1. Add ancient lake beds (more detailed than original)
+    const lakeCount = Math.floor(4 * featureMultiplier);
+    for (let l = 0; l < lakeCount; l++) {
+      const lakeX = Math.sin(l * 3.7) * terrainSize * 0.35;
+      const lakeZ = Math.cos(l * 2.9) * terrainSize * 0.35;
+      const lakeRadius = 120 + Math.random() * 180;
+
+      const distanceToLake = Math.sqrt(Math.pow(x - lakeX, 2) + Math.pow(z - lakeZ, 2));
+
+      if (distanceToLake < lakeRadius * 1.3) {
+        const normalizedDistance = distanceToLake / lakeRadius;
+        
+        if (normalizedDistance < 1) {
+          // Lake bed - depression
+          const lakeDepth = Math.pow(1 - normalizedDistance, 1.5) * 8;
+          elevation -= lakeDepth;
+        } else if (normalizedDistance < 1.3) {
+          // Ancient shoreline with sediment deposits
+          const shoreHeight = (normalizedDistance - 1) * 5;
+          elevation += shoreHeight;
+        }
+      }
+    }
+
+    // 3.2. Add dramatic canyon systems
+    const canyonCount = Math.floor(3 * featureMultiplier);
+    for (let c = 0; c < canyonCount; c++) {
+      const canyonStartX = Math.sin(c * 2.8) * terrainSize * 0.4;
+      const canyonStartZ = Math.cos(c * 3.2) * terrainSize * 0.4;
+      const canyonEndX = Math.sin(c * 2.8 + 2.5) * terrainSize * 0.4;
+      const canyonEndZ = Math.cos(c * 3.2 + 2.5) * terrainSize * 0.4;
+
+      // Canyon parameters
+      const canyonLength = Math.sqrt(Math.pow(canyonEndX - canyonStartX, 2) + Math.pow(canyonEndZ - canyonStartZ, 2));
+      const canyonDirX = (canyonEndX - canyonStartX) / canyonLength;
+      const canyonDirZ = (canyonEndZ - canyonStartZ) / canyonLength;
+
+      // Point projection onto canyon line
+      const pointToStartX = x - canyonStartX;
+      const pointToStartZ = z - canyonStartZ;
+      const projection = pointToStartX * canyonDirX + pointToStartZ * canyonDirZ;
+      const projectionX = canyonStartX + canyonDirX * Math.max(0, Math.min(canyonLength, projection));
+      const projectionZ = canyonStartZ + canyonDirZ * Math.max(0, Math.min(canyonLength, projection));
+
+      const distanceToCanyon = Math.sqrt(Math.pow(x - projectionX, 2) + Math.pow(z - projectionZ, 2));
+      const canyonWidth = 60 + Math.sin(projection * 0.02) * 20;
+
+      if (distanceToCanyon < canyonWidth && projection > 0 && projection < canyonLength) {
+        const normalizedDistance = distanceToCanyon / canyonWidth;
+        
+        // Canyon depth varies along its length
+        const canyonDepth = 15 + Math.sin(projection * 0.015) * 8;
+        
+        // Canyon profile: steep sides, flat bottom
+        if (normalizedDistance < 0.3) {
+          // Canyon floor
+          elevation -= canyonDepth;
+        } else if (normalizedDistance < 0.8) {
+          // Canyon walls - steep
+          const wallProfile = Math.pow((normalizedDistance - 0.3) / 0.5, 2);
+          elevation -= canyonDepth * (1 - wallProfile);
+        } else {
+          // Canyon rim - slightly raised
+          const rimHeight = (1 - normalizedDistance) * 2;
+          elevation += rimHeight;
+        }
+      }
+    }
+
+    // 3.3. Add spectacular rock formations (mesas, buttes)
+    const rockFormationCount = Math.floor(8 * featureMultiplier);
+    for (let rf = 0; rf < rockFormationCount; rf++) {
+      const rockX = Math.sin(rf * 4.1) * terrainSize * 0.3;
+      const rockZ = Math.cos(rf * 3.6) * terrainSize * 0.3;
+      const rockRadius = 40 + Math.random() * 60;
+      const rockHeight = 20 + Math.random() * 30;
+
+      const distanceToRock = Math.sqrt(Math.pow(x - rockX, 2) + Math.pow(z - rockZ, 2));
+
+      if (distanceToRock < rockRadius * 1.2) {
+        const normalizedDistance = distanceToRock / rockRadius;
+        
+        if (normalizedDistance < 1) {
+          // Mesa/butte formation - flat top, steep sides
+          const topRadius = rockRadius * 0.7;
+          if (distanceToRock < topRadius) {
+            // Flat top
+            elevation += rockHeight;
+          } else {
+            // Steep sides
+            const sideProfile = Math.pow((rockRadius - distanceToRock) / (rockRadius - topRadius), 3);
+            elevation += rockHeight * sideProfile;
+          }
+        } else if (normalizedDistance < 1.2) {
+          // Talus slopes around the formation
+          const talusHeight = (1.2 - normalizedDistance) * 3;
+          elevation += talusHeight;
+        }
       }
     }
 
@@ -3158,10 +4178,21 @@ function createSphericalSkyTexture(size = null) {
   canvas.height = size;
   const context = canvas.getContext('2d');
 
-  // Fill with deep space black
-  context.fillStyle = '#000005';
+  // Fill with deep space black with subtle gradient
+  const gradient = context.createRadialGradient(
+    size / 2, size / 2, 0,
+    size / 2, size / 2, size / 2
+  );
+  gradient.addColorStop(0, '#000008');
+  gradient.addColorStop(0.7, '#000005');
+  gradient.addColorStop(1, '#000002');
+  context.fillStyle = gradient;
   context.fillRect(0, 0, canvas.width, canvas.height);
 
+  // Add nebulae and cosmic dust first (background layer)
+  addCosmicNebulae(context, size);
+  addDistantGalaxies(context, size);
+  
   // Add stars and other elements with higher quality
   addBrighterBackgroundStars(context, size);
   addBrighterMidLayerStars(context, size);
@@ -3171,9 +4202,10 @@ function createSphericalSkyTexture(size = null) {
   // Add atmospheric glow for realism
   addAtmosphericGlow(context, size);
 
-  // Add some distant planets
-  addPlanetToCanvas(context, size * 0.8, size * 0.2, size * 0.03, '#A67B5B');
-  addPlanetToCanvas(context, size * 0.15, size * 0.75, size * 0.02, '#C8A080', true);
+  // Add some distant planets (including Earth visible as a pale blue dot)
+  addPlanetToCanvas(context, size * 0.8, size * 0.2, size * 0.03, '#A67B5B'); // Mars in distance
+  addPlanetToCanvas(context, size * 0.15, size * 0.75, size * 0.02, '#C8A080', true); // Saturn-like
+  addPlanetToCanvas(context, size * 0.6, size * 0.4, size * 0.008, '#6BA6CD'); // Earth as pale blue dot
 
   // Apply a subtle blur to reduce pixelation
   context.filter = 'blur(0px)';
@@ -3190,6 +4222,85 @@ function createSphericalSkyTexture(size = null) {
   const texture = new THREE.CanvasTexture(canvas);
 
   return texture;
+}
+
+// Add cosmic nebulae for background depth
+function addCosmicNebulae(context, size) {
+  const perfSettings = getPerformanceSettings();
+  const nebulaeCount = perfSettings.detailLevel === 'high' ? 8 : 
+                       perfSettings.detailLevel === 'normal' ? 5 : 3;
+  
+  for (let i = 0; i < nebulaeCount; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const radius = Math.random() * size * 0.15 + size * 0.05;
+    
+    // Create nebula gradient
+    const nebula = context.createRadialGradient(x, y, 0, x, y, radius);
+    
+    // Random nebula colors
+    const colorType = Math.random();
+    if (colorType < 0.3) {
+      // Red nebulae (like Orion)
+      nebula.addColorStop(0, 'rgba(255, 100, 100, 0.15)');
+      nebula.addColorStop(0.5, 'rgba(200, 50, 50, 0.08)');
+      nebula.addColorStop(1, 'rgba(100, 20, 20, 0)');
+    } else if (colorType < 0.6) {
+      // Blue nebulae
+      nebula.addColorStop(0, 'rgba(100, 150, 255, 0.12)');
+      nebula.addColorStop(0.5, 'rgba(50, 100, 200, 0.06)');
+      nebula.addColorStop(1, 'rgba(20, 50, 100, 0)');
+    } else {
+      // Purple/magenta nebulae
+      nebula.addColorStop(0, 'rgba(200, 100, 255, 0.10)');
+      nebula.addColorStop(0.5, 'rgba(150, 50, 200, 0.05)');
+      nebula.addColorStop(1, 'rgba(100, 20, 150, 0)');
+    }
+    
+    context.fillStyle = nebula;
+    context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+  }
+}
+
+// Add distant galaxies
+function addDistantGalaxies(context, size) {
+  const perfSettings = getPerformanceSettings();
+  const galaxyCount = perfSettings.detailLevel === 'high' ? 4 : 
+                      perfSettings.detailLevel === 'normal' ? 2 : 1;
+  
+  for (let i = 0; i < galaxyCount; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const width = Math.random() * size * 0.08 + size * 0.02;
+    const height = width * (0.3 + Math.random() * 0.4);
+    const rotation = Math.random() * Math.PI * 2;
+    
+    context.save();
+    context.translate(x, y);
+    context.rotate(rotation);
+    
+    // Create galaxy spiral gradient
+    const galaxy = context.createRadialGradient(0, 0, 0, 0, 0, width / 2);
+    galaxy.addColorStop(0, 'rgba(255, 255, 220, 0.08)');
+    galaxy.addColorStop(0.3, 'rgba(255, 255, 180, 0.05)');
+    galaxy.addColorStop(0.7, 'rgba(255, 255, 150, 0.02)');
+    galaxy.addColorStop(1, 'rgba(255, 255, 100, 0)');
+    
+    context.fillStyle = galaxy;
+    context.fillRect(-width / 2, -height / 2, width, height);
+    
+    // Add galaxy core
+    const core = context.createRadialGradient(0, 0, 0, 0, 0, width * 0.1);
+    core.addColorStop(0, 'rgba(255, 255, 255, 0.12)');
+    core.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    
+    context.fillStyle = core;
+    context.beginPath();
+    context.arc(0, 0, width * 0.1, 0, Math.PI * 2);
+    context.fill();
+    
+    context.restore();
+  }
 }
 
 // Add much brighter background stars
@@ -3825,6 +4936,12 @@ function loadNonEssentialComponents() {
   // Load Mars scene manager with delay
   lazyLoader.loadInBackground('marsSceneManager', () => {
     window.marsSceneManager = new MarsSceneManager(scene, 5000);
+    return Promise.resolve();
+  });
+
+  // Load atmospheric effects system
+  lazyLoader.loadInBackground('atmosphericEffects', () => {
+    window.atmosphericEffects = new MarsAtmosphericEffects(scene);
     return Promise.resolve();
   });
 
