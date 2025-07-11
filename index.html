@@ -280,11 +280,30 @@
       font-weight: bold;
       cursor: pointer;
       user-select: none;
-      transition: all 0.2s ease;
+      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
       touch-action: manipulation;
       backdrop-filter: blur(10px);
       box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
       position: relative;
+      overflow: hidden;
+    }
+    
+    .mobile-btn::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(135deg, rgba(255, 107, 53, 0.1), rgba(255, 107, 53, 0.05));
+      border-radius: 50%;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+      pointer-events: none;
+    }
+    
+    .mobile-btn:hover::before {
+      opacity: 1;
     }
     
     .mobile-btn .btn-label {
@@ -294,17 +313,38 @@
       margin-top: 2px;
       opacity: 0.8;
       text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+      transition: opacity 0.15s ease;
     }
     
     .mobile-btn:active {
       background: rgba(255, 107, 53, 0.9);
-      transform: scale(0.9);
+      transform: scale(0.85);
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+      border-color: rgba(255, 107, 53, 1);
+    }
+    
+    .mobile-btn:active .btn-label {
+      opacity: 1;
     }
     
     .mobile-btn:hover {
       background: rgba(255, 107, 53, 0.7);
       border-color: rgba(255, 107, 53, 0.8);
+      transform: scale(1.05);
+    }
+    
+    /* Add a subtle pulsing animation for better visibility */
+    .mobile-btn {
+      animation: mobileBtnPulse 3s ease-in-out infinite;
+    }
+    
+    @keyframes mobileBtnPulse {
+      0%, 100% {
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+      }
+      50% {
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3), 0 0 20px rgba(255, 107, 53, 0.2);
+      }
     }
     
     /* Touch Camera Controls */
@@ -1532,17 +1572,73 @@
           const rocketBtn = document.getElementById('mobile-rocket-btn');
           const cameraBtn = document.getElementById('mobile-camera-btn');
           
-          // Sample Collection Button (E key equivalent)
-          if (sampleBtn) {
-            sampleBtn.addEventListener('touchstart', (e) => {
+          // Enhanced button handler with debouncing
+          const createButtonHandler = (button, action, cooldown = 500) => {
+            let lastPress = 0;
+            let isPressed = false;
+            
+            const handlePress = (e) => {
               e.preventDefault();
+              e.stopPropagation();
+              
+              const now = Date.now();
+              if (now - lastPress < cooldown || isPressed) {
+                return;
+              }
+              
+              isPressed = true;
+              lastPress = now;
+              
+              // Visual feedback
+              button.style.transform = 'scale(0.85)';
+              button.style.background = 'rgba(255, 107, 53, 0.9)';
+              button.style.borderColor = 'rgba(255, 107, 53, 1)';
               
               // Haptic feedback
               if (navigator.vibrate) {
-                navigator.vibrate(100);
+                navigator.vibrate(80);
               }
               
-              // Trigger sample collection
+              // Execute action
+              setTimeout(() => {
+                action();
+                
+                // Reset visual feedback
+                setTimeout(() => {
+                  button.style.transform = 'scale(1)';
+                  button.style.background = 'rgba(0, 0, 0, 0.6)';
+                  button.style.borderColor = 'rgba(255, 107, 53, 0.5)';
+                  isPressed = false;
+                }, 100);
+              }, 50);
+            };
+            
+            // Use touchend for better control
+            button.addEventListener('touchend', handlePress);
+            
+            // Prevent context menu and other touch interference
+            button.addEventListener('touchstart', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            });
+            
+            button.addEventListener('touchmove', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            });
+            
+            button.addEventListener('touchcancel', (e) => {
+              e.preventDefault();
+              button.style.transform = 'scale(1)';
+              button.style.background = 'rgba(0, 0, 0, 0.6)';
+              button.style.borderColor = 'rgba(255, 107, 53, 0.5)';
+              isPressed = false;
+            });
+          };
+          
+          // Sample Collection Button (E key equivalent)
+          if (sampleBtn) {
+            createButtonHandler(sampleBtn, () => {
               if (window.keys && window.sampleSystem && window.rover) {
                 const collected = window.sampleSystem.collectSample(window.rover.position);
                 if (collected) {
@@ -1551,20 +1647,12 @@
                   this.showMobileNotification('No samples nearby', '#ffaa44');
                 }
               }
-            });
+            }, 600);
           }
           
           // Sample Analysis Button (Q key equivalent)
           if (analyzeBtn) {
-            analyzeBtn.addEventListener('touchstart', (e) => {
-              e.preventDefault();
-              
-              // Haptic feedback
-              if (navigator.vibrate) {
-                navigator.vibrate(100);
-              }
-              
-              // Trigger sample analysis
+            createButtonHandler(analyzeBtn, () => {
               if (window.sampleSystem) {
                 const samples = window.sampleSystem.getCollectedSamples();
                 if (samples.length > 0) {
@@ -1578,20 +1666,12 @@
                   this.showMobileNotification('No samples to analyze', '#ffaa44');
                 }
               }
-            });
+            }, 800);
           }
           
           // Rocket Launch Button (R key equivalent)
           if (rocketBtn) {
-            rocketBtn.addEventListener('touchstart', (e) => {
-              e.preventDefault();
-              
-              // Haptic feedback
-              if (navigator.vibrate) {
-                navigator.vibrate(150);
-              }
-              
-              // Trigger rocket launch
+            createButtonHandler(rocketBtn, () => {
               if (window.marsSceneManager && window.marsSceneManager.rocketLaunchActive) {
                 if (!window.lastManualRocketLaunch || Date.now() - window.lastManualRocketLaunch > 3000) {
                   window.lastManualRocketLaunch = Date.now();
@@ -1600,27 +1680,20 @@
                 } else {
                   this.showMobileNotification('Rocket cooldown...', '#ffaa44');
                 }
+              } else {
+                this.showMobileNotification('Rockets not available', '#ffaa44');
               }
-            });
+            }, 1000);
           }
           
           // Camera Toggle Button (C key equivalent)
           if (cameraBtn) {
-            cameraBtn.addEventListener('touchstart', (e) => {
-              e.preventDefault();
-              
-              // Haptic feedback
-              if (navigator.vibrate) {
-                navigator.vibrate(100);
-              }
-              
+            createButtonHandler(cameraBtn, () => {
               if (typeof window.toggleCameraMode === 'function') {
                 window.toggleCameraMode();
-                
-                // Show current camera mode
                 this.showCameraModeIndicator();
               }
-            });
+            }, 400);
           }
         }
          

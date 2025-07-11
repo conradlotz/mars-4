@@ -39,46 +39,46 @@ function getPerformanceSettings() {
     // High-end mobile devices (flagship phones/tablets)
     if (mobileTier === 'high') {
       return {
-        textureSize: 1024,
-        particleCount: 150,
-        renderDistance: 3000,
+        textureSize: 1536,
+        particleCount: 200,
+        renderDistance: 3500,
         shadowQuality: 'low',
-        antialiasing: false,
+        antialiasing: true,
         skyboxResolution: 2048,
         detailLevel: 'medium',
-        fogDistance: 2500,
+        fogDistance: 2800,
         graphicsQuality: 'medium',
         isMobile: true,
         mobileTier: 'high',
         disableRockets: false,
         disableMeteors: true,
         disableAtmosphericEffects: false,
-        terrainSegments: 96,
-        frameThrottle: 3,
+        terrainSegments: 112,
+        frameThrottle: 2,
         enableCulling: true,
-        maxLights: 5
+        maxLights: 6
       };
     }
     
     // Mid-range mobile devices
     if (mobileTier === 'medium') {
       return {
-        textureSize: 768,
-        particleCount: 100,
-        renderDistance: 2500,
+        textureSize: 1024,
+        particleCount: 125,
+        renderDistance: 3000,
         shadowQuality: 'none',
         antialiasing: false,
         skyboxResolution: 1536,
         detailLevel: 'low',
-        fogDistance: 2000,
+        fogDistance: 2300,
         graphicsQuality: 'low',
         isMobile: true,
         mobileTier: 'medium',
         disableRockets: true,
         disableMeteors: true,
         disableAtmosphericEffects: true,
-        terrainSegments: 80,
-        frameThrottle: 4,
+        terrainSegments: 96,
+        frameThrottle: 3,
         enableCulling: true,
         maxLights: 4
       };
@@ -86,22 +86,22 @@ function getPerformanceSettings() {
     
     // Low-end mobile devices (budget phones)
     return {
-      textureSize: 512,
-      particleCount: 50,
-      renderDistance: 2000,
+      textureSize: 768,
+      particleCount: 75,
+      renderDistance: 2500,
       shadowQuality: 'none',
       antialiasing: false,
       skyboxResolution: 1024,
       detailLevel: 'low',
-      fogDistance: 1500,
+      fogDistance: 1800,
       graphicsQuality: 'low',
       isMobile: true,
       mobileTier: 'low',
       disableRockets: true,
       disableMeteors: true,
       disableAtmosphericEffects: true,
-      terrainSegments: 64,
-      frameThrottle: 6,
+      terrainSegments: 80,
+      frameThrottle: 4,
       enableCulling: true,
       maxLights: 3
     };
@@ -138,9 +138,12 @@ camera.position.set(0, 10, 20);
 const perfSettings = getPerformanceSettings();
 const renderer = new THREE.WebGLRenderer({
   antialias: perfSettings.antialiasing,
-  powerPreference: perfSettings.isMobile ? 'low-power' : 
+  powerPreference: perfSettings.isMobile ? 
+                   (perfSettings.mobileTier === 'high' ? 'default' : 'low-power') : 
                    perfSettings.graphicsQuality === 'high' ? 'high-performance' : 'default',
-  precision: perfSettings.isMobile ? 'lowp' : 
+  precision: perfSettings.isMobile ? 
+            (perfSettings.mobileTier === 'high' ? 'mediump' : 
+             perfSettings.mobileTier === 'medium' ? 'lowp' : 'lowp') :
             perfSettings.graphicsQuality === 'high' ? 'highp' : 'mediump',
   alpha: false,
   stencil: false,
@@ -149,18 +152,27 @@ const renderer = new THREE.WebGLRenderer({
   preserveDrawingBuffer: false
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
-// Limit pixel ratio for better performance on high-DPI displays
-const pixelRatio = perfSettings.isMobile ? 1 : 
+
+// Adaptive pixel ratio for better visual quality
+const pixelRatio = perfSettings.isMobile ? 
+                   (perfSettings.mobileTier === 'high' ? Math.min(window.devicePixelRatio, 1.5) : 1) :
                    Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1);
 renderer.setPixelRatio(pixelRatio);
 
 // Mobile-specific renderer optimizations
 if (perfSettings.isMobile) {
   renderer.shadowMap.enabled = false;
-  renderer.setPixelRatio(1); // Force 1x pixel ratio on mobile
-  // Use standard encoding for compatibility
-  renderer.outputEncoding = THREE.LinearEncoding;
+  
+  // Better color encoding for mobile
+  renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.gammaFactor = 2.2;
+  
+  // Enable some optimizations for mid-range and high-end mobile
+  if (perfSettings.mobileTier === 'high') {
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.shadowMap.autoUpdate = false; // Manual updates for performance
+  }
 }
 document.body.appendChild(renderer.domElement);
 
@@ -3588,25 +3600,33 @@ function animate(time) {
 
   // Adaptive frame throttling based on mobile device capabilities
   const frameThrottle = perfSettings.isMobile ? 
-                       (perfSettings.mobileTier === 'high' ? 3 : 
-                        perfSettings.mobileTier === 'medium' ? 4 : 6) :
+                       (perfSettings.mobileTier === 'high' ? 2 : 
+                        perfSettings.mobileTier === 'medium' ? 3 : 4) :
                        perfSettings.detailLevel === 'high' ? 1 : 
                        perfSettings.detailLevel === 'normal' ? 2 : 3;
 
   // Optimize operations for mobile with tier-based updates
   if (perfSettings.isMobile) {
-    // Mobile scene manager updates with reduced throttling for better visuals
-    const sceneUpdateThrottle = perfSettings.mobileTier === 'high' ? 4 : 
-                               perfSettings.mobileTier === 'medium' ? 6 : 8;
+    // Mobile scene manager updates with less aggressive throttling
+    const sceneUpdateThrottle = perfSettings.mobileTier === 'high' ? 2 : 
+                               perfSettings.mobileTier === 'medium' ? 4 : 6;
     
     if (window.marsSceneManager && rover && frameCount % (frameThrottle * sceneUpdateThrottle) === 0) {
       window.marsSceneManager.update(rover.position);
     }
     
-    // Enable some atmospheric effects on high-end mobile devices
+    // Enable atmospheric effects on high-end mobile devices with better frequency
     if (!perfSettings.disableAtmosphericEffects && window.atmosphericEffects && 
-        frameCount % (frameThrottle * 6) === 0) {
+        frameCount % (frameThrottle * (perfSettings.mobileTier === 'high' ? 3 : 6)) === 0) {
       window.atmosphericEffects.update(delta, rover.position);
+    }
+    
+    // Enable dust particles updates on mid-range and high-end mobile
+    if ((perfSettings.mobileTier === 'high' || perfSettings.mobileTier === 'medium') && 
+        isMoving && frameCount % (frameThrottle * 2) === 0) {
+      if (window.dustParticles) {
+        window.dustParticles.update(rover.position, isMoving);
+      }
     }
   } else {
     // // Make the skybox follow the camera ONLY if it exists
