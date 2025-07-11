@@ -789,10 +789,10 @@ class MeteorSystem {
           theta = Math.random() * Math.PI * 0.5;
         }
 
-        // Calculate start position on the sky dome
-        const startX = this.skyRadius * Math.sin(theta) * Math.cos(phi);
-        const startY = this.skyRadius * Math.cos(theta);
-        const startZ = this.skyRadius * Math.sin(theta) * Math.sin(phi);
+                  // Calculate start position on the sky dome
+          const startX = this.skyRadius * Math.sin(theta) * Math.cos(phi);
+          const startY = this.skyRadius * Math.cos(theta);
+          const startZ = this.skyRadius * Math.sin(theta) * Math.sin(phi);
 
         // Calculate end position (opposite side but lower)
         const endPhi = (phi + Math.PI + (Math.random() - 0.5) * Math.PI * 0.5) % (Math.PI * 2);
@@ -1244,6 +1244,8 @@ class MarsSceneManager {
     this.createMarsBase();
     // Create rocket launch sites
     this.createLaunchSites();
+    // Create SpaceX Starship display lineup
+    this.createStarshipDisplay();
     
     // Initialize rocket launch timing system
     this.initializeRocketLaunchSystem();
@@ -2083,6 +2085,142 @@ class MarsSceneManager {
     });
   }
 
+  createStarshipDisplay() {
+    // Create a spectacular SpaceX Starship display lineup
+    const displayCenter = { x: -600, z: 0 }; // Position to the left of starting area
+    const rocketSpacing = 80; // Distance between rockets
+    const rocketCount = 6; // Number of rockets in display
+    
+    // Create display group
+    const displayGroup = new THREE.Group();
+    
+    for (let i = 0; i < rocketCount; i++) {
+      // Calculate position for each rocket
+      const rocketX = displayCenter.x;
+      const rocketZ = displayCenter.z + (i - (rocketCount - 1) / 2) * rocketSpacing;
+      
+      // Create different rocket types for variety
+      let rocketType = 'starship';
+      if (i === 2 || i === 3) {
+        rocketType = 'fullstack'; // Middle rockets are full stacks
+      } else if (i === 1 || i === 4) {
+        rocketType = 'superheavy'; // Some are boosters
+      }
+      
+      const displayRocket = this.createRocket(rocketType);
+      displayRocket.position.set(rocketX, 0, rocketZ);
+      
+      // Add dramatic lighting for each rocket
+      this.addDisplayLighting(displayRocket, i);
+      
+      // Add SpaceX display signage
+      if (i === Math.floor(rocketCount / 2)) {
+        this.addSpaceXSignage(displayRocket);
+      }
+      
+      displayGroup.add(displayRocket);
+    }
+    
+    // Add display platform
+    this.addDisplayPlatform(displayGroup, displayCenter, rocketCount * rocketSpacing);
+    
+    // Position on terrain
+    this.positionOnTerrain(displayGroup, displayCenter.x, displayCenter.z);
+    
+    this.scene.add(displayGroup);
+    
+    // Show notification about the display
+    if (window.showNotification) {
+      setTimeout(() => {
+        window.showNotification('🚀 SpaceX Starship Display Area Discovered! Drive West to see the lineup!', 6000);
+      }, 8000);
+    }
+  }
+
+  addDisplayLighting(rocket, index) {
+    // Add dramatic spotlights for each rocket
+    const spotLight = new THREE.SpotLight(0xffffff, 2, 200, Math.PI / 6, 0.3);
+    spotLight.position.set(30, 100, 0);
+    spotLight.target = rocket;
+    spotLight.castShadow = true;
+    this.scene.add(spotLight);
+    
+    // Add colored accent lighting
+    const colors = [0xff3300, 0x00ff88, 0x3388ff, 0xffaa00, 0xff6b35, 0x88ff00];
+    const accentLight = new THREE.PointLight(colors[index % colors.length], 1, 50);
+    accentLight.position.set(0, 80, 20);
+    rocket.add(accentLight);
+  }
+
+  addSpaceXSignage(rocket) {
+    // Create large SpaceX logo/sign
+    const signGeometry = new THREE.PlaneGeometry(40, 8);
+    const signMaterial = new THREE.MeshStandardMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.9
+    });
+    const sign = new THREE.Mesh(signGeometry, signMaterial);
+    sign.position.set(0, 200, 30);
+    sign.rotation.y = Math.PI;
+    this.scene.add(sign);
+    
+    // Add "SPACEX STARSHIP DISPLAY" text effect
+    const textGeometry = new THREE.PlaneGeometry(60, 6);
+    const textMaterial = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.8,
+      emissive: 0x333333
+    });
+    const textSign = new THREE.Mesh(textGeometry, textMaterial);
+    textSign.position.set(0, 210, 29);
+    textSign.rotation.y = Math.PI;
+    this.scene.add(textSign);
+  }
+
+  addDisplayPlatform(displayGroup, center, totalWidth) {
+    // Create elevated display platform
+    const platformGeometry = new THREE.BoxGeometry(totalWidth + 40, 5, 120);
+    const platformMaterial = new THREE.MeshStandardMaterial({
+      color: 0x444444,
+      metalness: 0.3,
+      roughness: 0.7
+    });
+    const platform = new THREE.Mesh(platformGeometry, platformMaterial);
+    platform.position.set(0, -2.5, 0);
+    displayGroup.add(platform);
+    
+    // Add platform details and markings
+    for (let i = 0; i < 6; i++) {
+      const markingGeometry = new THREE.CylinderGeometry(15, 15, 0.5, 32);
+      const markingMaterial = new THREE.MeshStandardMaterial({
+        color: 0xff6b35,
+        emissive: 0x331100,
+        emissiveIntensity: 0.2
+      });
+      const marking = new THREE.Mesh(markingGeometry, markingMaterial);
+      marking.position.set(0, 2.75, (i - 2.5) * 80);
+      displayGroup.add(marking);
+    }
+  }
+
+  positionOnTerrain(group, x, z) {
+    // Use raycasting to position on terrain
+    const raycaster = new THREE.Raycaster();
+    raycaster.set(new THREE.Vector3(x, 1000, z), new THREE.Vector3(0, -1, 0));
+    
+    let y = 0; // default height
+    if (this.scene && this.scene.children) {
+      const intersects = raycaster.intersectObjects(this.scene.children, true);
+      if (intersects.length > 0) {
+        y = intersects[0].point.y;
+      }
+    }
+    
+    group.position.set(x, y, z);
+  }
+
   createLaunchSite(x, z) {
     const siteGroup = new THREE.Group();
     siteGroup.position.set(x, 0, z);
@@ -2647,67 +2785,231 @@ class MarsSceneManager {
   }
   
   createRocketEngineEffect(rocket) {
-    // Create multiple particle systems for more realistic effects
-    const mainEngineParticles = this.createParticleSystem(2000, 0xff3300);
-    const smokeParticles = this.createParticleSystem(1000, 0x888888);
+    // Create enhanced burner effects with multiple layers
+    const burnerEffects = {
+      innerFlame: this.createFlameParticleSystem(1500, 0xffffff, 0xffff88), // White-yellow core
+      middleFlame: this.createFlameParticleSystem(2000, 0xff4400, 0xff8800), // Orange flame
+      outerFlame: this.createFlameParticleSystem(2500, 0xff1100, 0xff4400), // Red outer flame
+      smokeTrail: this.createSmokeParticleSystem(1000, 0x888888),
+      shockWave: this.createShockWaveEffect()
+    };
     
-    // Add multiple engine lights for better glow effect
+    // Create dramatic engine lighting
     const engineLights = [
-      new THREE.PointLight(0xff3300, 2, 20),
-      new THREE.PointLight(0xff5500, 1.5, 30),
-      new THREE.PointLight(0xff8800, 1, 40)
+      new THREE.PointLight(0xffffff, 5, 100), // Main white light
+      new THREE.PointLight(0xff3300, 4, 80),  // Orange glow
+      new THREE.PointLight(0xff6600, 3, 60),  // Red heat
+      new THREE.SpotLight(0xff4400, 3, 200, Math.PI / 4, 0.3) // Directional thrust
     ];
   
-    engineLights.forEach(light => {
-      light.position.y = -2;
+    // Position lights at engine base
+    engineLights.forEach((light, index) => {
+      light.position.y = -90 + index * 5; // Stagger lights
+      if (light.type === 'SpotLight') {
+        light.target.position.set(0, -200, 0);
+        light.angle = Math.PI / 4;
+      }
       rocket.add(light);
+    });
+    
+    // Add particle systems to rocket
+    Object.values(burnerEffects).forEach(effect => {
+      if (effect.mesh) {
+        effect.mesh.position.y = -85; // Position at engine base
+        rocket.add(effect.mesh);
+      }
     });
   
     return {
-      particles: [mainEngineParticles, smokeParticles],
+      effects: burnerEffects,
       lights: engineLights,
-      update: (intensity, isWarmup = false) => {
-        const positions = mainEngineParticles.geometry.attributes.position.array;
-        const smokePositions = smokeParticles.geometry.attributes.position.array;
+      update: (intensity) => {
         const time = Date.now() * 0.001;
+        
+        // Update each flame layer
+        this.updateFlameEffect(burnerEffects.innerFlame, intensity, time, 0.8, 15);
+        this.updateFlameEffect(burnerEffects.middleFlame, intensity, time, 1.2, 25);
+        this.updateFlameEffect(burnerEffects.outerFlame, intensity, time, 1.6, 35);
+        this.updateSmokeEffect(burnerEffects.smokeTrail, intensity, time);
+        this.updateShockWaveEffect(burnerEffects.shockWave, intensity, time);
   
-        // Update main engine particles
-        for (let i = 0; i < positions.length; i += 3) {
-          if (Math.random() > 0.1) {
-            const angle = Math.random() * Math.PI * 2;
-            const radius = Math.random() * 0.5 * intensity;
-            const speed = isWarmup ? 2 : (Math.random() * 4 + 2) * intensity;
-  
-            positions[i] = Math.cos(angle) * radius;
-            positions[i + 1] = -2 - (Math.random() * 8 * speed);
-            positions[i + 2] = Math.sin(angle) * radius;
-          }
-        }
-  
-        // Update smoke particles
-        for (let i = 0; i < smokePositions.length; i += 3) {
-          if (Math.random() > 0.05) {
-            const angle = Math.random() * Math.PI * 2;
-            const radius = Math.random() * 2 * intensity;
-            const speed = (Math.random() * 2 + 1) * intensity;
-  
-            smokePositions[i] = Math.cos(angle) * radius;
-            smokePositions[i + 1] = -4 - (Math.random() * 12 * speed);
-            smokePositions[i + 2] = Math.sin(angle) * radius;
-          }
-        }
-  
-        mainEngineParticles.geometry.attributes.position.needsUpdate = true;
-        smokeParticles.geometry.attributes.position.needsUpdate = true;
-  
-        // Animate engine lights
+        // Animate engine lights with realistic flickering
         engineLights.forEach((light, index) => {
-          const pulseSpeed = 10 + index * 5;
-          light.intensity = (2 - index * 0.5) * intensity * 
-            (1 + Math.sin(time * pulseSpeed) * 0.2);
+          const flicker = 1 + Math.sin(time * (20 + index * 5)) * 0.1 + 
+                         Math.sin(time * (30 + index * 7)) * 0.05;
+          const baseIntensity = [5, 4, 3, 3][index] || 2;
+          light.intensity = baseIntensity * intensity * flicker;
+          
+          // Add color temperature variation
+          if (index === 0) {
+            const temp = 0.9 + Math.sin(time * 15) * 0.1;
+            light.color.setRGB(1, temp, temp * 0.8);
+          }
         });
       }
     };
+  }
+
+  createFlameParticleSystem(count, color1, color2) {
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+    const velocities = new Float32Array(count * 3);
+    
+    // Initialize particles
+    for (let i = 0; i < count; i++) {
+      const i3 = i * 3;
+      
+      // Position at engine base
+      positions[i3] = (Math.random() - 0.5) * 8;
+      positions[i3 + 1] = 0;
+      positions[i3 + 2] = (Math.random() - 0.5) * 8;
+      
+      // Color gradient
+      const colorFactor = Math.random();
+      const color = color1.clone ? color1.clone().lerp(color2, colorFactor) : new THREE.Color(color1).lerp(new THREE.Color(color2), colorFactor);
+      colors[i3] = color.r;
+      colors[i3 + 1] = color.g;
+      colors[i3 + 2] = color.b;
+      
+      // Size variation
+      sizes[i] = Math.random() * 4 + 2;
+      
+      // Initial velocity
+      velocities[i3] = (Math.random() - 0.5) * 2;
+      velocities[i3 + 1] = -(Math.random() * 30 + 10);
+      velocities[i3 + 2] = (Math.random() - 0.5) * 2;
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+    
+    const material = new THREE.PointsMaterial({
+      size: 8,
+      sizeAttenuation: true,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      vertexColors: true,
+      opacity: 0.8
+    });
+    
+    const mesh = new THREE.Points(geometry, material);
+    
+    return {
+      mesh,
+      positions,
+      colors,
+      sizes,
+      velocities,
+      count
+    };
+  }
+
+  createSmokeParticleSystem(count, color) {
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+    
+    for (let i = 0; i < count; i++) {
+      const i3 = i * 3;
+      positions[i3] = (Math.random() - 0.5) * 15;
+      positions[i3 + 1] = -Math.random() * 20;
+      positions[i3 + 2] = (Math.random() - 0.5) * 15;
+      
+      const smokeColor = new THREE.Color(color);
+      colors[i3] = smokeColor.r;
+      colors[i3 + 1] = smokeColor.g;
+      colors[i3 + 2] = smokeColor.b;
+      
+      sizes[i] = Math.random() * 6 + 4;
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+    
+    const material = new THREE.PointsMaterial({
+      size: 12,
+      sizeAttenuation: true,
+      blending: THREE.NormalBlending,
+      transparent: true,
+      vertexColors: true,
+      opacity: 0.4
+    });
+    
+    return {
+      mesh: new THREE.Points(geometry, material),
+      positions,
+      count
+    };
+  }
+
+  createShockWaveEffect() {
+    const geometry = new THREE.RingGeometry(0, 30, 32);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xff4400,
+      transparent: true,
+      opacity: 0.3,
+      side: THREE.DoubleSide
+    });
+    
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.rotation.x = -Math.PI / 2; // Horizontal
+    mesh.position.y = -90;
+    
+    return { mesh };
+  }
+
+  updateFlameEffect(flame, intensity, time, spread, speed) {
+    const positions = flame.positions;
+    
+    for (let i = 0; i < flame.count; i++) {
+      const i3 = i * 3;
+      
+      // Create expanding cone shape
+      const angle = Math.random() * Math.PI * 2;
+      const radius = Math.random() * spread * intensity;
+      const velocity = speed * intensity;
+      
+      positions[i3] = Math.cos(angle) * radius;
+      positions[i3 + 1] = -(Math.random() * velocity + velocity * 0.5);
+      positions[i3 + 2] = Math.sin(angle) * radius;
+    }
+    
+    flame.mesh.geometry.attributes.position.needsUpdate = true;
+  }
+
+  updateSmokeEffect(smoke, intensity, time) {
+    const positions = smoke.positions;
+    
+    for (let i = 0; i < smoke.count; i++) {
+      const i3 = i * 3;
+      
+      positions[i3] += (Math.random() - 0.5) * 0.5;
+      positions[i3 + 1] -= (2 + Math.random() * 3) * intensity;
+      positions[i3 + 2] += (Math.random() - 0.5) * 0.5;
+      
+      // Reset particles that have moved too far
+      if (positions[i3 + 1] < -100) {
+        positions[i3] = (Math.random() - 0.5) * 15;
+        positions[i3 + 1] = 0;
+        positions[i3 + 2] = (Math.random() - 0.5) * 15;
+      }
+    }
+    
+    smoke.mesh.geometry.attributes.position.needsUpdate = true;
+  }
+
+  updateShockWaveEffect(shockWave, intensity, time) {
+    if (shockWave.mesh) {
+      // Pulsing ring effect
+      const pulse = 1 + Math.sin(time * 20) * 0.2;
+      shockWave.mesh.scale.setScalar(pulse * intensity);
+      shockWave.mesh.material.opacity = 0.3 * intensity * (1 - pulse * 0.3);
+    }
   }
   
   createParticleSystem(count, color) {
@@ -2801,22 +3103,28 @@ class MarsSceneManager {
         const easeProgress = this.easeInOutCubic(progress);
         event.rocket.position.lerp(event.endPos, easeProgress);
         
-        // Add slight wobble and rotation
+        // Add slight wobble and rotation for realistic flight
         event.rocket.rotation.z = Math.sin(progress * Math.PI * 4) * 0.05;
+        event.rocket.rotation.x = Math.cos(progress * Math.PI * 6) * 0.02;
         
-        // Update engine effects if they exist
+        // Update enhanced engine burner effects
         if (event.engineParticles) {
-          event.engineParticles.update(progress);
+          // Full throttle during launch
+          const thrustIntensity = Math.min(1.0, progress * 2); // Ramp up quickly
+          event.engineParticles.update(thrustIntensity);
         }
       } else {
         // Rocket landing animation - use easing for controlled descent
         const easeProgress = this.easeInOutCubic(1 - progress);
         event.rocket.position.lerp(event.endPos, easeProgress);
         event.rocket.rotation.z = Math.sin(progress * Math.PI * 4) * 0.05;
+        event.rocket.rotation.x = Math.cos(progress * Math.PI * 8) * 0.03;
         
-        // Update engine effects for landing burn
+        // Update engine effects for landing burn with throttle control
         if (event.engineParticles) {
-          event.engineParticles.update(1 - progress);
+          // Variable throttle for landing - strongest at end
+          const landingBurn = Math.max(0.3, (1 - progress) * 1.2);
+          event.engineParticles.update(landingBurn);
         }
       }
     }
@@ -6892,52 +7200,125 @@ function createEnhancedHUD() {
     existingHUD.remove();
   }
   
+  // Detect mobile device
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  
   const hud = document.createElement('div');
   hud.id = 'hud';
-  hud.style.cssText = `
-    position: fixed;
-    top: 10px;
-    left: 10px;
-    color: white;
-    font-family: monospace;
-    font-size: 14px;
-    z-index: 100;
-    background: rgba(0, 0, 0, 0.7);
-    padding: 15px;
-    border-radius: 8px;
-    min-width: 250px;
-    max-height: 80vh;
-    overflow-y: auto;
-    border: 2px solid #00ff88;
-  `;
   
-  hud.innerHTML = `
-    <div style="color: #00ff88; font-weight: bold; margin-bottom: 10px;">🚀 MARS ROVER HUD</div>
-    <div id="hud-status">
-      <div>Status: <span id="rover-status">Operational</span></div>
-      <div>Distance: <span id="distance-traveled">0</span> m</div>
-      <div>Speed: <span id="current-speed">0</span> m/s</div>
-      <div>Camera: <span id="camera-mode">Third Person</span></div>
-    </div>
-    <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
-      <div style="color: #88ff88; font-weight: bold;">🎯 MISSIONS</div>
-      <div>Level: <span id="player-level">1</span></div>
-      <div>XP: <span id="player-xp">0</span></div>
-      <div>Active: <span id="active-missions">0</span></div>
-      <div>Completed: <span id="completed-missions">0</span></div>
-    </div>
-    <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
-      <div style="color: #ffaa44; font-weight: bold;">🔬 SAMPLES</div>
-      <div>Collected: <span id="samples-collected">0</span></div>
-      <div>Analyzed: <span id="samples-analyzed">0</span></div>
-    </div>
-    <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
-      <div style="color: #aa44ff; font-weight: bold;">🏆 ACHIEVEMENTS</div>
-      <div>Unlocked: <span id="achievements-count">0</span></div>
-    </div>
-  `;
+  // Mobile-specific styles
+  if (isMobile) {
+    hud.style.cssText = `
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      color: white;
+      font-family: monospace;
+      font-size: 10px;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 8px;
+      border-radius: 6px;
+      min-width: 140px;
+      max-width: 160px;
+      max-height: 40vh;
+      overflow-y: auto;
+      border: 1px solid #00ff88;
+      transition: all 0.3s ease;
+    `;
+    
+    hud.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <div style="color: #00ff88; font-weight: bold; font-size: 9px;">🚀 HUD</div>
+        <button id="hud-toggle" style="background: none; border: none; color: #00ff88; cursor: pointer; font-size: 10px; padding: 0;">−</button>
+      </div>
+      <div id="hud-content">
+        <div id="hud-status">
+          <div>Dist: <span id="distance-traveled">0</span>m</div>
+          <div>Speed: <span id="current-speed">0</span>m/s</div>
+          <div>Cam: <span id="camera-mode">3P</span></div>
+        </div>
+        <div style="margin-top: 6px; border-top: 1px solid #333; padding-top: 6px;">
+          <div style="color: #88ff88; font-weight: bold; font-size: 9px;">🎯 MISSIONS</div>
+          <div>Lvl: <span id="player-level">1</span> | XP: <span id="player-xp">0</span></div>
+          <div>Act: <span id="active-missions">0</span> | Done: <span id="completed-missions">0</span></div>
+        </div>
+        <div style="margin-top: 6px; border-top: 1px solid #333; padding-top: 6px;">
+          <div style="color: #ffaa44; font-weight: bold; font-size: 9px;">🔬 SAMPLES</div>
+          <div>Coll: <span id="samples-collected">0</span> | Ana: <span id="samples-analyzed">0</span></div>
+        </div>
+        <div style="margin-top: 6px; border-top: 1px solid #333; padding-top: 6px;">
+          <div style="color: #aa44ff; font-weight: bold; font-size: 9px;">🏆 ACH</div>
+          <div>Unlocked: <span id="achievements-count">0</span></div>
+        </div>
+      </div>
+    `;
+  } else {
+    // Desktop styles (unchanged)
+    hud.style.cssText = `
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-family: monospace;
+      font-size: 14px;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 15px;
+      border-radius: 8px;
+      min-width: 250px;
+      max-height: 80vh;
+      overflow-y: auto;
+      border: 2px solid #00ff88;
+    `;
+    
+    hud.innerHTML = `
+      <div style="color: #00ff88; font-weight: bold; margin-bottom: 10px;">🚀 MARS ROVER HUD</div>
+      <div id="hud-status">
+        <div>Status: <span id="rover-status">Operational</span></div>
+        <div>Distance: <span id="distance-traveled">0</span> m</div>
+        <div>Speed: <span id="current-speed">0</span> m/s</div>
+        <div>Camera: <span id="camera-mode">Third Person</span></div>
+      </div>
+      <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
+        <div style="color: #88ff88; font-weight: bold;">🎯 MISSIONS</div>
+        <div>Level: <span id="player-level">1</span></div>
+        <div>XP: <span id="player-xp">0</span></div>
+        <div>Active: <span id="active-missions">0</span></div>
+        <div>Completed: <span id="completed-missions">0</span></div>
+      </div>
+      <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
+        <div style="color: #ffaa44; font-weight: bold;">🔬 SAMPLES</div>
+        <div>Collected: <span id="samples-collected">0</span></div>
+        <div>Analyzed: <span id="samples-analyzed">0</span></div>
+      </div>
+      <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
+        <div style="color: #aa44ff; font-weight: bold;">🏆 ACHIEVEMENTS</div>
+        <div>Unlocked: <span id="achievements-count">0</span></div>
+      </div>
+    `;
+  }
   
   document.body.appendChild(hud);
+  
+  // Add toggle functionality for mobile
+  if (isMobile) {
+    const toggleBtn = document.getElementById('hud-toggle');
+    const hudContent = document.getElementById('hud-content');
+    let isCollapsed = false;
+    
+    toggleBtn.addEventListener('click', () => {
+      if (isCollapsed) {
+        hudContent.style.display = 'block';
+        toggleBtn.textContent = '−';
+        isCollapsed = false;
+      } else {
+        hudContent.style.display = 'none';
+        toggleBtn.textContent = '+';
+        isCollapsed = true;
+      }
+    });
+  }
 }
 
 // Enhanced controls information
@@ -6947,40 +7328,102 @@ function addEnhancedControlsInfo() {
     existingControls.remove();
   }
   
+  // Detect mobile device
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  
   const controls = document.createElement('div');
   controls.id = 'controls';
-  controls.style.cssText = `
-    position: fixed;
-    bottom: 10px;
-    right: 10px;
-    color: white;
-    font-family: monospace;
-    font-size: 12px;
-    z-index: 100;
-    background: rgba(0, 0, 0, 0.7);
-    padding: 15px;
-    border-radius: 8px;
-    border: 2px solid #00ff88;
-    max-width: 300px;
-  `;
   
-  controls.innerHTML = `
-    <div style="color: #00ff88; font-weight: bold; margin-bottom: 10px;">🎮 ENHANCED CONTROLS</div>
-    <div><strong>Movement:</strong> WASD</div>
-    <div><strong>Camera:</strong> C to cycle modes</div>
-    <div><strong>Day/Night:</strong> L to toggle</div>
-    <div><strong>Samples:</strong> E to collect</div>
-    <div><strong>Analysis:</strong> Q to analyze</div>
-    <div><strong>Rockets:</strong> R to launch SpaceX rockets</div>
-    <div style="margin-top: 10px; font-size: 10px; color: #aaa;">
-      Look for glowing objects to collect samples!<br>
-      Watch for meteor showers at night!<br>
-      Press R to trigger manual rocket launches!<br>
-      Explore to find Mars colonies!
-    </div>
-  `;
+  if (isMobile) {
+    // Mobile: Make controls collapsible and position away from navigation
+    controls.style.cssText = `
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      color: white;
+      font-family: monospace;
+      font-size: 9px;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 8px;
+      border-radius: 6px;
+      border: 1px solid #00ff88;
+      max-width: 180px;
+      transition: all 0.3s ease;
+    `;
+    
+    controls.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+        <div style="color: #00ff88; font-weight: bold; font-size: 8px;">🎮 CONTROLS</div>
+        <button id="controls-toggle" style="background: none; border: none; color: #00ff88; cursor: pointer; font-size: 8px; padding: 0;">−</button>
+      </div>
+      <div id="controls-content">
+        <div style="font-size: 8px; color: #aaa; margin-bottom: 4px;">Use touch controls below!</div>
+        <div style="font-size: 8px;"><strong>Joystick:</strong> Move</div>
+        <div style="font-size: 8px;"><strong>💎:</strong> Collect samples</div>
+        <div style="font-size: 8px;"><strong>🔬:</strong> Analyze samples</div>
+        <div style="font-size: 8px;"><strong>🚀:</strong> Launch rockets</div>
+        <div style="font-size: 8px;"><strong>📷:</strong> Switch camera</div>
+        <div style="margin-top: 6px; font-size: 7px; color: #aaa;">
+          Look for glowing objects!<br>
+          Swipe screen to look around!
+        </div>
+      </div>
+    `;
+  } else {
+    // Desktop: Keep original layout
+    controls.style.cssText = `
+      position: fixed;
+      bottom: 10px;
+      right: 10px;
+      color: white;
+      font-family: monospace;
+      font-size: 12px;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 15px;
+      border-radius: 8px;
+      border: 2px solid #00ff88;
+      max-width: 300px;
+    `;
+    
+    controls.innerHTML = `
+      <div style="color: #00ff88; font-weight: bold; margin-bottom: 10px;">🎮 ENHANCED CONTROLS</div>
+      <div><strong>Movement:</strong> WASD</div>
+      <div><strong>Camera:</strong> C to cycle modes</div>
+      <div><strong>Day/Night:</strong> L to toggle</div>
+      <div><strong>Samples:</strong> E to collect</div>
+      <div><strong>Analysis:</strong> Q to analyze</div>
+      <div><strong>Rockets:</strong> R to launch SpaceX rockets</div>
+      <div style="margin-top: 10px; font-size: 10px; color: #aaa;">
+        Look for glowing objects to collect samples!<br>
+        Watch for meteor showers at night!<br>
+        Press R to trigger manual rocket launches!<br>
+        Explore to find Mars colonies!
+      </div>
+    `;
+  }
   
   document.body.appendChild(controls);
+  
+  // Add toggle functionality for mobile
+  if (isMobile) {
+    const toggleBtn = document.getElementById('controls-toggle');
+    const controlsContent = document.getElementById('controls-content');
+    let isCollapsed = false;
+    
+    toggleBtn.addEventListener('click', () => {
+      if (isCollapsed) {
+        controlsContent.style.display = 'block';
+        toggleBtn.textContent = '−';
+        isCollapsed = false;
+      } else {
+        controlsContent.style.display = 'none';
+        toggleBtn.textContent = '+';
+        isCollapsed = true;
+      }
+    });
+  }
 }
 
 // Enhanced update function for all systems
@@ -7049,7 +7492,22 @@ function updateEnhancedHUD() {
   // Update other status
   document.getElementById('distance-traveled').textContent = Math.round(distanceTraveled);
   document.getElementById('current-speed').textContent = currentSpeed.toFixed(1);
-  document.getElementById('camera-mode').textContent = cameraMode;
+  
+  // Update camera mode with compact text for mobile
+  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const cameraElement = document.getElementById('camera-mode');
+  if (cameraElement) {
+    if (isMobile) {
+      // Compact camera mode names for mobile
+      const compactMode = cameraMode === 'Third Person' ? '3P' : 
+                         cameraMode === 'First Person' ? '1P' : 
+                         cameraMode === 'Orbit' ? 'Orbit' : 
+                         cameraMode === 'Top Down' ? 'Top' : cameraMode;
+      cameraElement.textContent = compactMode;
+    } else {
+      cameraElement.textContent = cameraMode;
+    }
+  }
 }
 
 // Show sample analysis dialog

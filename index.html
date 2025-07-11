@@ -375,6 +375,46 @@
         min-width: auto;
       }
       
+      /* Mobile HUD positioning to avoid navigation interference */
+      #hud {
+        top: 10px !important;
+        right: 10px !important;
+        left: auto !important;
+        max-width: 160px !important;
+        font-size: 10px !important;
+        padding: 8px !important;
+        z-index: 150 !important;
+      }
+      
+      /* Mobile controls positioning */
+      #controls {
+        bottom: 10px !important;
+        left: 10px !important;
+        right: auto !important;
+        max-width: 180px !important;
+        font-size: 9px !important;
+        padding: 8px !important;
+        z-index: 150 !important;
+      }
+      
+      /* Ensure mobile navigation doesn't interfere with HUD */
+      #virtual-joystick {
+        bottom: 30px !important;
+        left: 30px !important;
+        z-index: 120 !important;
+      }
+      
+      #mobile-buttons {
+        bottom: 30px !important;
+        right: 20px !important;
+        z-index: 120 !important;
+      }
+      
+      /* Add space between mobile controls and HUD panels */
+      #mobile-controls {
+        z-index: 120 !important;
+      }
+      
       .controls {
         bottom: 240px !important;
         font-size: 12px;
