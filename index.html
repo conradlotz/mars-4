@@ -815,12 +815,27 @@
           mobileTierInfo = `<br>Mobile Tier: ${tierEmoji} ${tierName} (Score: ${mobileScore})`;
         }
         
+        // Check for Samsung device for display optimization info
+        let deviceBrandInfo = '';
+        if (this.deviceSpecs.isMobile) {
+          const userAgent = navigator.userAgent.toLowerCase();
+          const isSamsung = /samsung|sm-|galaxy/i.test(userAgent);
+          const isPixel = /pixel/i.test(userAgent);
+          
+          if (isSamsung) {
+            deviceBrandInfo = '<br><span style="color: #1ba1e2;">📱 Samsung - Display optimizations applied</span>';
+          } else if (isPixel) {
+            deviceBrandInfo = '<br><span style="color: #34a853;">📱 Pixel - Standard rendering</span>';
+          }
+        }
+        
         deviceSpecs.innerHTML = `
           Device: ${this.deviceSpecs.isMobile ? 'Mobile' : 'Desktop'}<br>
           Performance: ${this.deviceSpecs.performanceLevel.toUpperCase()}<br>
           Memory: ${this.deviceSpecs.deviceMemory}GB<br>
           CPU Cores: ${this.deviceSpecs.hardwareConcurrency}
           ${mobileTierInfo}
+          ${deviceBrandInfo}
           ${this.deviceSpecs.isMobile ? '<br><span style="color: #ff6b35;">🎮 Touch controls enabled</span>' : ''}
         `;
         

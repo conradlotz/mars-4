@@ -2,12 +2,48 @@
 function getPerformanceSettings() {
   const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
   
+  // Samsung device detection and GPU identification
+  function detectDeviceInfo() {
+    const userAgent = navigator.userAgent.toLowerCase();
+    const isSamsung = /samsung|sm-|galaxy/i.test(userAgent);
+    const isPixel = /pixel/i.test(userAgent);
+    
+    // Get WebGL renderer info for GPU detection
+    let gpuRenderer = 'unknown';
+    let isMaliGPU = false;
+    let isAdrenoGPU = false;
+    
+    try {
+      const canvas = document.createElement('canvas');
+      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+      if (gl) {
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        if (debugInfo) {
+          gpuRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL).toLowerCase();
+          isMaliGPU = /mali/i.test(gpuRenderer);
+          isAdrenoGPU = /adreno/i.test(gpuRenderer);
+        }
+      }
+    } catch (e) {
+      console.warn('Could not detect GPU:', e);
+    }
+    
+    return {
+      isSamsung,
+      isPixel,
+      gpuRenderer,
+      isMaliGPU,
+      isAdrenoGPU
+    };
+  }
+  
   // Enhanced mobile device capability detection
   function getMobileDeviceCapabilities() {
     const deviceMemory = navigator.deviceMemory || 4;
     const hardwareConcurrency = navigator.hardwareConcurrency || 4;
     const screenSize = Math.max(window.screen.width, window.screen.height);
     const pixelRatio = window.devicePixelRatio || 1;
+    const deviceInfo = detectDeviceInfo();
     
     // Calculate mobile device tier
     let mobileScore = 0;
@@ -27,18 +63,42 @@ function getPerformanceSettings() {
     else if (pixelRatio >= 2) mobileScore += 5;
     
     // Classify mobile device tier
-    if (mobileScore >= 60) return 'high';
-    if (mobileScore >= 30) return 'medium';
-    return 'low';
+    let tier = 'low';
+    if (mobileScore >= 60) tier = 'high';
+    else if (mobileScore >= 30) tier = 'medium';
+    
+    return {
+      tier,
+      deviceInfo
+    };
   }
   
   // Mobile-specific settings with device tier adaptation
   if (isMobile) {
-    const mobileTier = getMobileDeviceCapabilities();
+    const { tier: mobileTier, deviceInfo } = getMobileDeviceCapabilities();
+    
+    // Samsung-specific rendering adjustments
+    const samsungAdjustments = deviceInfo.isSamsung ? {
+      // Samsung devices need brighter lighting and different gamma
+      gammaCorrection: 1.8,  // Lower gamma for brighter appearance
+      ambientLightBoost: 2.0,  // Increase ambient lighting
+      materialBrightness: 1.3,  // Boost material brightness
+      fogDensityReduction: 0.7,  // Reduce fog density
+      samsungOptimized: true
+    } : {
+      gammaCorrection: 2.2,
+      ambientLightBoost: 1.0,
+      materialBrightness: 1.0,
+      fogDensityReduction: 1.0,
+      samsungOptimized: false
+    };
+    
+    // Base settings for device tier
+    let baseSettings = {};
     
     // High-end mobile devices (flagship phones/tablets)
     if (mobileTier === 'high') {
-      return {
+      baseSettings = {
         textureSize: 1536,
         particleCount: 200,
         renderDistance: 3500,
@@ -59,10 +119,9 @@ function getPerformanceSettings() {
         maxLights: 6
       };
     }
-    
     // Mid-range mobile devices
-    if (mobileTier === 'medium') {
-      return {
+    else if (mobileTier === 'medium') {
+      baseSettings = {
         textureSize: 1024,
         particleCount: 125,
         renderDistance: 3000,
@@ -83,27 +142,35 @@ function getPerformanceSettings() {
         maxLights: 4
       };
     }
-    
     // Low-end mobile devices (budget phones)
+    else {
+      baseSettings = {
+        textureSize: 768,
+        particleCount: 75,
+        renderDistance: 2500,
+        shadowQuality: 'none',
+        antialiasing: false,
+        skyboxResolution: 1024,
+        detailLevel: 'low',
+        fogDistance: 1800,
+        graphicsQuality: 'low',
+        isMobile: true,
+        mobileTier: 'low',
+        disableRockets: true,
+        disableMeteors: true,
+        disableAtmosphericEffects: true,
+        terrainSegments: 80,
+        frameThrottle: 4,
+        enableCulling: true,
+        maxLights: 3
+      };
+    }
+    
+    // Apply Samsung-specific adjustments
     return {
-      textureSize: 768,
-      particleCount: 75,
-      renderDistance: 2500,
-      shadowQuality: 'none',
-      antialiasing: false,
-      skyboxResolution: 1024,
-      detailLevel: 'low',
-      fogDistance: 1800,
-      graphicsQuality: 'low',
-      isMobile: true,
-      mobileTier: 'low',
-      disableRockets: true,
-      disableMeteors: true,
-      disableAtmosphericEffects: true,
-      terrainSegments: 80,
-      frameThrottle: 4,
-      enableCulling: true,
-      maxLights: 3
+      ...baseSettings,
+      ...samsungAdjustments,
+      deviceInfo
     };
   }
   
@@ -163,9 +230,27 @@ renderer.setPixelRatio(pixelRatio);
 if (perfSettings.isMobile) {
   renderer.shadowMap.enabled = false;
   
-  // Better color encoding for mobile
-  renderer.outputEncoding = THREE.sRGBEncoding;
-  renderer.gammaFactor = 2.2;
+      // Samsung-specific rendering adjustments
+    if (perfSettings.samsungOptimized) {
+      // Samsung devices need different color encoding and gamma
+      renderer.outputEncoding = THREE.LinearEncoding;  // Better for Samsung displays
+      renderer.gammaFactor = perfSettings.gammaCorrection;
+      renderer.toneMapping = THREE.ReinhardToneMapping;
+      renderer.toneMappingExposure = 1.5;  // Brighter exposure for Samsung
+      
+      console.log('Samsung device detected - applying display optimizations:');
+      console.log('- GPU:', perfSettings.deviceInfo.gpuRenderer);
+      console.log('- Gamma correction:', perfSettings.gammaCorrection);
+      console.log('- Ambient light boost:', perfSettings.ambientLightBoost);
+      console.log('- Material brightness:', perfSettings.materialBrightness);
+      console.log('- Fog density reduction:', perfSettings.fogDensityReduction);
+    } else {
+    // Standard mobile encoding
+    renderer.outputEncoding = THREE.sRGBEncoding;
+    renderer.gammaFactor = perfSettings.gammaCorrection;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+  }
   
   // Enable some optimizations for mid-range and high-end mobile
   if (perfSettings.mobileTier === 'high') {
@@ -176,8 +261,10 @@ if (perfSettings.isMobile) {
 }
 document.body.appendChild(renderer.domElement);
 
-// Adaptive fog based on performance settings
-scene.fog = new THREE.Fog(0xb77c5a, perfSettings.fogDistance * 0.2, perfSettings.renderDistance);
+// Adaptive fog based on performance settings with Samsung adjustments
+const fogColor = perfSettings.samsungOptimized ? 0xd4a574 : 0xb77c5a;  // Lighter fog for Samsung
+const fogDensity = perfSettings.samsungOptimized ? perfSettings.fogDensityReduction : 1.0;
+scene.fog = new THREE.Fog(fogColor, perfSettings.fogDistance * 0.2 * fogDensity, perfSettings.renderDistance);
 
 // Endless terrain system with reduced complexity
 const terrainSystem = {
@@ -599,13 +686,17 @@ const createDustParticles = () => {
 
 const dustParticles = createDustParticles();
 
-// Enhanced Lighting for Mars - update to match the reference image
-// Ambient light (stronger reddish to simulate Mars atmosphere)
-const ambientLight = new THREE.AmbientLight(0xff8866, 0.6);
+// Enhanced Lighting for Mars - update to match the reference image with Samsung adjustments
+// Ambient light (stronger reddish to simulate Mars atmosphere) with Samsung brightness boost
+const ambientIntensity = perfSettings.samsungOptimized ? 0.6 * perfSettings.ambientLightBoost : 0.6;
+const ambientColor = perfSettings.samsungOptimized ? 0xffaa88 : 0xff8866;  // Lighter for Samsung
+const ambientLight = new THREE.AmbientLight(ambientColor, ambientIntensity);
 scene.add(ambientLight);
 
-// Directional light (sun) - make it more orange/red like in the image
-const sunLight = new THREE.DirectionalLight(0xff7744, 1.0);
+// Directional light (sun) - make it more orange/red like in the image with Samsung adjustments
+const sunIntensity = perfSettings.samsungOptimized ? 1.0 * perfSettings.materialBrightness : 1.0;
+const sunColor = perfSettings.samsungOptimized ? 0xffaa66 : 0xff7744;  // Brighter for Samsung
+const sunLight = new THREE.DirectionalLight(sunColor, sunIntensity);
 sunLight.position.set(-50, 30, 50); // Position the sun lower on the horizon
 sunLight.castShadow = true;
 sunLight.shadow.mapSize.width = 2048;
@@ -618,8 +709,11 @@ sunLight.shadow.camera.top = 100;
 sunLight.shadow.camera.bottom = -100;
 scene.add(sunLight);
 
-// Add a subtle hemisphere light to simulate light bouncing off the surface
-const hemisphereLight = new THREE.HemisphereLight(0xff6633, 0xaa4400, 0.4);
+// Add a subtle hemisphere light to simulate light bouncing off the surface with Samsung adjustments
+const hemisphereIntensity = perfSettings.samsungOptimized ? 0.4 * perfSettings.ambientLightBoost : 0.4;
+const hemisphereSkyColor = perfSettings.samsungOptimized ? 0xff8855 : 0xff6633;
+const hemisphereGroundColor = perfSettings.samsungOptimized ? 0xcc6622 : 0xaa4400;
+const hemisphereLight = new THREE.HemisphereLight(hemisphereSkyColor, hemisphereGroundColor, hemisphereIntensity);
 scene.add(hemisphereLight);
 
 // Orbit Controls - Make globally accessible for mobile controls
@@ -7550,6 +7644,11 @@ function createEnhancedHUD() {
     const tierEmoji = mobileTier === 'high' ? '🔥' : mobileTier === 'medium' ? '⚡' : '📱';
     const tierName = mobileTier === 'high' ? 'High-End' : mobileTier === 'medium' ? 'Mid-Range' : 'Budget';
     
+    // Samsung device detection for HUD
+    const isSamsung = perfSettings.deviceInfo && perfSettings.deviceInfo.isSamsung;
+    const deviceBrand = isSamsung ? 'Samsung' : '';
+    const optimizationIndicator = isSamsung ? '🔧' : '';
+    
     hud.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
         <div style="color: #00ff88; font-weight: bold; font-size: 9px;">🚀 HUD</div>
@@ -7557,7 +7656,7 @@ function createEnhancedHUD() {
       </div>
       <div id="hud-content">
         <div style="color: ${tierColor}; font-size: 8px; margin-bottom: 6px; text-align: center; border-bottom: 1px solid ${tierColor}; padding-bottom: 3px;">
-          ${tierEmoji} ${tierName} Mobile
+          ${tierEmoji} ${deviceBrand} ${tierName} Mobile ${optimizationIndicator}
         </div>
         <div id="hud-status">
           <div>Dist: <span id="distance-traveled">0</span>m</div>
@@ -7878,7 +7977,12 @@ setTimeout(() => {
         const tierMessage = mobileTier === 'high' ? 'High-End Mobile' : 
                            mobileTier === 'medium' ? 'Mid-Range Mobile' : 'Mobile Optimized';
         
-        window.showNotification(`${tierEmoji} ${tierMessage}! Enhanced visuals enabled. Use touch controls to drive!`, 5000);
+        // Add Samsung-specific messaging
+        const deviceMessage = perfSettings.samsungOptimized ? 
+          `${tierEmoji} Samsung ${tierMessage}! Display optimizations applied for better visibility!` :
+          `${tierEmoji} ${tierMessage}! Enhanced visuals enabled. Use touch controls to drive!`;
+        
+        window.showNotification(deviceMessage, 5000);
       } else {
         window.showNotification('🚀 Mars Rover Ready! WASD to move, C for camera, R for rockets!', 5000);
       }
