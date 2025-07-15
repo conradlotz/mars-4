@@ -77,13 +77,13 @@ function getPerformanceSettings() {
   if (isMobile) {
     const { tier: mobileTier, deviceInfo } = getMobileDeviceCapabilities();
     
-    // Samsung-specific rendering adjustments
+    // Samsung-specific rendering adjustments - reduced to prevent overexposure
     const samsungAdjustments = deviceInfo.isSamsung ? {
-      // Samsung devices need brighter lighting and different gamma
-      gammaCorrection: 1.8,  // Lower gamma for brighter appearance
-      ambientLightBoost: 2.0,  // Increase ambient lighting
-      materialBrightness: 1.3,  // Boost material brightness
-      fogDensityReduction: 0.7,  // Reduce fog density
+      // Samsung devices need slightly brighter lighting and different gamma
+      gammaCorrection: 2.0,  // Slightly lower gamma for brighter appearance
+      ambientLightBoost: 1.2,  // Moderate increase in ambient lighting
+      materialBrightness: 1.1,  // Slight boost in material brightness
+      fogDensityReduction: 0.85,  // Slight reduction in fog density
       samsungOptimized: true
     } : {
       gammaCorrection: 2.2,
@@ -226,30 +226,35 @@ const pixelRatio = perfSettings.isMobile ?
                    Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1);
 renderer.setPixelRatio(pixelRatio);
 
-// Mobile-specific renderer optimizations
+  // Mobile-specific renderer optimizations
 if (perfSettings.isMobile) {
   renderer.shadowMap.enabled = false;
   
-      // Samsung-specific rendering adjustments
-    if (perfSettings.samsungOptimized) {
-      // Samsung devices need different color encoding and gamma
-      renderer.outputEncoding = THREE.LinearEncoding;  // Better for Samsung displays
-      renderer.gammaFactor = perfSettings.gammaCorrection;
-      renderer.toneMapping = THREE.ReinhardToneMapping;
-      renderer.toneMappingExposure = 1.5;  // Brighter exposure for Samsung
-      
-      console.log('Samsung device detected - applying display optimizations:');
-      console.log('- GPU:', perfSettings.deviceInfo.gpuRenderer);
-      console.log('- Gamma correction:', perfSettings.gammaCorrection);
-      console.log('- Ambient light boost:', perfSettings.ambientLightBoost);
-      console.log('- Material brightness:', perfSettings.materialBrightness);
-      console.log('- Fog density reduction:', perfSettings.fogDensityReduction);
-    } else {
+  // Samsung-specific rendering adjustments - reduced exposure to prevent overexposure
+  if (perfSettings.samsungOptimized) {
+    // Samsung devices need different color encoding and gamma
+    renderer.outputEncoding = THREE.LinearEncoding;  // Better for Samsung displays
+    renderer.gammaFactor = perfSettings.gammaCorrection;
+    renderer.toneMapping = THREE.ReinhardToneMapping;
+    renderer.toneMappingExposure = 1.1;  // Slightly brighter exposure for Samsung
+    
+    console.log('Samsung device detected - applying display optimizations:');
+    console.log('- GPU:', perfSettings.deviceInfo.gpuRenderer);
+    console.log('- Gamma correction:', perfSettings.gammaCorrection);
+    console.log('- Ambient light boost:', perfSettings.ambientLightBoost);
+    console.log('- Material brightness:', perfSettings.materialBrightness);
+    console.log('- Fog density reduction:', perfSettings.fogDensityReduction);
+  } else {
     // Standard mobile encoding
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.gammaFactor = perfSettings.gammaCorrection;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
+    
+    console.log('Non-Samsung mobile device detected - using standard settings:');
+    console.log('- GPU:', perfSettings.deviceInfo.gpuRenderer);
+    console.log('- Mobile tier:', perfSettings.mobileTier);
+    console.log('- Gamma correction:', perfSettings.gammaCorrection);
   }
   
   // Enable some optimizations for mid-range and high-end mobile
@@ -689,13 +694,13 @@ const dustParticles = createDustParticles();
 // Enhanced Lighting for Mars - update to match the reference image with Samsung adjustments
 // Ambient light (stronger reddish to simulate Mars atmosphere) with Samsung brightness boost
 const ambientIntensity = perfSettings.samsungOptimized ? 0.6 * perfSettings.ambientLightBoost : 0.6;
-const ambientColor = perfSettings.samsungOptimized ? 0xffaa88 : 0xff8866;  // Lighter for Samsung
+const ambientColor = perfSettings.samsungOptimized ? 0xff9977 : 0xff8866;  // Slightly warmer for Samsung
 const ambientLight = new THREE.AmbientLight(ambientColor, ambientIntensity);
 scene.add(ambientLight);
 
 // Directional light (sun) - make it more orange/red like in the image with Samsung adjustments
 const sunIntensity = perfSettings.samsungOptimized ? 1.0 * perfSettings.materialBrightness : 1.0;
-const sunColor = perfSettings.samsungOptimized ? 0xffaa66 : 0xff7744;  // Brighter for Samsung
+const sunColor = perfSettings.samsungOptimized ? 0xff9955 : 0xff7744;  // Slightly warmer for Samsung
 const sunLight = new THREE.DirectionalLight(sunColor, sunIntensity);
 sunLight.position.set(-50, 30, 50); // Position the sun lower on the horizon
 sunLight.castShadow = true;
@@ -711,8 +716,8 @@ scene.add(sunLight);
 
 // Add a subtle hemisphere light to simulate light bouncing off the surface with Samsung adjustments
 const hemisphereIntensity = perfSettings.samsungOptimized ? 0.4 * perfSettings.ambientLightBoost : 0.4;
-const hemisphereSkyColor = perfSettings.samsungOptimized ? 0xff8855 : 0xff6633;
-const hemisphereGroundColor = perfSettings.samsungOptimized ? 0xcc6622 : 0xaa4400;
+const hemisphereSkyColor = perfSettings.samsungOptimized ? 0xff7744 : 0xff6633;
+const hemisphereGroundColor = perfSettings.samsungOptimized ? 0xbb5511 : 0xaa4400;
 const hemisphereLight = new THREE.HemisphereLight(hemisphereSkyColor, hemisphereGroundColor, hemisphereIntensity);
 scene.add(hemisphereLight);
 
