@@ -15,6 +15,703 @@ function isMobileDevice() {
   return uaCheck || touchCheck || (orientationCheck && smallScreenCheck);
 }
 
+// Advanced Game Systems
+function initializeGameSystems(rover, wheels, scene) {
+  const perfSettings = getPerformanceSettings();
+  const gameSystem = {
+    repairKits: [],
+    fuelCells: [],
+    collectibles: [],
+    damageEffects: [],
+    notifications: []
+  };
+  
+  // Initialize Rover Health System
+  if (perfSettings.enableDamageSystem) {
+    rover.health = 100;
+    rover.maxHealth = 100;
+    rover.lastDamageTime = 0;
+    
+    // Add damage method
+    rover.takeDamage = function(amount) {
+      this.health = Math.max(0, this.health - amount);
+      this.lastDamageTime = Date.now();
+      
+      // Visual feedback
+      if (this.health < 30) {
+        showNotification("⚠️ Structural damage critical!", 2000);
+      }
+      
+      // Spark effect (simplified)
+      createDamageEffect(this.position);
+      
+      console.log(`Rover took ${amount} damage. Health: ${this.health}/${this.maxHealth}`);
+    };
+    
+    // Add repair method
+    rover.repair = function(amount) {
+      this.health = Math.min(this.maxHealth, this.health + amount);
+      showNotification("🔧 Rover repaired! +" + amount + " HP", 2000);
+      console.log(`Rover repaired by ${amount}. Health: ${this.health}/${this.maxHealth}`);
+    };
+    
+    // Create repair kits scattered around the map
+    createRepairKits(gameSystem, scene);
+  }
+  
+  // Initialize Fuel System
+  if (perfSettings.enableFuelSystem) {
+    rover.fuel = 1000;
+    rover.maxFuel = 1000;
+    rover.fuelConsumption = 0.5; // fuel per second when moving
+    
+    // Add fuel methods
+    rover.consumeFuel = function(amount) {
+      this.fuel = Math.max(0, this.fuel - amount);
+      if (this.fuel < 100) {
+        showNotification("⛽ Fuel running low!", 1500);
+      }
+    };
+    
+    rover.addFuel = function(amount) {
+      this.fuel = Math.min(this.maxFuel, this.fuel + amount);
+      showNotification("⛽ Fuel cell collected! +" + amount + " fuel", 2000);
+    };
+    
+    // Create fuel cells
+    createFuelCells(gameSystem, scene);
+  }
+  
+  // Initialize Easter Eggs
+  if (perfSettings.enableEasterEggs) {
+    createEasterEggs(gameSystem, scene);
+  }
+  
+  return gameSystem;
+}
+
+// Create repair kits scattered around the map
+function createRepairKits(gameSystem, scene) {
+  const repairKitCount = 15;
+  
+  for (let i = 0; i < repairKitCount; i++) {
+    const kit = new THREE.Mesh(
+      new THREE.BoxGeometry(3, 3, 3),
+      new THREE.MeshStandardMaterial({ 
+        color: 0x00ff00, 
+        emissive: 0x004400, 
+        emissiveIntensity: 0.3 
+      })
+    );
+    
+    // Position randomly around the map
+    const angle = Math.random() * Math.PI * 2;
+    const distance = 50 + Math.random() * 300;
+    kit.position.x = Math.cos(angle) * distance;
+    kit.position.z = Math.sin(angle) * distance;
+    kit.position.y = 5; // Above ground
+    
+    // Add pulsing animation
+    kit.userData = { 
+      type: 'repairKit', 
+      originalY: kit.position.y,
+      animationTime: Math.random() * Math.PI * 2 
+    };
+    
+    scene.add(kit);
+    gameSystem.repairKits.push(kit);
+  }
+}
+
+// Create fuel cells
+function createFuelCells(gameSystem, scene) {
+  const fuelCellCount = 10;
+  
+  for (let i = 0; i < fuelCellCount; i++) {
+    const cell = new THREE.Mesh(
+      new THREE.CylinderGeometry(2, 2, 4, 8),
+      new THREE.MeshStandardMaterial({ 
+        color: 0x0066ff, 
+        emissive: 0x001144, 
+        emissiveIntensity: 0.4 
+      })
+    );
+    
+    // Position randomly around the map
+    const angle = Math.random() * Math.PI * 2;
+    const distance = 80 + Math.random() * 400;
+    cell.position.x = Math.cos(angle) * distance;
+    cell.position.z = Math.sin(angle) * distance;
+    cell.position.y = 6;
+    
+    // Add rotation animation
+    cell.userData = { 
+      type: 'fuelCell', 
+      rotationSpeed: 0.02 + Math.random() * 0.02 
+    };
+    
+    scene.add(cell);
+    gameSystem.fuelCells.push(cell);
+  }
+}
+
+// Create easter eggs
+function createEasterEggs(gameSystem, scene) {
+  // Create the monolith
+  const monolith = new THREE.Mesh(
+    new THREE.BoxGeometry(2, 12, 4),
+    new THREE.MeshStandardMaterial({ 
+      color: 0x111111, 
+      metalness: 0.9,
+      roughness: 0.1,
+      emissive: 0x000011,
+      emissiveIntensity: 0.1
+    })
+  );
+  
+  // Position in a random distant location
+  const angle = Math.random() * Math.PI * 2;
+  const distance = 800 + Math.random() * 500;
+  monolith.position.x = Math.cos(angle) * distance;
+  monolith.position.z = Math.sin(angle) * distance;
+  monolith.position.y = 6;
+  
+  monolith.userData = { 
+    type: 'monolith', 
+    discovered: false 
+  };
+  
+  scene.add(monolith);
+  gameSystem.collectibles.push(monolith);
+  
+  console.log(`Monolith hidden at coordinates: (${Math.round(monolith.position.x)}, ${Math.round(monolith.position.z)})`);
+}
+
+// Create damage effect
+function createDamageEffect(position) {
+  // Simple particle effect for damage
+  const particleCount = 10;
+  const particles = [];
+  
+  for (let i = 0; i < particleCount; i++) {
+    const particle = new THREE.Mesh(
+      new THREE.SphereGeometry(0.1, 4, 4),
+      new THREE.MeshBasicMaterial({ color: 0xff6600 })
+    );
+    
+    particle.position.copy(position);
+    particle.position.add(new THREE.Vector3(
+      (Math.random() - 0.5) * 2,
+      Math.random() * 2,
+      (Math.random() - 0.5) * 2
+    ));
+    
+    // Add to scene temporarily
+    scene.add(particle);
+    particles.push(particle);
+    
+    // Remove after 1 second
+    setTimeout(() => {
+      scene.remove(particle);
+    }, 1000);
+  }
+}
+
+// Update game systems in the animation loop
+function updateGameSystems(time, delta) {
+  const perfSettings = getPerformanceSettings();
+  
+  if (!gameSystem || !rover) return;
+  
+  // Update damage system
+  if (perfSettings.enableDamageSystem && rover.health !== undefined) {
+    updateDamageSystem(time, delta);
+  }
+  
+  // Update fuel system
+  if (perfSettings.enableFuelSystem && rover.fuel !== undefined) {
+    updateFuelSystem(time, delta);
+  }
+  
+  // Update collectibles
+  updateCollectibles(time, delta);
+  
+  // Update visual effects
+  updateVisualEffects(time, delta);
+}
+
+// Update damage system
+function updateDamageSystem(time, delta) {
+  // Apply limp effect when health is low
+  if (rover.health < 30 && wheels) {
+    wheels.forEach(wheel => {
+      if (wheel.rotation) {
+        wheel.rotation.x *= 0.98; // Limp effect
+      }
+    });
+  }
+  
+  // Random damage from rough terrain (very rare)
+  if (isMoving && Math.random() < 0.0001) { // 0.01% chance per frame when moving
+    rover.takeDamage(Math.random() * 5 + 1);
+  }
+}
+
+// Update fuel system
+function updateFuelSystem(time, delta) {
+  // Consume fuel while moving
+  if (isMoving && rover.fuel > 0) {
+    rover.consumeFuel(rover.fuelConsumption * delta / 16.67); // Normalize to 60fps
+  }
+  
+  // Prevent movement if no fuel
+  if (rover.fuel <= 0 && isMoving) {
+    showNotification("⛽ Out of fuel! Find fuel cells to continue.", 3000);
+    // Stop movement by resetting position
+    rover.position.copy(previousPosition);
+    isMoving = false;
+  }
+}
+
+// Update collectibles (repair kits, fuel cells, easter eggs)
+function updateCollectibles(time, delta) {
+  // Check repair kit pickups
+  if (gameSystem.repairKits) {
+    gameSystem.repairKits.forEach((kit, index) => {
+      if (kit.visible && rover.position.distanceTo(kit.position) < 8) {
+        kit.visible = false;
+        rover.repair(25);
+        // Remove from array after pickup
+        setTimeout(() => {
+          scene.remove(kit);
+          gameSystem.repairKits.splice(index, 1);
+        }, 100);
+      }
+      
+      // Animate pulsing
+      if (kit.visible && kit.userData) {
+        kit.userData.animationTime += delta * 0.003;
+        kit.position.y = kit.userData.originalY + Math.sin(kit.userData.animationTime) * 0.5;
+      }
+    });
+  }
+  
+  // Check fuel cell pickups
+  if (gameSystem.fuelCells) {
+    gameSystem.fuelCells.forEach((cell, index) => {
+      if (cell.visible && rover.position.distanceTo(cell.position) < 8) {
+        cell.visible = false;
+        rover.addFuel(200);
+        // Remove from array after pickup
+        setTimeout(() => {
+          scene.remove(cell);
+          gameSystem.fuelCells.splice(index, 1);
+        }, 100);
+      }
+      
+      // Animate rotation
+      if (cell.visible && cell.userData) {
+        cell.rotation.y += cell.userData.rotationSpeed;
+      }
+    });
+  }
+  
+  // Check easter egg interactions
+  if (gameSystem.collectibles) {
+    gameSystem.collectibles.forEach((item) => {
+      if (item.userData.type === 'monolith' && !item.userData.discovered) {
+        if (rover.position.distanceTo(item.position) < 10) {
+          item.userData.discovered = true;
+          showNotification("🗿 MONOLITH DISCOVERED! You've found the ancient artifact!", 5000);
+          // Play a sound effect here if audio is enabled
+          console.log("🗿 MONOLITH DISCOVERED! Achievement unlocked!");
+          
+          // Unlock golden rover skin
+          if (rover.material && rover.material.color) {
+            rover.material.color.setHex(0xFFD700); // Gold color
+            showNotification("🏆 Golden Rover skin unlocked!", 3000);
+          }
+        }
+      }
+    });
+  }
+}
+
+// Update visual effects
+function updateVisualEffects(time, delta) {
+  // Update HUD with game system info
+  updateGameHUD();
+}
+
+// Update HUD with game system information
+function updateGameHUD() {
+  if (!rover) return;
+  
+  // Update health display
+  if (rover.health !== undefined) {
+    const healthElement = document.getElementById('rover-health');
+    if (healthElement) {
+      healthElement.textContent = Math.round(rover.health);
+      
+      // Change color based on health
+      if (rover.health < 30) {
+        healthElement.style.color = '#ff4444';
+      } else if (rover.health < 60) {
+        healthElement.style.color = '#ffaa44';
+      } else {
+        healthElement.style.color = '#44ff44';
+      }
+    }
+  }
+  
+  // Update fuel display
+  if (rover.fuel !== undefined) {
+    const fuelElement = document.getElementById('rover-fuel');
+    if (fuelElement) {
+      fuelElement.textContent = Math.round(rover.fuel);
+      
+      // Change color based on fuel
+      if (rover.fuel < 100) {
+        fuelElement.style.color = '#ff4444';
+      } else if (rover.fuel < 300) {
+        fuelElement.style.color = '#ffaa44';
+      } else {
+        fuelElement.style.color = '#44aaff';
+      }
+    }
+  }
+}
+
+// Photo mode functionality
+function togglePhotoMode() {
+  const photoMode = document.getElementById('photo-mode');
+  if (photoMode) {
+    photoMode.remove();
+    return;
+  }
+  
+  // Create photo mode overlay
+  const overlay = document.createElement('div');
+  overlay.id = 'photo-mode';
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    color: white;
+    font-family: monospace;
+  `;
+  
+  // Hide HUD
+  const hud = document.getElementById('hud');
+  if (hud) hud.style.display = 'none';
+  
+  // Create photo controls
+  overlay.innerHTML = `
+    <div style="text-align: center; margin-bottom: 20px;">
+      <h2>📸 PHOTO MODE</h2>
+      <p>Press SPACE to capture • Press P to exit</p>
+    </div>
+    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+      <button id="filter-normal" style="padding: 10px 20px; background: #333; color: white; border: 1px solid #666; cursor: pointer;">Normal</button>
+      <button id="filter-sepia" style="padding: 10px 20px; background: #333; color: white; border: 1px solid #666; cursor: pointer;">Sepia</button>
+      <button id="filter-retro" style="padding: 10px 20px; background: #333; color: white; border: 1px solid #666; cursor: pointer;">Retro</button>
+    </div>
+    <canvas id="photo-canvas" style="max-width: 80%; max-height: 60%; border: 2px solid #fff;"></canvas>
+  `;
+  
+  document.body.appendChild(overlay);
+  
+  // Capture current frame
+  capturePhoto();
+  
+  // Add event listeners
+  document.addEventListener('keydown', photoModeKeyHandler);
+  document.getElementById('filter-normal').addEventListener('click', () => applyFilter('normal'));
+  document.getElementById('filter-sepia').addEventListener('click', () => applyFilter('sepia'));
+  document.getElementById('filter-retro').addEventListener('click', () => applyFilter('retro'));
+}
+
+// Photo mode key handler
+function photoModeKeyHandler(event) {
+  if (event.key.toLowerCase() === 'p') {
+    exitPhotoMode();
+  } else if (event.key === ' ') {
+    event.preventDefault();
+    capturePhoto();
+  }
+}
+
+// Exit photo mode
+function exitPhotoMode() {
+  const photoMode = document.getElementById('photo-mode');
+  if (photoMode) photoMode.remove();
+  
+  // Show HUD
+  const hud = document.getElementById('hud');
+  if (hud) hud.style.display = 'block';
+  
+  // Remove event listener
+  document.removeEventListener('keydown', photoModeKeyHandler);
+}
+
+// Capture photo
+function capturePhoto() {
+  const canvas = document.getElementById('photo-canvas');
+  if (!canvas) return;
+  
+  // Copy renderer canvas to photo canvas
+  const ctx = canvas.getContext('2d');
+  canvas.width = renderer.domElement.width;
+  canvas.height = renderer.domElement.height;
+  ctx.drawImage(renderer.domElement, 0, 0);
+  
+  // Show capture effect
+  showNotification("📸 Photo captured!", 1000);
+}
+
+// Apply photo filter
+function applyFilter(filterType) {
+  const canvas = document.getElementById('photo-canvas');
+  if (!canvas) return;
+  
+  const ctx = canvas.getContext('2d');
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = imageData.data;
+  
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    
+    switch (filterType) {
+      case 'sepia':
+        data[i] = Math.min(255, (r * 0.393) + (g * 0.769) + (b * 0.189));
+        data[i + 1] = Math.min(255, (r * 0.349) + (g * 0.686) + (b * 0.168));
+        data[i + 2] = Math.min(255, (r * 0.272) + (g * 0.534) + (b * 0.131));
+        break;
+      case 'retro':
+        data[i] = Math.min(255, r * 1.2);
+        data[i + 1] = Math.min(255, g * 0.8);
+        data[i + 2] = Math.min(255, b * 0.6);
+        break;
+      case 'normal':
+      default:
+        // Keep original colors
+        break;
+    }
+  }
+  
+  ctx.putImageData(imageData, 0, 0);
+}
+
+// Konami code activation
+function activateKonamiCode() {
+  showNotification("🎮 KONAMI CODE ACTIVATED! Infinite fuel for 60 seconds!", 5000);
+  console.log("🎮 KONAMI CODE ACTIVATED! Infinite fuel mode!");
+  
+  // Store original fuel consumption
+  const originalConsumption = rover.fuelConsumption;
+  rover.fuelConsumption = 0;
+  
+  // Restore after 60 seconds
+  setTimeout(() => {
+    rover.fuelConsumption = originalConsumption;
+    showNotification("🎮 Konami code effect expired.", 2000);
+  }, 60000);
+}
+
+// Help system
+function toggleHelpSystem() {
+  const helpOverlay = document.getElementById('help-overlay');
+  if (helpOverlay) {
+    helpOverlay.remove();
+    return;
+  }
+  
+  // Create help overlay
+  const overlay = document.createElement('div');
+  overlay.id = 'help-overlay';
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.95);
+    z-index: 1000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: white;
+    font-family: monospace;
+    overflow-y: auto;
+    padding: 20px;
+    box-sizing: border-box;
+  `;
+  
+  const perfSettings = getPerformanceSettings();
+  
+  overlay.innerHTML = `
+    <div style="max-width: 800px; width: 100%;">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="color: #ff6b35; margin: 0 0 10px 0;">🚀 MARS ROVER SIMULATOR</h1>
+        <p style="color: #888; margin: 0;">Advanced Game Features Guide</p>
+      </div>
+      
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
+        <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px;">
+          <h3 style="color: #00ff88; margin: 0 0 10px 0;">🎮 CONTROLS</h3>
+          <div style="font-size: 14px; line-height: 1.5;">
+            <div><strong>W/A/S/D</strong> - Move rover</div>
+            <div><strong>C</strong> - Toggle camera mode</div>
+            <div><strong>L</strong> - Toggle day/night</div>
+            <div><strong>P</strong> - Photo mode</div>
+            <div><strong>H</strong> - Help (this screen)</div>
+          </div>
+        </div>
+        
+        <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px;">
+          <h3 style="color: #ff6b35; margin: 0 0 10px 0;">🔧 DAMAGE SYSTEM</h3>
+          <div style="font-size: 14px; line-height: 1.5;">
+            ${perfSettings.enableDamageSystem ? 
+              `<div>• Rover health: 100%</div>
+               <div>• Collect <span style="color: #00ff00;">green repair kits</span></div>
+               <div>• Health drops from rough terrain</div>
+               <div>• Low health = limping movement</div>` :
+              `<div style="color: #888;">Disabled on this device</div>`
+            }
+          </div>
+        </div>
+        
+        <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px;">
+          <h3 style="color: #4488ff; margin: 0 0 10px 0;">⛽ FUEL SYSTEM</h3>
+          <div style="font-size: 14px; line-height: 1.5;">
+            ${perfSettings.enableFuelSystem ? 
+              `<div>• Fuel depletes while moving</div>
+               <div>• Collect <span style="color: #4488ff;">blue fuel cells</span></div>
+               <div>• No fuel = no movement</div>
+               <div>• Konami code = infinite fuel</div>` :
+              `<div style="color: #888;">Disabled on this device</div>`
+            }
+          </div>
+        </div>
+        
+        <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px;">
+          <h3 style="color: #ff44aa; margin: 0 0 10px 0;">📸 PHOTO MODE</h3>
+          <div style="font-size: 14px; line-height: 1.5;">
+            ${perfSettings.enablePhotoMode ? 
+              `<div>• Press <strong>P</strong> to enter photo mode</div>
+               <div>• <strong>SPACE</strong> to capture photo</div>
+               <div>• Apply Instagram-style filters</div>
+               <div>• <strong>P</strong> again to exit</div>` :
+              `<div style="color: #888;">Disabled on this device</div>`
+            }
+          </div>
+        </div>
+        
+        <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px;">
+          <h3 style="color: #ffaa44; margin: 0 0 10px 0;">🎨 CUSTOMIZATION</h3>
+          <div style="font-size: 14px; line-height: 1.5;">
+            ${perfSettings.enableCustomization ? 
+              `<div>• Color buttons in HUD</div>
+               <div>• Click to change rover color</div>
+               <div>• Find monolith for gold skin</div>
+               <div>• Express your style!</div>` :
+              `<div style="color: #888;">Disabled on this device</div>`
+            }
+          </div>
+        </div>
+        
+        <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px;">
+          <h3 style="color: #aa44ff; margin: 0 0 10px 0;">🗿 EASTER EGGS</h3>
+          <div style="font-size: 14px; line-height: 1.5;">
+            ${perfSettings.enableEasterEggs ? 
+              `<div>• Find the hidden monolith</div>
+               <div>• Konami code: ↑↑↓↓←→←→BA</div>
+               <div>• Unlocks golden rover skin</div>
+               <div>• Infinite fuel for 60 seconds</div>` :
+              `<div style="color: #888;">Disabled on this device</div>`
+            }
+          </div>
+        </div>
+      </div>
+      
+      <div style="text-align: center; margin-top: 30px; padding: 20px; background: rgba(255, 107, 53, 0.1); border-radius: 8px;">
+        <h3 style="color: #ff6b35; margin: 0 0 10px 0;">🎯 MISSION OBJECTIVES</h3>
+        <div style="font-size: 14px; line-height: 1.5;">
+          <div>• Explore the Martian landscape</div>
+          <div>• Collect samples and resources</div>
+          <div>• Maintain your rover's health and fuel</div>
+          <div>• Discover hidden secrets</div>
+          <div>• Capture stunning photos of Mars</div>
+        </div>
+      </div>
+      
+      <div style="text-align: center; margin-top: 20px;">
+        <button onclick="document.getElementById('help-overlay').remove();" style="
+          background: #ff6b35; 
+          color: white; 
+          border: none; 
+          padding: 12px 24px; 
+          font-size: 16px; 
+          border-radius: 6px; 
+          cursor: pointer;
+          font-family: monospace;
+          font-weight: bold;
+        ">🚀 START EXPLORING</button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(overlay);
+  
+  // Add click to close
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      overlay.remove();
+    }
+  });
+}
+
+// Welcome message for new game features
+function showWelcomeMessage() {
+  const perfSettings = getPerformanceSettings();
+  
+  // Count enabled features
+  const enabledFeatures = [
+    perfSettings.enableDamageSystem,
+    perfSettings.enableFuelSystem,
+    perfSettings.enablePhotoMode,
+    perfSettings.enableEasterEggs,
+    perfSettings.enableCustomization
+  ].filter(Boolean).length;
+  
+  if (enabledFeatures > 0) {
+    const message = `
+      🚀 Welcome to Mars Rover Simulator!
+      
+      🎮 ${enabledFeatures} game features enabled
+      ${perfSettings.enableDamageSystem ? '🔧 Damage & Repair System' : ''}
+      ${perfSettings.enableFuelSystem ? '⛽ Fuel Management' : ''}
+      ${perfSettings.enablePhotoMode ? '📸 Photo Mode (Press P)' : ''}
+      ${perfSettings.enableEasterEggs ? '🗿 Hidden Easter Eggs' : ''}
+      ${perfSettings.enableCustomization ? '🎨 Rover Customization' : ''}
+      
+      Press H for help anytime!
+    `;
+    
+    showNotification(message, 8000);
+  }
+}
+
 // Performance-aware initialization with mobile detection
 function getPerformanceSettings() {
   const isMobile = isMobileDevice();
@@ -133,7 +830,14 @@ function getPerformanceSettings() {
         terrainSegments: 112,
         frameThrottle: 2,
         enableCulling: true,
-        maxLights: 6
+        maxLights: 6,
+        // Game Features - enabled for high-end mobile
+        enableDamageSystem: true,
+        enableFuelSystem: true,
+        enablePhotoMode: true,
+        enableEasterEggs: true,
+        enableCustomization: true,
+        enableWeatherForecast: false // Disable weather forecast on mobile for performance
       };
     }
     // Mid-range mobile devices
@@ -150,13 +854,20 @@ function getPerformanceSettings() {
         graphicsQuality: 'low',
         isMobile: true,
         mobileTier: 'medium',
-        disableRockets: true,
+        disableRockets: false, // Enable rockets on medium-tier mobile
         disableMeteors: true,
         disableAtmosphericEffects: true,
         terrainSegments: 96,
         frameThrottle: 3,
         enableCulling: true,
-        maxLights: 4
+        maxLights: 4,
+        // Game Features - reduced for medium-end mobile
+        enableDamageSystem: true,
+        enableFuelSystem: true,
+        enablePhotoMode: true,
+        enableEasterEggs: false,
+        enableCustomization: true,
+        enableWeatherForecast: false
       };
     }
     // Low-end mobile devices (budget phones)
@@ -179,7 +890,14 @@ function getPerformanceSettings() {
         terrainSegments: 80,
         frameThrottle: 4,
         enableCulling: true,
-        maxLights: 3
+        maxLights: 3,
+        // Game Features - minimal for low-end mobile
+        enableDamageSystem: false,
+        enableFuelSystem: false,
+        enablePhotoMode: true,
+        enableEasterEggs: false,
+        enableCustomization: false,
+        enableWeatherForecast: false
       };
     }
     
@@ -209,7 +927,14 @@ function getPerformanceSettings() {
     terrainSegments: 128,
     frameThrottle: 2,
     enableCulling: false,
-    maxLights: 8
+    maxLights: 8,
+    // Game Features
+    enableDamageSystem: true,
+    enableFuelSystem: true,
+    enablePhotoMode: true,
+    enableEasterEggs: true,
+    enableCustomization: true,
+    enableWeatherForecast: true
   };
 }
 
@@ -647,6 +1372,14 @@ const { rover, wheels, originalWheelPositions } = createRealisticRover();
 rover.rotation.y = 0;
 scene.add(rover);
 
+// Initialize Game Systems
+const gameSystem = initializeGameSystems(rover, wheels, scene);
+
+// Show welcome message with new features
+setTimeout(() => {
+  showWelcomeMessage();
+}, 2000);
+
 // Dust Particle System
 const createDustParticles = () => {
   const perfSettings = getPerformanceSettings();
@@ -795,6 +1528,10 @@ if (!window.gameEventListeners) {
   };
 }
 
+// Konami code sequence
+const konamiCode = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyA'];
+let konamiIndex = 0;
+
 // Combined keydown handler to prevent duplicate listeners
 const keydownHandler = (event) => {
   keys[event.key.toLowerCase()] = true;
@@ -824,6 +1561,33 @@ const keydownHandler = (event) => {
   if (event.key.toLowerCase() === 'l') {
     if (typeof toggleDayNight === 'function') {
       toggleDayNight();
+    }
+  }
+  
+  // Photo mode toggle
+  if (event.key.toLowerCase() === 'p') {
+    const perfSettings = getPerformanceSettings();
+    if (perfSettings.enablePhotoMode) {
+      togglePhotoMode();
+    }
+  }
+  
+  // Help system toggle
+  if (event.key.toLowerCase() === 'h') {
+    toggleHelpSystem();
+  }
+  
+  // Konami code easter egg
+  if (getPerformanceSettings().enableEasterEggs) {
+    if (event.code === konamiCode[konamiIndex]) {
+      konamiIndex++;
+      if (konamiIndex === konamiCode.length) {
+        // Konami code completed!
+        activateKonamiCode();
+        konamiIndex = 0;
+      }
+    } else {
+      konamiIndex = 0; // Reset on wrong key
     }
   }
 };
@@ -1627,7 +2391,7 @@ class MarsSceneManager {
     // Rocket launch timing variables - reduced frequency for better performance
     this.rocketLaunchInterval = 60000; // 1 minute = 60000ms
     this.lastRocketLaunch = 0;
-    this.rocketLaunchActive = true;
+    this.rocketLaunchActive = false; // Disabled by default - starships stay on ground
     this.maxSimultaneousRockets = 3; // Reduced for better performance
     
     // Simplified launch patterns for better performance
@@ -1648,16 +2412,12 @@ class MarsSceneManager {
 
   enableRocketLaunches() {
     this.rocketLaunchActive = true;
-    if (window.showNotification) {
-      window.showNotification('🚀 SpaceX Rocket Launches ENABLED', 3000);
-    }
+    // Removed notification - starships stay on ground
   }
 
   disableRocketLaunches() {
     this.rocketLaunchActive = false;
-    if (window.showNotification) {
-      window.showNotification('🚀 SpaceX Rocket Launches DISABLED', 3000);
-    }
+    // Removed notification - starships stay on ground
   }
 
   triggerManualLaunch(patternType = 'random') {
@@ -1702,10 +2462,10 @@ class MarsSceneManager {
     const isLaunch = Math.random() > 0.3; // 70% chance of launch, 30% chance of landing
     const eventType = isLaunch ? 'launch' : 'landing';
     
-    // Show notification about the upcoming launch sequence
-    if (window.showNotification) {
-      window.showNotification(`🚀 SpaceX ${eventType.toUpperCase()} Sequence! ${pattern.count} Starship rockets ${eventType === 'launch' ? 'launching' : 'landing'} (${pattern.type})`, 6000);
-    }
+    // Launch notification removed - starships stay on ground
+    // if (window.showNotification) {
+    //   window.showNotification(`🚀 SpaceX ${eventType.toUpperCase()} Sequence! ${pattern.count} Starship rockets ${eventType === 'launch' ? 'launching' : 'landing'} (${pattern.type})`, 6000);
+    // }
     
     // Launch rockets with delays based on pattern
     for (let i = 0; i < pattern.count; i++) {
@@ -2501,12 +3261,12 @@ class MarsSceneManager {
     
     this.scene.add(displayGroup);
     
-    // Show notification about the display
-    if (window.showNotification) {
-      setTimeout(() => {
-        window.showNotification('🚀 SpaceX Starship Display Area Discovered! Drive West to see the lineup!', 6000);
-      }, 8000);
-    }
+    // Display notification removed - starships remain as static ground display
+    // if (window.showNotification) {
+    //   setTimeout(() => {
+    //     window.showNotification('🚀 SpaceX Starship Display Area Discovered! Drive West to see the lineup!', 6000);
+    //   }, 8000);
+    // }
   }
 
   addDisplayLighting(rocket, index) {
@@ -2987,107 +3747,15 @@ class MarsSceneManager {
     this.scene.add(rocket);
     this.activeEvents.add(event);
     
-    // Show notification about rocket launch
-    if (window.showNotification) {
-      const rocketName = rocketType === 'fullstack' ? 'Starship + Super Heavy' : 
-                        rocketType === 'superheavy' ? 'Super Heavy Booster' : 'Starship';
-      window.showNotification(`${rocketName} ${type} detected!`, 5000);
-    }
+    // Launch notification removed - starships stay on ground
+    // if (window.showNotification) {
+    //   const rocketName = rocketType === 'fullstack' ? 'Starship + Super Heavy' : 
+    //                     rocketType === 'superheavy' ? 'Super Heavy Booster' : 'Starship';
+    //   window.showNotification(`${rocketName} ${type} detected!`, 5000);
+    // }
   }
   
-  createRocketEngineEffect(rocket) {
-    // Create particle system for engine exhaust
-    const particleCount = 1000;
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-    const colors = new Float32Array(particleCount * 3);
-    const sizes = new Float32Array(particleCount);
   
-    // Initialize particles
-    for (let i = 0; i < particleCount; i++) {
-      // Position at rocket base
-      positions[i * 3] = 0;
-      positions[i * 3 + 1] = -2; // Just below the rocket
-      positions[i * 3 + 2] = 0;
-  
-      // Color gradient from white to orange to red
-      const colorFactor = Math.random();
-      colors[i * 3] = 1; // R
-      colors[i * 3 + 1] = 0.5 + (colorFactor * 0.5); // G
-      colors[i * 3 + 2] = colorFactor * 0.3; // B
-  
-      // Random sizes for variation
-      sizes[i] = Math.random() * 2 + 1;
-    }
-  
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-  
-    // Create shader material for better-looking particles
-    const material = new THREE.ShaderMaterial({
-      uniforms: {
-        time: { value: 0 },
-        pointTexture: { value: this.createEngineParticleTexture() }
-      },
-      vertexShader: `
-        attribute float size;
-        varying vec3 vColor;
-        void main() {
-          vColor = color;
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = size * (300.0 / -mvPosition.z);
-          gl_Position = projectionMatrix * mvPosition;
-        }
-      `,
-      fragmentShader: `
-        uniform sampler2D pointTexture;
-        varying vec3 vColor;
-        void main() {
-          gl_FragColor = vec4(vColor, 1.0) * texture2D(pointTexture, gl_PointCoord);
-        }
-      `,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      transparent: true,
-      vertexColors: true
-    });
-  
-    const particleSystem = new THREE.Points(geometry, material);
-    particleSystem.position.y = -2; // Position at base of rocket
-    rocket.add(particleSystem);
-  
-    // Add point light for engine glow
-    const engineLight = new THREE.PointLight(0xff3300, 2, 10);
-    engineLight.position.y = -2;
-    rocket.add(engineLight);
-  
-    return {
-      particles: particleSystem,
-      light: engineLight,
-      update: (progress) => {
-        const positions = particleSystem.geometry.attributes.position.array;
-        const time = Date.now() * 0.001;
-  
-        for (let i = 0; i < particleCount; i++) {
-          // Create expanding cone shape for exhaust
-          const angle = Math.random() * Math.PI * 2;
-          const radius = Math.random() * 0.5 * (1 - progress); // Cone gets wider as rocket rises
-          const speed = Math.random() * 2 + 1;
-  
-          positions[i * 3] = Math.cos(angle) * radius;
-          positions[i * 3 + 1] = -2 - (Math.random() * 4 * speed);
-          positions[i * 3 + 2] = Math.sin(angle) * radius;
-        }
-  
-        particleSystem.geometry.attributes.position.needsUpdate = true;
-        material.uniforms.time.value = time;
-  
-        // Pulse the engine light
-        engineLight.intensity = 2 + Math.sin(time * 10) * 0.5;
-      }
-    };
-  }
   
   createEngineParticleTexture() {
     const canvas = document.createElement('canvas');
@@ -3157,18 +3825,32 @@ class MarsSceneManager {
   }
   
   createRocketEngineEffect(rocket) {
+    const perfSettings = getPerformanceSettings();
+    
     // Create enhanced burner effects with multiple layers
-    const burnerEffects = {
-      innerFlame: this.createFlameParticleSystem(1500, 0xffffff, 0xffff88), // White-yellow core
+    // Use darker, more visible colors for mobile devices
+    const burnerEffects = perfSettings.isMobile ? {
+      innerFlame: this.createFlameParticleSystem(800, 0xff3300, 0xff6600), // Bright red-orange core for mobile
+      middleFlame: this.createFlameParticleSystem(1000, 0xaa1100, 0xff2200), // Dark red-orange flame
+      outerFlame: this.createFlameParticleSystem(1200, 0x660000, 0xaa1100), // Dark red outer flame
+      smokeTrail: this.createSmokeParticleSystem(600, 0x222222), // Darker smoke
+      shockWave: this.createShockWaveEffect()
+    } : {
+      innerFlame: this.createFlameParticleSystem(1500, 0xffffff, 0xffff88), // White-yellow core for desktop
       middleFlame: this.createFlameParticleSystem(2000, 0xff4400, 0xff8800), // Orange flame
       outerFlame: this.createFlameParticleSystem(2500, 0xff1100, 0xff4400), // Red outer flame
       smokeTrail: this.createSmokeParticleSystem(1000, 0x888888),
       shockWave: this.createShockWaveEffect()
     };
     
-    // Create dramatic engine lighting
-    const engineLights = [
-      new THREE.PointLight(0xffffff, 5, 100), // Main white light
+    // Create dramatic engine lighting - adjust for mobile visibility
+    const engineLights = perfSettings.isMobile ? [
+      new THREE.PointLight(0xff6600, 8, 120), // Brighter orange light for mobile
+      new THREE.PointLight(0xff2200, 6, 100), // Bright red glow
+      new THREE.PointLight(0xaa1100, 4, 80),  // Dark red heat
+      new THREE.SpotLight(0xff3300, 5, 250, Math.PI / 4, 0.3) // Brighter directional thrust
+    ] : [
+      new THREE.PointLight(0xffffff, 5, 100), // Main white light for desktop
       new THREE.PointLight(0xff3300, 4, 80),  // Orange glow
       new THREE.PointLight(0xff6600, 3, 60),  // Red heat
       new THREE.SpotLight(0xff4400, 3, 200, Math.PI / 4, 0.3) // Directional thrust
@@ -3845,6 +4527,9 @@ function animate(time) {
     // Set current speed based on direction - FIXED: positive for forward (w key)
     currentSpeed = speed * (keys.w ? 1 : -1); // Positive for forward, negative for backward
   }
+
+  // Update Game Systems
+  updateGameSystems(time, delta);
 
   // Update terrain system with current rover position
   terrainSystem.update(rover.position);
@@ -5771,8 +6456,8 @@ function loadNonEssentialComponents() {
       lazyLoader.loadInBackground('marsSceneManager', () => {
         // Create a mobile-optimized scene manager
         window.marsSceneManager = new MarsSceneManager(scene, 2000); // Smaller terrain size
-        // Disable rocket launches immediately for mobile
-        if (window.marsSceneManager.disableRocketLaunches) {
+        // Only disable rockets for low-end mobile devices
+        if (window.marsSceneManager.disableRocketLaunches && perfSettings.mobileTier === 'low') {
           window.marsSceneManager.disableRocketLaunches();
         }
         return Promise.resolve();
@@ -7710,7 +8395,10 @@ function createEnhancedHUD() {
     hud.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
         <div style="color: #00ff88; font-weight: bold; font-size: 9px;">🚀 HUD</div>
-        <button id="hud-toggle" style="background: none; border: none; color: #00ff88; cursor: pointer; font-size: 10px; padding: 0;">−</button>
+        <div style="display: flex; gap: 4px;">
+          <button id="help-btn" style="background: none; border: none; color: #ffaa44; cursor: pointer; font-size: 10px; padding: 0;" title="Help (H)">?</button>
+          <button id="hud-toggle" style="background: none; border: none; color: #00ff88; cursor: pointer; font-size: 10px; padding: 0;">−</button>
+        </div>
       </div>
       <div id="hud-content">
         <div style="color: ${tierColor}; font-size: 8px; margin-bottom: 6px; text-align: center; border-bottom: 1px solid ${tierColor}; padding-bottom: 3px;">
@@ -7720,6 +8408,8 @@ function createEnhancedHUD() {
           <div>Dist: <span id="distance-traveled">0</span>m</div>
           <div>Speed: <span id="current-speed">0</span>m/s</div>
           <div>Cam: <span id="camera-mode">3P</span></div>
+          <div>Health: <span id="rover-health">100</span>%</div>
+          <div>Fuel: <span id="rover-fuel">1000</span></div>
         </div>
         <div style="margin-top: 6px; border-top: 1px solid #333; padding-top: 6px;">
           <div style="color: #88ff88; font-weight: bold; font-size: 9px;">🎯 MISSIONS</div>
@@ -7746,6 +8436,17 @@ function createEnhancedHUD() {
             width: 100%;
             transition: all 0.3s ease;
           ">⚡ Low Power Mode</button>
+        </div>
+        <div style="margin-top: 6px; border-top: 1px solid #333; padding-top: 6px;">
+          <div style="color: #88ff88; font-weight: bold; font-size: 8px; margin-bottom: 4px;">🎨 ROVER COLOR</div>
+          <div style="display: flex; gap: 2px; justify-content: space-between;">
+            <button class="color-btn" data-color="0xff4444" style="background: #ff4444; width: 18px; height: 18px; border: 1px solid #666; cursor: pointer; border-radius: 2px;"></button>
+            <button class="color-btn" data-color="0x44ff44" style="background: #44ff44; width: 18px; height: 18px; border: 1px solid #666; cursor: pointer; border-radius: 2px;"></button>
+            <button class="color-btn" data-color="0x4444ff" style="background: #4444ff; width: 18px; height: 18px; border: 1px solid #666; cursor: pointer; border-radius: 2px;"></button>
+            <button class="color-btn" data-color="0xffaa44" style="background: #ffaa44; width: 18px; height: 18px; border: 1px solid #666; cursor: pointer; border-radius: 2px;"></button>
+            <button class="color-btn" data-color="0x888888" style="background: #888888; width: 18px; height: 18px; border: 1px solid #666; cursor: pointer; border-radius: 2px;"></button>
+            <button class="color-btn" data-color="0xffffff" style="background: #ffffff; width: 18px; height: 18px; border: 1px solid #666; cursor: pointer; border-radius: 2px;"></button>
+          </div>
         </div>
       </div>
     `;
@@ -7775,6 +8476,8 @@ function createEnhancedHUD() {
         <div>Distance: <span id="distance-traveled">0</span> m</div>
         <div>Speed: <span id="current-speed">0</span> m/s</div>
         <div>Camera: <span id="camera-mode">Third Person</span></div>
+        <div>Health: <span id="rover-health">100</span>%</div>
+        <div>Fuel: <span id="rover-fuel">1000</span></div>
       </div>
       <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
         <div style="color: #88ff88; font-weight: bold;">🎯 MISSIONS</div>
@@ -7805,6 +8508,17 @@ function createEnhancedHUD() {
           transition: all 0.3s ease;
         ">⚡ Low Power Mode</button>
       </div>
+      <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
+        <div style="color: #88ff88; font-weight: bold; margin-bottom: 8px;">🎨 ROVER CUSTOMIZATION</div>
+        <div style="display: flex; gap: 8px; justify-content: space-between; flex-wrap: wrap;">
+          <button class="color-btn" data-color="0xff4444" style="background: #ff4444; width: 24px; height: 24px; border: 1px solid #666; cursor: pointer; border-radius: 4px;"></button>
+          <button class="color-btn" data-color="0x44ff44" style="background: #44ff44; width: 24px; height: 24px; border: 1px solid #666; cursor: pointer; border-radius: 4px;"></button>
+          <button class="color-btn" data-color="0x4444ff" style="background: #4444ff; width: 24px; height: 24px; border: 1px solid #666; cursor: pointer; border-radius: 4px;"></button>
+          <button class="color-btn" data-color="0xffaa44" style="background: #ffaa44; width: 24px; height: 24px; border: 1px solid #666; cursor: pointer; border-radius: 4px;"></button>
+          <button class="color-btn" data-color="0x888888" style="background: #888888; width: 24px; height: 24px; border: 1px solid #666; cursor: pointer; border-radius: 4px;"></button>
+          <button class="color-btn" data-color="0xffffff" style="background: #ffffff; width: 24px; height: 24px; border: 1px solid #666; cursor: pointer; border-radius: 4px;"></button>
+        </div>
+      </div>
     `;
   }
   
@@ -7820,14 +8534,20 @@ function createEnhancedHUD() {
       if (isCollapsed) {
         hudContent.style.display = 'block';
         toggleBtn.textContent = '−';
-        isCollapsed = false;
-      } else {
-        hudContent.style.display = 'none';
-        toggleBtn.textContent = '+';
-        isCollapsed = true;
-      }
-    });
+              isCollapsed = false;
+    } else {
+      hudContent.style.display = 'none';
+      toggleBtn.textContent = '+';
+      isCollapsed = true;
+    }
+  });
+  
+  // Add help button functionality
+  const helpBtn = document.getElementById('help-btn');
+  if (helpBtn) {
+    helpBtn.addEventListener('click', toggleHelpSystem);
   }
+}
   
   // Add low-power toggle functionality for both mobile and desktop
   const lowPowerToggle = document.getElementById('low-power-toggle');
@@ -7873,6 +8593,46 @@ function createEnhancedHUD() {
       }
     });
   }
+  
+  // Add rover customization listeners
+  const colorButtons = document.querySelectorAll('.color-btn');
+  colorButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      const colorHex = button.getAttribute('data-color');
+      changeRoverColor(colorHex);
+    });
+  });
+}
+
+// Change rover color
+function changeRoverColor(colorHex) {
+  const perfSettings = getPerformanceSettings();
+  if (!perfSettings.enableCustomization || !rover) return;
+  
+  const color = parseInt(colorHex);
+  
+  // Find rover body material and change color
+  rover.traverse((child) => {
+    if (child.isMesh && child.material) {
+      // Only change the main body, not wheels or other parts
+      if (child.material.color && child.userData.isBody) {
+        child.material.color.setHex(color);
+      }
+    }
+  });
+  
+  // If no userData.isBody found, change the first material found
+  if (!rover.userData.colorChanged) {
+    rover.traverse((child) => {
+      if (child.isMesh && child.material && child.material.color) {
+        child.material.color.setHex(color);
+        rover.userData.colorChanged = true;
+        return; // Stop after first material
+      }
+    });
+  }
+  
+  showNotification("🎨 Rover color changed!", 1500);
 }
 
 // Enhanced controls information
@@ -7916,11 +8676,11 @@ function addEnhancedControlsInfo() {
     <div><strong>Day/Night:</strong> L to toggle</div>
     <div><strong>Samples:</strong> E to collect</div>
     <div><strong>Analysis:</strong> Q to analyze</div>
-    <div><strong>Rockets:</strong> R to launch SpaceX rockets</div>
+                <div><strong>Rockets:</strong> SpaceX starships on display</div>
     <div style="margin-top: 10px; font-size: 10px; color: #aaa;">
       Look for glowing objects to collect samples!<br>
       Watch for meteor showers at night!<br>
-      Press R to trigger manual rocket launches!<br>
+              SpaceX starships on display for exploration!<br>
       Explore to find Mars colonies!
     </div>
   `;
@@ -7959,16 +8719,16 @@ function updateEnhancedSystems(deltaTime, roverPosition) {
     }
   }
   
-  // Handle manual rocket launch (R key)
-  if (keys['r']) {
-    if (window.marsSceneManager && window.marsSceneManager.rocketLaunchActive) {
-      // Prevent spamming - only allow one manual launch per 3 seconds
-      if (!window.lastManualRocketLaunch || Date.now() - window.lastManualRocketLaunch > 3000) {
-        window.lastManualRocketLaunch = Date.now();
-        window.marsSceneManager.triggerManualLaunch();
-      }
-    }
-  }
+  // Manual rocket launch disabled - starships stay on ground
+  // if (keys['r']) {
+  //   if (window.marsSceneManager && window.marsSceneManager.rocketLaunchActive) {
+  //     // Prevent spamming - only allow one manual launch per 3 seconds
+  //     if (!window.lastManualRocketLaunch || Date.now() - window.lastManualRocketLaunch > 3000) {
+  //       window.lastManualRocketLaunch = Date.now();
+  //       window.marsSceneManager.triggerManualLaunch();
+  //     }
+  //   }
+  // }
 }
 
 // Update HUD with enhanced information
@@ -8106,10 +8866,11 @@ setTimeout(() => {
         const tierMessage = mobileTier === 'high' ? 'High-End Mobile' : 
                            mobileTier === 'medium' ? 'Mid-Range Mobile' : 'Mobile Optimized';
         
-        // Add Samsung-specific messaging
+        // Add Samsung-specific messaging with rocket status
+        const rocketStatus = perfSettings.disableRockets ? '' : ' Rocket effects enhanced for mobile visibility!';
         const deviceMessage = perfSettings.samsungOptimized ? 
-          `${tierEmoji} Samsung ${tierMessage}! Display optimizations applied for better visibility!` :
-          `${tierEmoji} ${tierMessage}! Enhanced visuals enabled. Use touch controls to drive!`;
+          `${tierEmoji} Samsung ${tierMessage}! Display optimizations applied for better visibility!${rocketStatus}` :
+          `${tierEmoji} ${tierMessage}! Enhanced visuals enabled. Use touch controls to drive!${rocketStatus}`;
         
         window.showNotification(deviceMessage, 5000);
       } else {
@@ -8131,10 +8892,10 @@ setTimeout(() => {
         setInterval: (ms) => window.marsSceneManager.setRocketLaunchInterval(ms)
       };
       
-      // Show rocket system ready message (desktop only)
-      if (window.showNotification && !perfSettings.isMobile) {
-        window.showNotification('🚀 Rocket System Ready! Press R for manual launch!', 4000);
-      }
+      // Rocket system ready notification removed - starships stay on ground
+      // if (window.showNotification && !perfSettings.isMobile) {
+      //   window.showNotification('🚀 Rocket System Ready! Press R for manual launch!', 4000);
+      // }
     } else if (perfSettings.isMobile) {
       // Mobile-specific performance notification with feature details
       if (window.showNotification) {
@@ -8144,7 +8905,7 @@ setTimeout(() => {
         if (mobileTier === 'high') {
           featureMessage = '🔥 High-End Mobile: Enhanced terrain, rockets enabled, atmospheric effects active!';
         } else if (mobileTier === 'medium') {
-          featureMessage = '⚡ Mid-Range Mobile: Improved terrain, optimized effects for smooth gameplay!';
+          featureMessage = '⚡ Mid-Range Mobile: Improved terrain, rockets enabled with enhanced visibility!';
         } else {
           featureMessage = '📱 Mobile Optimized: Essential features enabled for best performance!';
         }

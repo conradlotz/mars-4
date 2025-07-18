@@ -1361,7 +1361,7 @@
           </div>
           <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 18px;">🚀</span>
-            <span style="font-size: 13px;">Tap ROCKET for SpaceX launches</span>
+                                <span style="font-size: 13px;">SpaceX starships on display</span>
           </div>
           <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 18px;">📷</span>
@@ -1721,12 +1721,12 @@
                 if (!window.lastManualRocketLaunch || Date.now() - window.lastManualRocketLaunch > 3000) {
                   window.lastManualRocketLaunch = Date.now();
                   window.marsSceneManager.triggerManualLaunch();
-                  this.showMobileNotification('🚀 Rocket Launched!', '#ff6b35');
+                  // Rocket launch notification removed - starships stay on ground
                 } else {
                   this.showMobileNotification('Rocket cooldown...', '#ffaa44');
                 }
               } else {
-                this.showMobileNotification('Rockets not available', '#ffaa44');
+                this.showMobileNotification('Rockets optimized for mobile - enhanced visibility!', '#00ff88');
               }
             }, 1000);
           }
