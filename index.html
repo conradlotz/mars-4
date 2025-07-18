@@ -669,6 +669,23 @@
   </div>
   
   <script>
+    // Enhanced mobile detection with improved heuristics - global function
+    function isMobileDevice() {
+      const userAgent = navigator.userAgent.toLowerCase();
+      
+      // Traditional UA detection
+      const uaCheck = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
+      
+      // Enhanced detection for newer iPads and tablets that report as desktop
+      const touchCheck = navigator.maxTouchPoints > 0 && window.innerWidth < 1024;
+      
+      // Additional mobile indicators
+      const orientationCheck = 'orientation' in window;
+      const smallScreenCheck = window.innerWidth <= 768;
+      
+      return uaCheck || touchCheck || (orientationCheck && smallScreenCheck);
+    }
+
     // Performance optimization and preloader system
     class GameOptimizer {
       constructor() {
@@ -696,12 +713,25 @@
         const canvas = document.createElement('canvas');
         const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
         
+        // Safe GPU renderer detection with proper fallback
+        let gpuRenderer = 'Unknown';
+        if (gl) {
+          try {
+            const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+            if (debugInfo) {
+              gpuRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || 'Unknown';
+            }
+          } catch (error) {
+            console.warn('Could not detect GPU renderer:', error);
+          }
+        }
+        
         const specs = {
-          isMobile: /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent),
+          isMobile: isMobileDevice(),
           deviceMemory: navigator.deviceMemory || 4,
           hardwareConcurrency: navigator.hardwareConcurrency || 4,
           maxTextureSize: gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) : 2048,
-          renderer: gl ? gl.getParameter(gl.getExtension('WEBGL_debug_renderer_info')?.UNMASKED_RENDERER_WEBGL) : 'Unknown',
+          renderer: gpuRenderer,
           maxViewportDims: gl ? gl.getParameter(gl.MAX_VIEWPORT_DIMS) : [1920, 1080],
           pixelRatio: window.devicePixelRatio || 1,
           screenSize: Math.max(window.screen.width, window.screen.height),
@@ -1396,7 +1426,7 @@
             d: false
           };
           
-          this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+          this.isMobile = isMobileDevice();
           
           if (this.isMobile) {
             this.initializeMobileControls();

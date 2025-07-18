@@ -1,6 +1,23 @@
+// Enhanced mobile detection with improved heuristics
+function isMobileDevice() {
+  const userAgent = navigator.userAgent.toLowerCase();
+  
+  // Traditional UA detection
+  const uaCheck = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
+  
+  // Enhanced detection for newer iPads and tablets that report as desktop
+  const touchCheck = navigator.maxTouchPoints > 0 && window.innerWidth < 1024;
+  
+  // Additional mobile indicators
+  const orientationCheck = 'orientation' in window;
+  const smallScreenCheck = window.innerWidth <= 768;
+  
+  return uaCheck || touchCheck || (orientationCheck && smallScreenCheck);
+}
+
 // Performance-aware initialization with mobile detection
 function getPerformanceSettings() {
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const isMobile = isMobileDevice();
   
   // Samsung device detection and GPU identification
   function detectDeviceInfo() {
@@ -99,12 +116,12 @@ function getPerformanceSettings() {
     // High-end mobile devices (flagship phones/tablets)
     if (mobileTier === 'high') {
       baseSettings = {
-        textureSize: 1536,
+        textureSize: 1024, // Cap at 1024 for mobile safety
         particleCount: 200,
         renderDistance: 3500,
         shadowQuality: 'low',
         antialiasing: true,
-        skyboxResolution: 2048,
+        skyboxResolution: 1024, // Cap at 1024 for mobile safety
         detailLevel: 'medium',
         fogDistance: 2800,
         graphicsQuality: 'medium',
@@ -122,12 +139,12 @@ function getPerformanceSettings() {
     // Mid-range mobile devices
     else if (mobileTier === 'medium') {
       baseSettings = {
-        textureSize: 1024,
+        textureSize: 1024, // Already capped appropriately
         particleCount: 125,
         renderDistance: 3000,
         shadowQuality: 'none',
         antialiasing: false,
-        skyboxResolution: 1536,
+        skyboxResolution: 1024, // Cap at 1024 for mobile safety
         detailLevel: 'low',
         fogDistance: 2300,
         graphicsQuality: 'low',
@@ -174,14 +191,14 @@ function getPerformanceSettings() {
     };
   }
   
-  // Desktop settings
+  // Desktop settings - capped to prevent GPU crashes
   return window.GAME_PERFORMANCE_SETTINGS || {
-    textureSize: 1024,
+    textureSize: 2048, // Cap at 2048 for safety
     particleCount: 500,
     renderDistance: 5000,
     shadowQuality: 'low',
     antialiasing: true,
-    skyboxResolution: 2048,
+    skyboxResolution: 4096, // Cap at 4096 for safety
     detailLevel: 'normal',
     fogDistance: 4000,
     graphicsQuality: 'medium',
@@ -744,13 +761,80 @@ let distanceTraveled = 0;
 let lastUpdateTime = 0;
 const DISTANCE_SCALE_FACTOR = 50; // Increased scale factor to make distance more visible
 
-window.addEventListener('keydown', (event) => {
-  keys[event.key.toLowerCase()] = true;
-});
+// Centralized event listener management to prevent duplicates
+if (!window.gameEventListeners) {
+  window.gameEventListeners = {
+    listeners: new Map(),
+    
+    add: function(target, event, handler, options = {}) {
+      const key = `${target.constructor.name}-${event}`;
+      
+      // Remove existing listener if it exists
+      if (this.listeners.has(key)) {
+        const oldHandler = this.listeners.get(key);
+        target.removeEventListener(event, oldHandler, options);
+      }
+      
+      // Add new listener
+      target.addEventListener(event, handler, options);
+      this.listeners.set(key, handler);
+    },
+    
+    remove: function(target, event, options = {}) {
+      const key = `${target.constructor.name}-${event}`;
+      if (this.listeners.has(key)) {
+        const handler = this.listeners.get(key);
+        target.removeEventListener(event, handler, options);
+        this.listeners.delete(key);
+      }
+    },
+    
+    cleanup: function() {
+      this.listeners.clear();
+    }
+  };
+}
 
-window.addEventListener('keyup', (event) => {
+// Combined keydown handler to prevent duplicate listeners
+const keydownHandler = (event) => {
+  keys[event.key.toLowerCase()] = true;
+  
+  // Camera toggle functionality
+  if (event.key.toLowerCase() === 'c') {
+    toggleCameraMode();
+    
+    // Update HUD when camera mode changes
+    const hud = document.getElementById('cameraHUD');
+    if (hud) {
+      switch (cameraMode) {
+        case 'orbit':
+          hud.innerHTML = 'Camera: Orbit Mode (Press C to change)';
+          break;
+        case 'thirdPerson':
+          hud.innerHTML = 'Camera: Third Person Mode (Press C to change)';
+          break;
+        case 'firstPerson':
+          hud.innerHTML = 'Camera: First Person Mode (Press C to change)';
+          break;
+      }
+    }
+  }
+  
+  // Day/night cycle toggle functionality
+  if (event.key.toLowerCase() === 'l') {
+    if (typeof toggleDayNight === 'function') {
+      toggleDayNight();
+    }
+  }
+};
+
+const keyupHandler = (event) => {
   keys[event.key.toLowerCase()] = false;
-});
+};
+
+// Add event listeners using the centralized system
+window.gameEventListeners.add(window, 'keydown', keydownHandler);
+window.gameEventListeners.add(window, 'keyup', keyupHandler);
 
 // Add camera modes and third-person view
 const cameraOffset = new THREE.Vector3(0, 7, 15); // Positive Z to position behind the rover
@@ -783,12 +867,7 @@ window.toggleCameraMode = function toggleCameraMode() {
   }
 };
 
-// Add key listener for camera toggle (press 'c' to change camera mode)
-window.addEventListener('keydown', (event) => {
-  if (event.key.toLowerCase() === 'c') {
-    toggleCameraMode();
-  }
-});
+// Camera toggle is now handled in the main keydown handler to prevent duplicate listeners
 
 // Add a variable to track the rover's yaw rotation separately - Make globally accessible for mobile controls
 window.roverYaw = 0;
@@ -4145,36 +4224,20 @@ function createHUD() {
   //distanceText.innerHTML = 'Distance Traveled: 0.00 miles';
   document.body.appendChild(distanceText);
 
-  // Update HUD when camera mode changes
-  window.addEventListener('keydown', (event) => {
-    if (event.key.toLowerCase() === 'c') {
-      const hud = document.getElementById('cameraHUD');
-      if (hud) {
-        switch (cameraMode) {
-          case 'orbit':
-            hud.innerHTML = 'Camera: Orbit Mode (Press C to change)';
-            break;
-          case 'thirdPerson':
-            hud.innerHTML = 'Camera: Third Person Mode (Press C to change)';
-            break;
-          case 'firstPerson':
-            hud.innerHTML = 'Camera: First Person Mode (Press C to change)';
-            break;
-        }
-      }
-    }
-  });
+  // HUD update is now handled in the main keydown handler to prevent duplicate listeners
 }
 
 // Create the HUD
 createHUD();
 
-// Resize Window
-window.addEventListener('resize', () => {
+// Resize Window - using centralized event listener management
+const resizeHandler = () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
-});
+};
+
+window.gameEventListeners.add(window, 'resize', resizeHandler);
 
 function createRealisticMarsTerrain() {
   // Performance-adaptive terrain creation with mobile optimization
@@ -4908,8 +4971,8 @@ function createSpaceSkybox() {
   // Use a higher-resolution sphere for smoother appearance
   const skyboxGeometry = new THREE.SphereGeometry(6000, 256, 256);
 
-  // Create a higher resolution texture
-  const texture = createSphericalSkyTexture(8192); // Increase texture size to 4096x4096
+  // Create a higher resolution texture - capped to prevent memory issues
+  const texture = createSphericalSkyTexture(perfSettings.isMobile ? 1024 : 4096); // Cap at 4096 for desktop, 1024 for mobile
 
   // Apply advanced texture filtering for smoother appearance
   texture.minFilter = THREE.LinearMipmapLinearFilter; // Use trilinear filtering
@@ -5632,10 +5695,10 @@ class LazyLoader {
   }
 
   async loadInBackground(componentName, loadFunction) {
-    // Load component in the background without blocking
+    // Load component in the background without blocking - faster for immediate response
     setTimeout(() => {
       this.loadComponent(componentName, loadFunction, 'background');
-    }, 100);
+    }, 10);
   }
 }
 
@@ -5649,10 +5712,10 @@ function initializeScene() {
   // Load essential components immediately
   loadCoreComponents();
   
-  // Load non-essential components in background
+  // Load non-essential components in background - reduced delay for faster startup
   setTimeout(() => {
     loadNonEssentialComponents();
-  }, 1000);
+  }, 100);
 }
 
 function loadCoreComponents() {
@@ -5703,7 +5766,7 @@ function loadNonEssentialComponents() {
   if (perfSettings.isMobile) {
     console.log("Mobile device detected - loading essential systems only");
     
-    // Load basic Mars scene manager but with reduced features
+    // Load basic Mars scene manager but with reduced features - prioritize for immediate driving
     setTimeout(() => {
       lazyLoader.loadInBackground('marsSceneManager', () => {
         // Create a mobile-optimized scene manager
@@ -5714,7 +5777,7 @@ function loadNonEssentialComponents() {
         }
         return Promise.resolve();
       });
-    }, 2000); // Shorter delay for mobile
+    }, 50); // Reduced from 2000ms to 50ms for immediate driving capability
     
     console.log("Essential mobile components queued for loading");
     return;
@@ -5946,12 +6009,7 @@ function updateSkyAppearance(transitionProgress = null) {
 // Start the day/night cycle
 startDayNightCycle();
 
-// Add a keypress handler for toggling
-document.addEventListener('keydown', function (event) {
-  if (event.key === 'l' || event.key === 'L') { // 'L' for Light cycle
-    toggleDayNight();
-  }
-});
+// Day/night toggle is now handled in the main keydown handler to prevent duplicate listeners
 
 // Run the initialization in the correct order
 initializeScene();
@@ -5979,7 +6037,7 @@ function updateDistanceTraveled(currentTime) {
 // Create a realistic Mars day sky texture based on NASA imagery and scientific data
 function createRealisticMarsDaySkyTexture() {
   const canvas = document.createElement('canvas');
-  const canvasSize = 2048;
+  const canvasSize = perfSettings.isMobile ? 1024 : 2048; // Responsive to device capabilities
   canvas.width = canvasSize;
   canvas.height = canvasSize;
   const context = canvas.getContext('2d');
@@ -6295,7 +6353,7 @@ function updateSkyForTimeOfDay(timeOfDay) {
 // Create a dawn sky texture with beautiful sunrise colors
 function createDawnSkyTexture(dawnFactor) {
   const canvas = document.createElement('canvas');
-  const size = 2048;
+  const size = perfSettings.isMobile ? 1024 : 2048; // Responsive to device capabilities
   canvas.width = size;
   canvas.height = size;
   const context = canvas.getContext('2d');
@@ -6360,7 +6418,7 @@ function createDawnSkyTexture(dawnFactor) {
 // Create a dusk sky texture with beautiful sunset colors
 function createDuskSkyTexture(duskFactor) {
   const canvas = document.createElement('canvas');
-  const size = 2048;
+  const size = perfSettings.isMobile ? 1024 : 2048; // Responsive to device capabilities
   canvas.width = size;
   canvas.height = size;
   const context = canvas.getContext('2d');
@@ -6425,7 +6483,7 @@ function createDuskSkyTexture(duskFactor) {
 // Create a day sky texture with intensity factor
 function createDaySkyTexture(intensityFactor) {
   const canvas = document.createElement('canvas');
-  const size = 2048;
+  const size = perfSettings.isMobile ? 1024 : 2048; // Responsive to device capabilities
   canvas.width = size;
   canvas.height = size;
   const context = canvas.getContext('2d');
@@ -7018,12 +7076,7 @@ function updateSkyAppearance(transitionProgress = null) {
 // Start the day/night cycle
 //startDayNightCycle();
 
-// Add a keypress handler for toggling
-document.addEventListener('keydown', function (event) {
-  if (event.key === 'l' || event.key === 'L') { // 'L' for Light cycle
-    toggleDayNight();
-  }
-});
+// Day/night toggle is now handled in the main keydown handler to prevent duplicate listeners
 
 // ==============================================================================
 // COMPREHENSIVE ENHANCEMENT SYSTEMS
@@ -7615,7 +7668,7 @@ function createEnhancedHUD() {
   }
   
   // Detect mobile device
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const isMobile = isMobileDevice();
   
   const hud = document.createElement('div');
   hud.id = 'hud';
@@ -7681,6 +7734,19 @@ function createEnhancedHUD() {
           <div style="color: #aa44ff; font-weight: bold; font-size: 9px;">🏆 ACH</div>
           <div>Unlocked: <span id="achievements-count">0</span></div>
         </div>
+        <div style="margin-top: 6px; border-top: 1px solid #333; padding-top: 6px;">
+          <button id="low-power-toggle" style="
+            background: #333; 
+            border: 1px solid #666; 
+            color: #ffaa44; 
+            cursor: pointer; 
+            font-size: 8px; 
+            padding: 4px 8px; 
+            border-radius: 3px; 
+            width: 100%;
+            transition: all 0.3s ease;
+          ">⚡ Low Power Mode</button>
+        </div>
       </div>
     `;
   } else {
@@ -7726,6 +7792,19 @@ function createEnhancedHUD() {
         <div style="color: #aa44ff; font-weight: bold;">🏆 ACHIEVEMENTS</div>
         <div>Unlocked: <span id="achievements-count">0</span></div>
       </div>
+      <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
+        <button id="low-power-toggle" style="
+          background: #333; 
+          border: 1px solid #666; 
+          color: #ffaa44; 
+          cursor: pointer; 
+          font-size: 12px; 
+          padding: 8px 12px; 
+          border-radius: 4px; 
+          width: 100%;
+          transition: all 0.3s ease;
+        ">⚡ Low Power Mode</button>
+      </div>
     `;
   }
   
@@ -7749,6 +7828,51 @@ function createEnhancedHUD() {
       }
     });
   }
+  
+  // Add low-power toggle functionality for both mobile and desktop
+  const lowPowerToggle = document.getElementById('low-power-toggle');
+  let isLowPowerMode = false;
+  
+  if (lowPowerToggle) {
+    lowPowerToggle.addEventListener('click', () => {
+      isLowPowerMode = !isLowPowerMode;
+      
+      if (isLowPowerMode) {
+        // Enable low power mode
+        renderer.setPixelRatio(0.5); // Reduce pixel ratio for instant FPS boost
+        if (renderer.shadowMap) {
+          renderer.shadowMap.enabled = false; // Disable shadows
+        }
+        renderer.antialias = false; // Disable antialiasing
+        
+        // Update button appearance
+        lowPowerToggle.style.background = '#ff6b35';
+        lowPowerToggle.style.color = '#fff';
+        lowPowerToggle.textContent = '🔋 Low Power: ON';
+        
+        console.log('Low power mode enabled - FPS boost activated');
+      } else {
+        // Disable low power mode
+        const perfSettings = getPerformanceSettings();
+        const pixelRatio = perfSettings.isMobile ? 
+                          (perfSettings.mobileTier === 'high' ? Math.min(window.devicePixelRatio, 1.5) : 1) :
+                          Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1);
+        renderer.setPixelRatio(pixelRatio); // Restore original pixel ratio
+        
+        if (renderer.shadowMap && perfSettings.shadowQuality !== 'none') {
+          renderer.shadowMap.enabled = true; // Re-enable shadows if supported
+        }
+        renderer.antialias = perfSettings.antialiasing; // Restore antialiasing
+        
+        // Update button appearance
+        lowPowerToggle.style.background = '#333';
+        lowPowerToggle.style.color = '#ffaa44';
+        lowPowerToggle.textContent = '⚡ Low Power Mode';
+        
+        console.log('Low power mode disabled - restored original settings');
+      }
+    });
+  }
 }
 
 // Enhanced controls information
@@ -7759,7 +7883,7 @@ function addEnhancedControlsInfo() {
   }
   
   // Detect mobile device
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const isMobile = isMobileDevice();
   
   // Skip creating controls panel on mobile devices
   if (isMobile) {
@@ -7884,7 +8008,7 @@ function updateEnhancedHUD() {
   if (speedEl) speedEl.textContent = currentSpeed.toFixed(1);
   
   // Update camera mode with compact text for mobile
-  const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  const isMobile = isMobileDevice();
   const cameraElement = document.getElementById('camera-mode');
   if (cameraElement) {
     if (isMobile) {
