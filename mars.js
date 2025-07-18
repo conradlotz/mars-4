@@ -1070,13 +1070,18 @@ scene.add(marsSurface);
 function createRealisticRover() {
   // Create a group to hold all rover parts
   const roverGroup = new THREE.Group();
+  
+  // Get performance settings to adjust materials for mobile
+  const perfSettings = getPerformanceSettings();
 
   // Main chassis - lower platform
   const chassisGeometry = new THREE.BoxGeometry(2.4, 0.2, 3.2); // Increased size for better visibility
   const chassisMaterial = new THREE.MeshStandardMaterial({
-    color: 0x888888,
+    color: perfSettings.isMobile ? 0xcccccc : 0x888888, // Brighter on mobile
     roughness: 0.7,
-    metalness: 0.3
+    metalness: 0.3,
+    emissive: perfSettings.isMobile ? 0x222222 : 0x000000, // Self-illuminating on mobile
+    emissiveIntensity: perfSettings.isMobile ? 0.2 : 0
   });
   const chassis = new THREE.Mesh(chassisGeometry, chassisMaterial);
   chassis.position.y = 0.6;
@@ -1086,10 +1091,15 @@ function createRealisticRover() {
   // Main body - central electronics box
   const bodyGeometry = new THREE.BoxGeometry(1.8, 0.6, 2.2);
   const bodyMaterial = new THREE.MeshStandardMaterial({
-    color: 0xdddddd,
+    color: perfSettings.isMobile ? 0xffffff : 0xdddddd, // Brighter white on mobile
     roughness: 0.5,
-    metalness: 0.5
+    metalness: 0.5,
+    emissive: perfSettings.isMobile ? 0x333333 : 0x000000, // Strong self-illumination on mobile
+    emissiveIntensity: perfSettings.isMobile ? 0.3 : 0
   });
+  
+  // Mark this as the main body for color customization
+  bodyMaterial.userData = { isBody: true };
   const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
   body.position.y = 1.0;
   body.castShadow = true;
@@ -1163,9 +1173,11 @@ function createRealisticRover() {
   // Solar panels
   const panelGeometry = new THREE.BoxGeometry(2.8, 0.05, 1.8);
   const panelMaterial = new THREE.MeshStandardMaterial({
-    color: 0x2244aa,
+    color: perfSettings.isMobile ? 0x4466ff : 0x2244aa, // Brighter blue on mobile
     roughness: 0.3,
-    metalness: 0.8
+    metalness: 0.8,
+    emissive: perfSettings.isMobile ? 0x001133 : 0x000000, // Blue glow on mobile
+    emissiveIntensity: perfSettings.isMobile ? 0.4 : 0 // Strong blue emission for visibility
   });
   const panel = new THREE.Mesh(panelGeometry, panelMaterial);
   panel.position.y = 1.5;
@@ -1320,6 +1332,32 @@ function createRealisticRover() {
     wheels.push(wheel);
   });
 
+  // Add bright rover lights for mobile visibility
+  if (perfSettings.isMobile) {
+    // Main rover illumination light
+    const roverLight = new THREE.PointLight(0xffffff, 2, 30);
+    roverLight.position.set(0, 3, 0);
+    roverGroup.add(roverLight);
+    
+    // Additional side lights for better visibility
+    const leftLight = new THREE.PointLight(0x4466ff, 1.5, 20);
+    leftLight.position.set(-2, 2, 0);
+    roverGroup.add(leftLight);
+    
+    const rightLight = new THREE.PointLight(0x4466ff, 1.5, 20);
+    rightLight.position.set(2, 2, 0);
+    roverGroup.add(rightLight);
+    
+    // Front headlight
+    const headlight = new THREE.SpotLight(0xffffff, 2, 50, Math.PI / 4, 0.5);
+    headlight.position.set(0, 1.5, 1.5);
+    headlight.target.position.set(0, 0, 5);
+    roverGroup.add(headlight);
+    roverGroup.add(headlight.target);
+    
+    console.log('Mobile rover lighting added for better visibility');
+  }
+
   return {
     rover: roverGroup,
     wheels,
@@ -1371,6 +1409,23 @@ const { rover, wheels, originalWheelPositions } = createRealisticRover();
 // Set initial rotation to face away from the screen
 rover.rotation.y = 0;
 scene.add(rover);
+
+// Add enhanced ambient lighting for mobile devices
+const perfSettingsForRover = getPerformanceSettings();
+if (perfSettingsForRover.isMobile) {
+  // Add strong ambient light for mobile visibility
+  const ambientLight = new THREE.AmbientLight(0x404040, 0.8); // Bright ambient light
+  scene.add(ambientLight);
+  
+  // Add additional hemisphere light for better rover visibility
+  const hemisphereLight = new THREE.HemisphereLight(0x87CEEB, 0x8B4513, 0.6);
+  scene.add(hemisphereLight);
+  
+  console.log('Mobile enhanced lighting added for rover visibility');
+  console.log('Rover position:', rover.position);
+  console.log('Rover visible:', rover.visible);
+  console.log('Rover in scene:', scene.children.includes(rover));
+}
 
 // Initialize Game Systems
 const gameSystem = initializeGameSystems(rover, wheels, scene);
@@ -8610,29 +8665,48 @@ function changeRoverColor(colorHex) {
   if (!perfSettings.enableCustomization || !rover) return;
   
   const color = parseInt(colorHex);
+  let colorChanged = false;
   
   // Find rover body material and change color
   rover.traverse((child) => {
     if (child.isMesh && child.material) {
-      // Only change the main body, not wheels or other parts
-      if (child.material.color && child.userData.isBody) {
+      // Look for the main body material (marked with userData.isBody)
+      if (child.material.userData && child.material.userData.isBody) {
         child.material.color.setHex(color);
+        // Maintain mobile emissive properties
+        if (perfSettings.isMobile) {
+          const emissiveColor = new THREE.Color(color).multiplyScalar(0.2);
+          child.material.emissive = emissiveColor;
+        }
+        colorChanged = true;
       }
     }
   });
   
-  // If no userData.isBody found, change the first material found
-  if (!rover.userData.colorChanged) {
+  // If no tagged material found, change the main body (largest non-wheel component)
+  if (!colorChanged) {
     rover.traverse((child) => {
-      if (child.isMesh && child.material && child.material.color) {
-        child.material.color.setHex(color);
-        rover.userData.colorChanged = true;
-        return; // Stop after first material
+      if (child.isMesh && child.material && child.material.color && !colorChanged) {
+        // Skip wheel materials (typically darker) and small components
+        const color = child.material.color;
+        if (color.r > 0.3 && color.g > 0.3 && color.b > 0.3) { // Likely the main body
+          child.material.color.setHex(parseInt(colorHex));
+          // Maintain mobile emissive properties
+          if (perfSettings.isMobile) {
+            const emissiveColor = new THREE.Color(parseInt(colorHex)).multiplyScalar(0.2);
+            child.material.emissive = emissiveColor;
+          }
+          colorChanged = true;
+        }
       }
     });
   }
   
-  showNotification("🎨 Rover color changed!", 1500);
+  if (colorChanged) {
+    showNotification("🎨 Rover color changed!", 1500);
+  } else {
+    showNotification("🎨 Could not change rover color", 1500);
+  }
 }
 
 // Enhanced controls information
@@ -8866,11 +8940,12 @@ setTimeout(() => {
         const tierMessage = mobileTier === 'high' ? 'High-End Mobile' : 
                            mobileTier === 'medium' ? 'Mid-Range Mobile' : 'Mobile Optimized';
         
-        // Add Samsung-specific messaging with rocket status
+        // Add Samsung-specific messaging with rocket and rover status
         const rocketStatus = perfSettings.disableRockets ? '' : ' Rocket effects enhanced for mobile visibility!';
+        const roverStatus = ' Rover lighting enhanced for mobile!';
         const deviceMessage = perfSettings.samsungOptimized ? 
-          `${tierEmoji} Samsung ${tierMessage}! Display optimizations applied for better visibility!${rocketStatus}` :
-          `${tierEmoji} ${tierMessage}! Enhanced visuals enabled. Use touch controls to drive!${rocketStatus}`;
+          `${tierEmoji} Samsung ${tierMessage}! Display optimizations applied for better visibility!${rocketStatus}${roverStatus}` :
+          `${tierEmoji} ${tierMessage}! Enhanced visuals enabled. Use touch controls to drive!${rocketStatus}${roverStatus}`;
         
         window.showNotification(deviceMessage, 5000);
       } else {
