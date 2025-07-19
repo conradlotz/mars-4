@@ -938,28 +938,37 @@ function getPerformanceSettings() {
   };
 }
 
+// Global renderer check to prevent multiple contexts
+if (window.gameRenderer) {
+  console.warn('Disposing existing renderer to prevent multiple WebGL contexts');
+  window.gameRenderer.dispose();
+  if (window.gameRenderer.domElement && window.gameRenderer.domElement.parentNode) {
+    window.gameRenderer.domElement.parentNode.removeChild(window.gameRenderer.domElement);
+  }
+}
+
 // Scene, Camera, Renderer
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
 camera.position.set(0, 10, 20);
 
-// Performance-optimized renderer with adaptive settings
+// Performance-optimized renderer with adaptive settings - MOBILE EMERGENCY MODE
 const perfSettings = getPerformanceSettings();
 const renderer = new THREE.WebGLRenderer({
-  antialias: perfSettings.antialiasing,
-  powerPreference: perfSettings.isMobile ? 
-                   (perfSettings.mobileTier === 'high' ? 'default' : 'low-power') : 
-                   perfSettings.graphicsQuality === 'high' ? 'high-performance' : 'default',
-  precision: perfSettings.isMobile ? 
-            (perfSettings.mobileTier === 'high' ? 'mediump' : 
-             perfSettings.mobileTier === 'medium' ? 'lowp' : 'lowp') :
-            perfSettings.graphicsQuality === 'high' ? 'highp' : 'mediump',
+  antialias: false, // Force disabled on ALL devices for performance
+  powerPreference: 'low-power', // Force low power on ALL devices
+  precision: 'lowp', // Force lowest precision on ALL devices
   alpha: false,
   stencil: false,
   depth: true,
   logarithmicDepthBuffer: false,
-  preserveDrawingBuffer: false
+  preserveDrawingBuffer: false,
+  failIfMajorPerformanceCaveat: false, // Don't fail on performance issues
+  premultipliedAlpha: false // Reduce GPU load
 });
+
+// Store renderer globally to prevent duplicates
+window.gameRenderer = renderer;
 renderer.setSize(window.innerWidth, window.innerHeight);
 
 // Register renderer with context manager for mobile safety
@@ -1028,12 +1037,63 @@ if (perfSettings.isMobile) {
   }
 }
 
-// Add cleanup on page unload to prevent context leaks
-window.addEventListener('beforeunload', () => {
-  console.log('Cleaning up WebGL contexts before page unload');
+// Add comprehensive cleanup to prevent context leaks
+const cleanup = () => {
+  console.log('Cleaning up WebGL contexts and stopping animation');
+  
+  // Stop animation loop
+  window.gameAnimationRunning = false;
+  if (window.gameAnimationId) {
+    cancelAnimationFrame(window.gameAnimationId);
+  }
+  if (animationId) {
+    cancelAnimationFrame(animationId);
+  }
+  
+  // Dispose all WebGL contexts
   webglContextManager.disposeAll();
+  
+  // Dispose renderer and its context
+  if (window.gameRenderer) {
+    window.gameRenderer.dispose();
+    window.gameRenderer.forceContextLoss();
+    window.gameRenderer = null;
+  }
   if (renderer) {
     renderer.dispose();
+    renderer.forceContextLoss();
+  }
+  
+  // Clear scene
+  if (scene) {
+    scene.traverse(child => {
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        if (child.material.map) child.material.map.dispose();
+        if (child.material.normalMap) child.material.normalMap.dispose();
+        if (child.material.roughnessMap) child.material.roughnessMap.dispose();
+        child.material.dispose();
+      }
+    });
+  }
+};
+
+// Multiple cleanup event listeners
+window.addEventListener('beforeunload', cleanup);
+window.addEventListener('pagehide', cleanup);
+window.addEventListener('unload', cleanup);
+
+// Cleanup on visibility change (when tab becomes hidden)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    console.log('Page hidden - pausing animation to save resources');
+    window.gameAnimationRunning = false;
+  } else {
+    console.log('Page visible - resuming animation');
+    if (!window.gameAnimationRunning) {
+      window.gameAnimationRunning = true;
+      animate(performance.now());
+    }
   }
 });
 document.body.appendChild(renderer.domElement);
@@ -1387,9 +1447,26 @@ function createRealisticRover() {
 
 // Create a solar panel texture
 function createSolarPanelTexture() {
+  const solarPerfSettings = getPerformanceSettings();
+  
+  // MOBILE EMERGENCY: Return minimal texture to prevent WebGL context issues
+  if (solarPerfSettings.isMobile) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 16; // Minimal size
+    canvas.height = 16;
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#2244aa'; // Simple blue color
+    context.fillRect(0, 0, 16, 16);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.generateMipmaps = false;
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    return texture;
+  }
+  
   const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
+  canvas.width = 64; // Reduced size for all devices
+  canvas.height = 64;
   const context = canvas.getContext('2d');
 
   // Background color
@@ -4542,9 +4619,23 @@ animate = function (time) {
   }
 };
 
+// Global animation control to prevent multiple loops
+if (window.gameAnimationRunning) {
+  console.warn('Animation already running, stopping previous loop');
+  cancelAnimationFrame(window.gameAnimationId);
+}
+window.gameAnimationRunning = true;
+
 // Modify the animate function
 function animate(time) {
-  animationId = requestAnimationFrame(animate);
+  // Check if animation should continue
+  if (!window.gameAnimationRunning) {
+    console.log('Animation stopped by global control');
+    return;
+  }
+  
+  window.gameAnimationId = requestAnimationFrame(animate);
+  animationId = window.gameAnimationId;
   
   // Emergency performance monitoring for mobile
   const currentPerfSettings = getPerformanceSettings();
@@ -4552,26 +4643,39 @@ function animate(time) {
     mobilePerformanceMonitor.update(time);
     
     // If performance is critically bad, enable emergency mode
-    if (!emergencyPerformanceMode && mobilePerformanceMonitor.getAverageFPS() < 10) {
+    if (!emergencyPerformanceMode && mobilePerformanceMonitor.getAverageFPS() < 5) { // Lower threshold
       emergencyPerformanceMode = true;
-      console.warn('Emergency performance mode activated - reducing quality drastically');
+      console.warn('CRITICAL: Emergency performance mode activated - maximum quality reduction');
       
-      // Hide all non-essential objects
+      // Hide all objects except rover and essential lights
       scene.children.forEach(child => {
         if (child !== rover && child.type !== 'DirectionalLight' && child.type !== 'AmbientLight') {
           child.visible = false;
         }
       });
       
-      // Reduce rover detail
+      // Drastically reduce rover detail
       rover.traverse(child => {
         if (child.isMesh && child.material) {
           child.material.needsUpdate = false;
+          // Remove ALL textures and use basic material
           if (child.material.map) {
-            child.material.map = null; // Remove textures
+            child.material.map.dispose();
+            child.material.map = null;
           }
+          if (child.material.normalMap) {
+            child.material.normalMap.dispose();
+            child.material.normalMap = null;
+          }
+          // Use basic material
+          child.material = new THREE.MeshBasicMaterial({
+            color: child.material.color || 0xffffff
+          });
         }
       });
+      
+      // Force minimal render settings
+      renderer.setPixelRatio(0.5); // Extremely low resolution
     }
   }
 
@@ -5504,32 +5608,26 @@ function createRealisticMarsTerrain() {
 
   geometry.computeVertexNormals();
 
-  // Create material with Mars texture
-  const marsTexture = createRealisticMarsTexture();
-  marsTexture.wrapS = THREE.RepeatWrapping;
-  marsTexture.wrapT = THREE.RepeatWrapping;
-  marsTexture.repeat.set(8, 8); // Repeat texture to avoid stretching
-
-  // Create a normal map for additional detail
-  const normalMap = createMarsNormalMap();
-  normalMap.wrapS = THREE.RepeatWrapping;
-  normalMap.wrapT = THREE.RepeatWrapping;
-  normalMap.repeat.set(8, 8);
-
-  // Create a roughness map
-  const roughnessMap = createMarsRoughnessMap();
-  roughnessMap.wrapS = THREE.RepeatWrapping;
-  roughnessMap.wrapT = THREE.RepeatWrapping;
-  roughnessMap.repeat.set(8, 8);
-
-  // Create material with smooth shading
-  const material = new THREE.MeshStandardMaterial({
-    color: 0xaa6633,  // Martian reddish-brown color
-    roughness: 0.9,   // Very rough surface
-    metalness: 0.1,   // Low metalness for a dusty appearance
-    flatShading: false, // Use smooth shading
-    side: THREE.DoubleSide
-  });
+  // MOBILE EMERGENCY: Use basic material without textures to prevent WebGL context issues
+  const terrainPerfSettings = getPerformanceSettings();
+  let material;
+  
+  if (terrainPerfSettings.isMobile || true) { // Force basic materials on ALL devices
+    // Use basic material without textures - no additional WebGL contexts
+    material = new THREE.MeshBasicMaterial({
+      color: 0xaa6633,  // Martian reddish-brown color
+      side: THREE.DoubleSide,
+      transparent: false,
+      fog: true // Allow fog to affect material for depth
+    });
+    console.log('Emergency: Using basic terrain material without textures');
+  } else {
+    // This branch should not execute in emergency mode
+    material = new THREE.MeshBasicMaterial({
+      color: 0xaa6633,
+      side: THREE.DoubleSide
+    });
+  }
 
   const terrain = new THREE.Mesh(geometry, material);
   terrain.receiveShadow = true;
@@ -5580,15 +5678,28 @@ function createRealisticMarsTerrain() {
   return terrain;
 }
 
-// Create a realistic Mars texture
+// Create a realistic Mars texture - EMERGENCY MOBILE MODE
 function createRealisticMarsTexture() {
-  const perfSettings = getPerformanceSettings();
-  const textureSize = perfSettings.textureSize || 1024;
+  const marsPerfSettings = getPerformanceSettings();
+  
+  // Force minimal texture size on ALL devices to prevent WebGL context issues
+  const textureSize = 64; // Ultra minimal texture size
   
   const canvas = document.createElement('canvas');
   canvas.width = textureSize;
   canvas.height = textureSize;
   const context = canvas.getContext('2d');
+  
+  // MOBILE EMERGENCY: Return solid color instead of complex texture
+  if (marsPerfSettings.isMobile) {
+    context.fillStyle = '#a83c0c'; // Simple Mars red color
+    context.fillRect(0, 0, textureSize, textureSize);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.generateMipmaps = false; // Prevent additional GPU load
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    return texture;
+  }
 
   // Base color - deeper reddish-orange like in the reference image
   const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
@@ -6552,17 +6663,17 @@ function loadCoreComponents() {
   createHUD();
   console.log("HUD created");
 
-  // Create basic skybox (lightweight version first)
+  // MOBILE EMERGENCY: Force simple background for all devices to prevent WebGL context issues
   const perfSettings = getPerformanceSettings();
-  if (perfSettings.detailLevel === 'low') {
-    // Create a simple gradient sky for low-end devices
-    scene.background = new THREE.Color(0x87CEEB);
-    console.log("Simple sky background created");
+  if (perfSettings.isMobile || true) { // Force simple background on ALL devices
+    // Create a simple gradient sky - no textures, no additional WebGL contexts
+    scene.background = new THREE.Color(0x87CEEB); // Simple sky blue
+    scene.fog = new THREE.Fog(0x87CEEB, 100, 1000); // Add fog for depth
+    console.log("Emergency simple sky background created");
   } else {
-    // Create the skybox and make it globally accessible
-    window.spaceSkybox = createSpaceSkybox();
-    scene.add(window.spaceSkybox);
-    console.log("Skybox added to scene");
+    // This branch should not execute in emergency mode
+    scene.background = new THREE.Color(0x87CEEB);
+    console.log("Fallback simple sky background created");
   }
 
   // Create the sun directional light
