@@ -810,27 +810,27 @@ function getPerformanceSettings() {
     // Base settings for device tier
     let baseSettings = {};
     
-    // High-end mobile devices (flagship phones/tablets)
+    // High-end mobile devices (flagship phones/tablets) - Emergency performance mode
     if (mobileTier === 'high') {
       baseSettings = {
-        textureSize: 1024, // Cap at 1024 for mobile safety
-        particleCount: 200,
-        renderDistance: 3500,
-        shadowQuality: 'low',
-        antialiasing: true,
-        skyboxResolution: 1024, // Cap at 1024 for mobile safety
-        detailLevel: 'medium',
-        fogDistance: 2800,
-        graphicsQuality: 'medium',
+        textureSize: 512, // Drastically reduced for emergency performance
+        particleCount: 25, // Minimal particles
+        renderDistance: 1500, // Much shorter render distance
+        shadowQuality: 'none',
+        antialiasing: false, // Disabled for performance
+        skyboxResolution: 512, // Much smaller skybox
+        detailLevel: 'low',
+        fogDistance: 1200,
+        graphicsQuality: 'low',
         isMobile: true,
         mobileTier: 'high',
-        disableRockets: false,
+        disableRockets: true, // Disable all heavy effects
         disableMeteors: true,
-        disableAtmosphericEffects: false,
-        terrainSegments: 112,
-        frameThrottle: 2,
+        disableAtmosphericEffects: true,
+        terrainSegments: 48, // Minimal terrain
+        frameThrottle: 6, // Aggressive frame throttling
         enableCulling: true,
-        maxLights: 6,
+        maxLights: 2, // Minimal lights
         // Game Features - enabled for high-end mobile
         enableDamageSystem: true,
         enableFuelSystem: true,
@@ -840,27 +840,27 @@ function getPerformanceSettings() {
         enableWeatherForecast: false // Disable weather forecast on mobile for performance
       };
     }
-    // Mid-range mobile devices
+    // Mid-range mobile devices - Emergency performance mode
     else if (mobileTier === 'medium') {
       baseSettings = {
-        textureSize: 1024, // Already capped appropriately
-        particleCount: 125,
-        renderDistance: 3000,
+        textureSize: 256, // Extremely reduced
+        particleCount: 10, // Almost no particles
+        renderDistance: 1200,
         shadowQuality: 'none',
         antialiasing: false,
-        skyboxResolution: 1024, // Cap at 1024 for mobile safety
+        skyboxResolution: 256, // Tiny skybox
         detailLevel: 'low',
-        fogDistance: 2300,
+        fogDistance: 1000,
         graphicsQuality: 'low',
         isMobile: true,
         mobileTier: 'medium',
-        disableRockets: false, // Enable rockets on medium-tier mobile
+        disableRockets: true, // Disable all effects for performance
         disableMeteors: true,
         disableAtmosphericEffects: true,
-        terrainSegments: 96,
-        frameThrottle: 3,
+        terrainSegments: 32, // Minimal terrain
+        frameThrottle: 8, // Very aggressive throttling
         enableCulling: true,
-        maxLights: 4,
+        maxLights: 1, // Single light only
         // Game Features - reduced for medium-end mobile
         enableDamageSystem: true,
         enableFuelSystem: true,
@@ -870,27 +870,27 @@ function getPerformanceSettings() {
         enableWeatherForecast: false
       };
     }
-    // Low-end mobile devices (budget phones)
+    // Low-end mobile devices (budget phones) - Ultra minimal mode
     else {
       baseSettings = {
-        textureSize: 768,
-        particleCount: 75,
-        renderDistance: 2500,
+        textureSize: 128, // Ultra minimal textures
+        particleCount: 0, // No particles at all
+        renderDistance: 800, // Very short render distance
         shadowQuality: 'none',
         antialiasing: false,
-        skyboxResolution: 1024,
+        skyboxResolution: 128, // Minimal skybox
         detailLevel: 'low',
-        fogDistance: 1800,
+        fogDistance: 600,
         graphicsQuality: 'low',
         isMobile: true,
         mobileTier: 'low',
         disableRockets: true,
         disableMeteors: true,
         disableAtmosphericEffects: true,
-        terrainSegments: 80,
-        frameThrottle: 4,
+        terrainSegments: 16, // Ultra minimal terrain
+        frameThrottle: 12, // Skip most frames
         enableCulling: true,
-        maxLights: 3,
+        maxLights: 1, // Single light only
         // Game Features - minimal for low-end mobile
         enableDamageSystem: false,
         enableFuelSystem: false,
@@ -962,9 +962,11 @@ const renderer = new THREE.WebGLRenderer({
 });
 renderer.setSize(window.innerWidth, window.innerHeight);
 
-// Adaptive pixel ratio for better visual quality
-const pixelRatio = perfSettings.isMobile ? 
-                   (perfSettings.mobileTier === 'high' ? Math.min(window.devicePixelRatio, 1.5) : 1) :
+// Register renderer with context manager for mobile safety
+webglContextManager.register(renderer);
+
+// Adaptive pixel ratio for better visual quality - capped at 1 for mobile emergency performance
+const pixelRatio = perfSettings.isMobile ? 1 : // Force pixelRatio to 1 on mobile
                    Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1);
 renderer.setPixelRatio(pixelRatio);
 
@@ -999,13 +1001,41 @@ if (perfSettings.isMobile) {
     console.log('- Gamma correction:', perfSettings.gammaCorrection);
   }
   
-  // Enable some optimizations for mid-range and high-end mobile
-  if (perfSettings.mobileTier === 'high') {
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFShadowMap;
-    renderer.shadowMap.autoUpdate = false; // Manual updates for performance
+  // Disable shadows entirely on mobile for performance
+  renderer.shadowMap.enabled = false;
+  
+  // Add WebGL context loss handling for mobile stability
+  renderer.domElement.addEventListener('webglcontextlost', (event) => {
+    event.preventDefault();
+    console.warn('WebGL context lost - pausing animation');
+    // Stop animation loop
+    cancelAnimationFrame(animationId);
+  }, false);
+
+  renderer.domElement.addEventListener('webglcontextrestored', () => {
+    console.log('WebGL context restored - resuming animation');
+    // Restart animation with reduced settings
+    animate(performance.now());
+  }, false);
+  
+  // Force garbage collection more frequently on mobile
+  if (perfSettings.isMobile) {
+    setInterval(() => {
+      if (window.gc) {
+        window.gc();
+      }
+    }, 5000); // More frequent GC - every 5 seconds
   }
 }
+
+// Add cleanup on page unload to prevent context leaks
+window.addEventListener('beforeunload', () => {
+  console.log('Cleaning up WebGL contexts before page unload');
+  webglContextManager.disposeAll();
+  if (renderer) {
+    renderer.dispose();
+  }
+});
 document.body.appendChild(renderer.domElement);
 
 // Adaptive fog based on performance settings with Samsung adjustments
@@ -1332,30 +1362,14 @@ function createRealisticRover() {
     wheels.push(wheel);
   });
 
-  // Add bright rover lights for mobile visibility
+  // Add minimal rover lighting for mobile visibility (reduced for performance)
   if (perfSettings.isMobile) {
-    // Main rover illumination light
-    const roverLight = new THREE.PointLight(0xffffff, 2, 30);
-    roverLight.position.set(0, 3, 0);
+    // Only one main rover light to reduce GPU load
+    const roverLight = new THREE.PointLight(0xffffff, 1.5, 25);
+    roverLight.position.set(0, 2, 0);
     roverGroup.add(roverLight);
     
-    // Additional side lights for better visibility
-    const leftLight = new THREE.PointLight(0x4466ff, 1.5, 20);
-    leftLight.position.set(-2, 2, 0);
-    roverGroup.add(leftLight);
-    
-    const rightLight = new THREE.PointLight(0x4466ff, 1.5, 20);
-    rightLight.position.set(2, 2, 0);
-    roverGroup.add(rightLight);
-    
-    // Front headlight
-    const headlight = new THREE.SpotLight(0xffffff, 2, 50, Math.PI / 4, 0.5);
-    headlight.position.set(0, 1.5, 1.5);
-    headlight.target.position.set(0, 0, 5);
-    roverGroup.add(headlight);
-    roverGroup.add(headlight.target);
-    
-    console.log('Mobile rover lighting added for better visibility');
+    console.log('Minimal mobile rover lighting added for performance');
   }
 
   return {
@@ -1413,13 +1427,12 @@ scene.add(rover);
 // Add enhanced ambient lighting for mobile devices
 const perfSettingsForRover = getPerformanceSettings();
 if (perfSettingsForRover.isMobile) {
-  // Add strong ambient light for mobile visibility
-  const ambientLight = new THREE.AmbientLight(0x404040, 0.8); // Bright ambient light
+  // Reduce ambient light intensity to prevent GPU overload
+  const ambientLight = new THREE.AmbientLight(0x404040, 0.4); // Reduced intensity
   scene.add(ambientLight);
   
-  // Add additional hemisphere light for better rover visibility
-  const hemisphereLight = new THREE.HemisphereLight(0x87CEEB, 0x8B4513, 0.6);
-  scene.add(hemisphereLight);
+  // Remove hemisphere light on mobile to reduce GPU load
+  console.log('Mobile lighting optimized for performance');
   
   console.log('Mobile enhanced lighting added for rover visibility');
   console.log('Rover position:', rover.position);
@@ -1712,6 +1725,37 @@ let roverYaw = window.roverYaw;
 // Add a frame counter for performance optimization
 let frameCount = 0;
 let lastTime = 0;
+let animationId = null; // Track animation frame ID for context loss handling
+
+// Emergency performance mode for mobile
+let emergencyPerformanceMode = false;
+
+// Global WebGL context manager to prevent context overflow
+const webglContextManager = {
+  contexts: new Set(),
+  maxContexts: 2, // Very conservative limit for mobile
+  
+  register: function(renderer) {
+    this.contexts.add(renderer);
+    if (this.contexts.size > this.maxContexts) {
+      console.warn('Too many WebGL contexts, disposing oldest');
+      const oldest = this.contexts.values().next().value;
+      this.dispose(oldest);
+    }
+  },
+  
+  dispose: function(renderer) {
+    if (renderer && typeof renderer.dispose === 'function') {
+      renderer.dispose();
+      this.contexts.delete(renderer);
+    }
+  },
+  
+  disposeAll: function() {
+    this.contexts.forEach(renderer => this.dispose(renderer));
+    this.contexts.clear();
+  }
+};
 const FRAME_THROTTLE = 3; // Only perform heavy operations every N frames
 
 // Mobile performance monitoring
@@ -4500,7 +4544,36 @@ animate = function (time) {
 
 // Modify the animate function
 function animate(time) {
-  requestAnimationFrame(animate);
+  animationId = requestAnimationFrame(animate);
+  
+  // Emergency performance monitoring for mobile
+  const currentPerfSettings = getPerformanceSettings();
+  if (currentPerfSettings.isMobile) {
+    mobilePerformanceMonitor.update(time);
+    
+    // If performance is critically bad, enable emergency mode
+    if (!emergencyPerformanceMode && mobilePerformanceMonitor.getAverageFPS() < 10) {
+      emergencyPerformanceMode = true;
+      console.warn('Emergency performance mode activated - reducing quality drastically');
+      
+      // Hide all non-essential objects
+      scene.children.forEach(child => {
+        if (child !== rover && child.type !== 'DirectionalLight' && child.type !== 'AmbientLight') {
+          child.visible = false;
+        }
+      });
+      
+      // Reduce rover detail
+      rover.traverse(child => {
+        if (child.isMesh && child.material) {
+          child.material.needsUpdate = false;
+          if (child.material.map) {
+            child.material.map = null; // Remove textures
+          }
+        }
+      });
+    }
+  }
 
   // Calculate delta time for consistent movement regardless of frame rate
   const delta = time - lastTime || 16.67; // Default to 60fps if lastTime is not set
@@ -4509,13 +4582,12 @@ function animate(time) {
   // Skip frames if browser tab is inactive or delta is too large (indicating lag)
   if (delta > 100) return;
 
-  // Mobile performance monitoring with adaptive throttling
-  const perfSettings = getPerformanceSettings();
-  if (perfSettings.isMobile) {
+  // Mobile performance monitoring with adaptive throttling  
+  if (currentPerfSettings.isMobile) {
     mobilePerformanceMonitor.update(time);
     
     // Adaptive frame skipping based on performance and device tier
-    const mobileTier = perfSettings.mobileTier || 'low';
+    const mobileTier = currentPerfSettings.mobileTier || 'low';
     const performanceThreshold = mobileTier === 'high' ? 25 : 
                                 mobileTier === 'medium' ? 20 : 15;
     
@@ -4531,31 +4603,31 @@ function animate(time) {
   frameCount++;
 
   // Adaptive frame throttling based on mobile device capabilities
-  const frameThrottle = perfSettings.isMobile ? 
-                       (perfSettings.mobileTier === 'high' ? 2 : 
-                        perfSettings.mobileTier === 'medium' ? 3 : 4) :
-                       perfSettings.detailLevel === 'high' ? 1 : 
-                       perfSettings.detailLevel === 'normal' ? 2 : 3;
+  const frameThrottle = currentPerfSettings.isMobile ? 
+                       (currentPerfSettings.mobileTier === 'high' ? 6 : 
+                        currentPerfSettings.mobileTier === 'medium' ? 8 : 12) : // Much more aggressive throttling
+                       currentPerfSettings.detailLevel === 'high' ? 1 : 
+                       currentPerfSettings.detailLevel === 'normal' ? 2 : 3;
 
   // Optimize operations for mobile with tier-based updates
-  if (perfSettings.isMobile) {
-    // Mobile scene manager updates with less aggressive throttling
-    const sceneUpdateThrottle = perfSettings.mobileTier === 'high' ? 2 : 
-                               perfSettings.mobileTier === 'medium' ? 4 : 6;
+  if (currentPerfSettings.isMobile) {
+    // Mobile scene manager updates - heavily throttled
+    const sceneUpdateThrottle = currentPerfSettings.mobileTier === 'high' ? 10 : 
+                               currentPerfSettings.mobileTier === 'medium' ? 20 : 40;
     
     if (window.marsSceneManager && rover && frameCount % (frameThrottle * sceneUpdateThrottle) === 0) {
       window.marsSceneManager.update(rover.position);
     }
     
-    // Enable atmospheric effects on high-end mobile devices with better frequency
-    if (!perfSettings.disableAtmosphericEffects && window.atmosphericEffects && 
-        frameCount % (frameThrottle * (perfSettings.mobileTier === 'high' ? 3 : 6)) === 0) {
+    // Disable all atmospheric effects and particles on mobile in emergency mode
+    if (!emergencyPerformanceMode && !currentPerfSettings.disableAtmosphericEffects && window.atmosphericEffects && 
+        frameCount % (frameThrottle * 20) === 0) {
       window.atmosphericEffects.update(delta, rover.position);
     }
     
-    // Enable dust particles updates on mid-range and high-end mobile
-    if ((perfSettings.mobileTier === 'high' || perfSettings.mobileTier === 'medium') && 
-        isMoving && frameCount % (frameThrottle * 2) === 0) {
+    // Disable dust particles entirely in emergency mode
+    if (!emergencyPerformanceMode && currentPerfSettings.mobileTier === 'high' && 
+        isMoving && frameCount % (frameThrottle * 10) === 0) {
       if (window.dustParticles) {
         window.dustParticles.update(rover.position, isMoving);
       }
@@ -8957,12 +9029,11 @@ setTimeout(() => {
         const tierMessage = mobileTier === 'high' ? 'High-End Mobile' : 
                            mobileTier === 'medium' ? 'Mid-Range Mobile' : 'Mobile Optimized';
         
-        // Add Samsung-specific messaging with rocket and rover status
-        const rocketStatus = perfSettings.disableRockets ? '' : ' Rocket effects enhanced for mobile visibility!';
-        const roverStatus = ' Rover lighting enhanced for mobile!';
+        // Add emergency performance messaging for mobile
+        const performanceStatus = ' Emergency performance mode active for stability!';
         const deviceMessage = perfSettings.samsungOptimized ? 
-          `${tierEmoji} Samsung ${tierMessage}! Display optimizations applied for better visibility!${rocketStatus}${roverStatus}` :
-          `${tierEmoji} ${tierMessage}! Enhanced visuals enabled. Use touch controls to drive!${rocketStatus}${roverStatus}`;
+          `${tierEmoji} Samsung ${tierMessage}! Emergency optimizations applied for maximum performance!${performanceStatus}` :
+          `${tierEmoji} ${tierMessage}! Emergency performance mode enabled. Graphics reduced for stability.${performanceStatus}`;
         
         window.showNotification(deviceMessage, 5000);
       } else {
