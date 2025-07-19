@@ -1101,29 +1101,29 @@
         const notification = document.createElement('div');
         notification.style.cssText = `
           position: fixed;
-          top: 20px;
-          left: 50%;
-          transform: translateX(-50%);
+          bottom: 80px;
+          right: 20px;
           background: rgba(0, 0, 0, 0.9);
           color: white;
-          padding: 15px 25px;
+          padding: 12px 20px;
           border-radius: 25px;
           z-index: 10001;
-          font-size: 14px;
+          font-size: 12px;
           text-align: center;
           border: 2px solid rgba(255, 107, 53, 0.6);
           backdrop-filter: blur(15px);
           transition: all 0.3s ease;
           cursor: pointer;
           box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+          max-width: 200px;
         `;
         
         notification.innerHTML = `
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 20px; animation: pulse 2s infinite;">🎵</span>
-            <div>
-              <div style="font-weight: bold; margin-bottom: 3px;">Click to Enable Mars Music</div>
-              <div style="font-size: 12px; opacity: 0.8;">Ambient sounds ready to play</div>
+          <div style="display: flex; align-items: center; gap: 8px; flex-direction: column;">
+            <span style="font-size: 16px; animation: pulse 2s infinite;">🎵</span>
+            <div style="font-size: 11px; text-align: center;">
+              <div style="font-weight: bold; margin-bottom: 2px;">Mars Music</div>
+              <div style="opacity: 0.8;">Tap to play</div>
             </div>
           </div>
         `;
@@ -1165,13 +1165,13 @@
           // Remove after success
           setTimeout(() => {
             notification.style.opacity = '0';
-            notification.style.transform = 'translateX(-50%) translateY(-20px)';
+            notification.style.transform = 'translateY(20px)';
             setTimeout(() => {
               if (notification.parentNode) {
                 notification.parentNode.removeChild(notification);
               }
             }, 300);
-          }, 2000);
+          }, 1500);
           
           // Remove click listener
           notification.removeEventListener('click', enableAudio);
@@ -1180,18 +1180,18 @@
         // Add click listener
         notification.addEventListener('click', enableAudio);
         
-        // Auto-remove after 12 seconds if not clicked
+        // Auto-remove after 5 seconds if not clicked
         setTimeout(() => {
           if (notification.parentNode) {
             notification.style.opacity = '0';
-            notification.style.transform = 'translateX(-50%) translateY(-20px)';
+            notification.style.transform = 'translateY(20px)';
             setTimeout(() => {
               if (notification.parentNode) {
                 notification.parentNode.removeChild(notification);
               }
             }, 300);
           }
-        }, 12000);
+        }, 5000);
       }
       
       // Clean up UI elements after loading
@@ -1385,7 +1385,7 @@
         
         document.body.appendChild(instructions);
         
-        // Auto-remove after 12 seconds
+        // Auto-remove after 6 seconds for faster dismissal
         setTimeout(() => {
           if (instructions.parentNode) {
             instructions.style.opacity = '0';
@@ -1394,7 +1394,7 @@
               instructions.remove();
             }, 300);
           }
-        }, 12000);
+        }, 6000);
       }
     }
     

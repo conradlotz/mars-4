@@ -1425,15 +1425,32 @@ if (perfSettingsForRover.isMobile) {
   console.log('Rover position:', rover.position);
   console.log('Rover visible:', rover.visible);
   console.log('Rover in scene:', scene.children.includes(rover));
+  console.log('Camera position:', camera.position);
+  console.log('Camera looking at rover area');
+  
+  // Ensure rover is at a visible position
+  rover.position.set(0, 0, 0);
+  
+  // Force rover to be visible
+  rover.visible = true;
+  rover.traverse((child) => {
+    if (child.isMesh) {
+      child.visible = true;
+    }
+  });
+  
+  // Make sure camera can see rover area
+  camera.position.set(0, 10, 20);
+  camera.lookAt(0, 0, 0);
 }
 
 // Initialize Game Systems
 const gameSystem = initializeGameSystems(rover, wheels, scene);
 
-// Show welcome message with new features
+// Show welcome message with new features (reduced delay)
 setTimeout(() => {
   showWelcomeMessage();
-}, 2000);
+}, 1000);
 
 // Dust Particle System
 const createDustParticles = () => {
