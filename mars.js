@@ -971,8 +971,10 @@ const renderer = new THREE.WebGLRenderer({
 window.gameRenderer = renderer;
 renderer.setSize(window.innerWidth, window.innerHeight);
 
-// Register renderer with context manager for mobile safety
-webglContextManager.register(renderer);
+// Register renderer with context manager for mobile safety (guard against TDZ)
+if (window.webglContextManager && typeof window.webglContextManager.register === 'function') {
+  window.webglContextManager.register(renderer);
+}
 
 // Adaptive pixel ratio for better visual quality - capped at 1 for mobile emergency performance
 const pixelRatio = perfSettings.isMobile ? 1 : // Force pixelRatio to 1 on mobile
@@ -1097,6 +1099,9 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 document.body.appendChild(renderer.domElement);
+
+// Prepare the night skybox (starry sky) for the day/night system
+let spaceSkybox = createSpaceSkybox();
 
 // Adaptive fog based on performance settings with Samsung adjustments
 const fogColor = perfSettings.samsungOptimized ? 0xd4a574 : 0xb77c5a;  // Lighter fog for Samsung
@@ -1833,6 +1838,8 @@ const webglContextManager = {
     this.contexts.clear();
   }
 };
+// Expose context manager globally for safe early access
+window.webglContextManager = webglContextManager;
 const FRAME_THROTTLE = 3; // Only perform heavy operations every N frames
 
 // Mobile performance monitoring
@@ -6663,17 +6670,12 @@ function loadCoreComponents() {
   createHUD();
   console.log("HUD created");
 
-  // MOBILE EMERGENCY: Force simple background for all devices to prevent WebGL context issues
+  // Simple background only for mobile to prevent WebGL context issues
   const perfSettings = getPerformanceSettings();
-  if (perfSettings.isMobile || true) { // Force simple background on ALL devices
-    // Create a simple gradient sky - no textures, no additional WebGL contexts
-    scene.background = new THREE.Color(0x87CEEB); // Simple sky blue
-    scene.fog = new THREE.Fog(0x87CEEB, 100, 1000); // Add fog for depth
-    console.log("Emergency simple sky background created");
-  } else {
-    // This branch should not execute in emergency mode
+  if (perfSettings.isMobile) {
     scene.background = new THREE.Color(0x87CEEB);
-    console.log("Fallback simple sky background created");
+    scene.fog = new THREE.Fog(0x87CEEB, 100, 1000);
+    console.log("Mobile: simple sky background created");
   }
 
   // Create the sun directional light
@@ -7840,11 +7842,11 @@ function forceDayMode() {
 // Expose the function globally for debugging
 window.forceDayMode = forceDayMode;
 
-// Call forceDayMode after a short delay to ensure everything is initialized
-setTimeout(() => {
-  console.log("Auto-forcing day mode after initialization");
-  forceDayMode();
-}, 2000);
+// Optionally start in day; do not force override so night can appear normally
+// setTimeout(() => {
+//   console.log("Auto-forcing day mode after initialization");
+//   forceDayMode();
+// }, 2000);
 
 function updateSkyAppearance(transitionProgress = null) {
   console.log("Updating sky appearance - isDaytime:", isDaytime);
