@@ -1019,13 +1019,27 @@ if (perfSettings.isMobile) {
   renderer.domElement.addEventListener('webglcontextlost', (event) => {
     event.preventDefault();
     console.warn('WebGL context lost - pausing animation');
-    // Stop animation loop
-    cancelAnimationFrame(animationId);
+    window.gameAnimationRunning = false;
+    if (window.gameAnimationId) {
+      cancelAnimationFrame(window.gameAnimationId);
+    }
+    
+    // Dispose all contexts to prevent overflow
+    if (window.webglContextManager) {
+      window.webglContextManager.disposeAll();
+    }
   }, false);
 
   renderer.domElement.addEventListener('webglcontextrestored', () => {
     console.log('WebGL context restored - resuming animation');
+    
+    // Re-register the renderer
+    if (window.webglContextManager) {
+      window.webglContextManager.register(renderer);
+    }
+    
     // Restart animation with reduced settings
+    window.gameAnimationRunning = true;
     animate(performance.now());
   }, false);
   
@@ -1815,25 +1829,33 @@ let emergencyPerformanceMode = false;
 // Global WebGL context manager to prevent context overflow
 const webglContextManager = {
   contexts: new Set(),
-  maxContexts: 2, // Very conservative limit for mobile
+  maxContexts: 1, // Only allow one context to prevent overflow
   
   register: function(renderer) {
-    this.contexts.add(renderer);
-    if (this.contexts.size > this.maxContexts) {
-      console.warn('Too many WebGL contexts, disposing oldest');
-      const oldest = this.contexts.values().next().value;
-      this.dispose(oldest);
+    // If we already have a context, dispose it first
+    if (this.contexts.size >= this.maxContexts) {
+      console.warn('Disposing existing WebGL context to prevent overflow');
+      this.disposeAll();
     }
+    
+    this.contexts.add(renderer);
+    console.log('WebGL context registered, total contexts:', this.contexts.size);
   },
   
   dispose: function(renderer) {
     if (renderer && typeof renderer.dispose === 'function') {
-      renderer.dispose();
-      this.contexts.delete(renderer);
+      try {
+        renderer.dispose();
+        console.log('WebGL context disposed successfully');
+      } catch (error) {
+        console.warn('Error disposing WebGL context:', error);
+      }
     }
+    this.contexts.delete(renderer);
   },
   
   disposeAll: function() {
+    console.log('Disposing all WebGL contexts');
     this.contexts.forEach(renderer => this.dispose(renderer));
     this.contexts.clear();
   }
@@ -1846,8 +1868,9 @@ const FRAME_THROTTLE = 3; // Only perform heavy operations every N frames
 const mobilePerformanceMonitor = {
   frameRates: [],
   lastFrameTime: 0,
-  targetFPS: 30, // Target 30 FPS on mobile
+  targetFPS: 20, // Lower target FPS for mobile stability
   frameDropCount: 0,
+  emergencyModeTriggered: false,
   
   update: function(currentTime) {
     if (this.lastFrameTime > 0) {
@@ -1855,15 +1878,15 @@ const mobilePerformanceMonitor = {
       const fps = 1000 / frameDelta;
       
       this.frameRates.push(fps);
-      if (this.frameRates.length > 30) {
+      if (this.frameRates.length > 20) { // Keep last 20 frames for faster response
         this.frameRates.shift();
       }
       
-      // Check if we're dropping frames
-      if (fps < this.targetFPS * 0.8) {
+      // Check if we're dropping frames with more tolerance
+      if (fps < this.targetFPS * 0.6) {
         this.frameDropCount++;
       } else {
-        this.frameDropCount = Math.max(0, this.frameDropCount - 1);
+        this.frameDropCount = Math.max(0, this.frameDropCount - 2);
       }
     }
     
@@ -1871,12 +1894,24 @@ const mobilePerformanceMonitor = {
   },
   
   getAverageFPS: function() {
-    if (this.frameRates.length === 0) return 0;
+    if (this.frameRates.length === 0) return 30;
     return this.frameRates.reduce((a, b) => a + b, 0) / this.frameRates.length;
   },
   
   isPerformancePoor: function() {
-    return this.frameDropCount > 10;
+    return this.frameDropCount > 15;
+  },
+  
+  shouldTriggerEmergencyMode: function() {
+    // Only trigger emergency mode if we have enough data and performance is consistently bad
+    if (this.frameRates.length < 10) return false;
+    if (this.emergencyModeTriggered) return false;
+    
+    const avgFPS = this.getAverageFPS();
+    const recentFPS = this.frameRates.slice(-5).reduce((a, b) => a + b, 0) / 5;
+    
+    // Trigger only if both average and recent FPS are very low
+    return avgFPS < 3 && recentFPS < 3;
   }
 };
 
@@ -4641,6 +4676,12 @@ function animate(time) {
     return;
   }
   
+  // Prevent multiple animation loops
+  if (window.gameAnimationId && window.gameAnimationId !== animationId) {
+    console.warn('Multiple animation loops detected, canceling previous');
+    cancelAnimationFrame(window.gameAnimationId);
+  }
+  
   window.gameAnimationId = requestAnimationFrame(animate);
   animationId = window.gameAnimationId;
   
@@ -4650,8 +4691,9 @@ function animate(time) {
     mobilePerformanceMonitor.update(time);
     
     // If performance is critically bad, enable emergency mode
-    if (!emergencyPerformanceMode && mobilePerformanceMonitor.getAverageFPS() < 5) { // Lower threshold
+    if (!emergencyPerformanceMode && mobilePerformanceMonitor.shouldTriggerEmergencyMode()) {
       emergencyPerformanceMode = true;
+      mobilePerformanceMonitor.emergencyModeTriggered = true;
       console.warn('CRITICAL: Emergency performance mode activated - maximum quality reduction');
       
       // Hide all objects except rover and essential lights
@@ -4893,8 +4935,8 @@ function animate(time) {
   }
 
     // Update the HUD with the distance traveled
-    if (distanceText) {
-      distanceText.innerHTML = `Distance Traveled: ${distanceTraveled.toFixed(2)} miles`;
+    if (window.distanceText) {
+      window.distanceText.innerHTML = `Distance Traveled: ${distanceTraveled.toFixed(2)} miles`;
     }
   }
 
@@ -5149,20 +5191,20 @@ function createHUD() {
   document.body.appendChild(hudElement);
 
   // Create a text element for distance traveled
-  distanceText = document.createElement('div');
-  distanceText.style.position = 'absolute';
-  distanceText.style.top = '20px';
-  distanceText.style.left = '20px';
-  distanceText.style.color = 'white';
-  distanceText.style.fontSize = '16px';
-  distanceText.style.fontFamily = 'Arial, sans-serif';
-  distanceText.style.padding = '10px';
-  distanceText.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-  distanceText.style.borderRadius = '5px';
-  distanceText.style.pointerEvents = 'none';
-  distanceText.id = 'distanceHUD';
-  //distanceText.innerHTML = 'Distance Traveled: 0.00 miles';
-  document.body.appendChild(distanceText);
+  window.distanceText = document.createElement('div');
+  window.distanceText.style.position = 'absolute';
+  window.distanceText.style.top = '20px';
+  window.distanceText.style.left = '20px';
+  window.distanceText.style.color = 'white';
+  window.distanceText.style.fontSize = '16px';
+  window.distanceText.style.fontFamily = 'Arial, sans-serif';
+  window.distanceText.style.padding = '10px';
+  window.distanceText.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+  window.distanceText.style.borderRadius = '5px';
+  window.distanceText.style.pointerEvents = 'none';
+  window.distanceText.id = 'distanceHUD';
+  //window.distanceText.innerHTML = 'Distance Traveled: 0.00 miles';
+  document.body.appendChild(window.distanceText);
 
   // HUD update is now handled in the main keydown handler to prevent duplicate listeners
 }
@@ -9127,9 +9169,405 @@ function showAnalysisDialog(analysis) {
   }, 10000);
 }
 
+// Mobile Controls System
+class MobileControlsSystem {
+  constructor() {
+    this.joystick = {
+      element: null,
+      knob: null,
+      active: false,
+      startX: 0,
+      startY: 0,
+      currentX: 0,
+      currentY: 0,
+      maxDistance: 40
+    };
+    
+    this.camera = {
+      element: null,
+      startX: 0,
+      startY: 0,
+      sensitivity: 0.003
+    };
+    
+    this.virtualKeys = {
+      w: false,
+      a: false,
+      s: false,
+      d: false
+    };
+    
+    this.isMobile = isMobileDevice();
+    
+    if (this.isMobile) {
+      this.initializeMobileControls();
+    }
+  }
+  
+  initializeMobileControls() {
+    const mobileControls = document.getElementById('mobile-controls');
+    if (!mobileControls) return;
+    
+    mobileControls.classList.add('show');
+    
+    // Prevent page scrolling on mobile
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width = '100%';
+    document.body.style.height = '100%';
+    
+    // Prevent pull-to-refresh on mobile
+    document.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+    }, { passive: false });
+    
+    this.initializeJoystick();
+    this.initializeTouchCamera();
+    this.initializeMobileButtons();
+  }
+  
+  initializeJoystick() {
+    this.joystick.element = document.getElementById('virtual-joystick');
+    this.joystick.knob = document.getElementById('joystick-knob');
+    
+    if (!this.joystick.element || !this.joystick.knob) return;
+    
+    // Touch start
+    this.joystick.element.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      const rect = this.joystick.element.getBoundingClientRect();
+      
+      this.joystick.active = true;
+      this.joystick.startX = rect.left + rect.width / 2;
+      this.joystick.startY = rect.top + rect.height / 2;
+      
+      // Add haptic feedback if available
+      if (navigator.vibrate) {
+        navigator.vibrate(50);
+      }
+      
+      // Visual feedback
+      this.joystick.element.style.background = 'rgba(255, 107, 53, 0.3)';
+      
+      this.updateJoystick(touch.clientX, touch.clientY);
+    });
+    
+    // Touch move
+    this.joystick.element.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      if (!this.joystick.active) return;
+      
+      const touch = e.touches[0];
+      this.updateJoystick(touch.clientX, touch.clientY);
+    });
+    
+    // Touch end
+    const endTouch = () => {
+      this.joystick.active = false;
+      this.joystick.knob.style.transform = 'translate(-50%, -50%)';
+      
+      // Reset visual feedback
+      this.joystick.element.style.background = 'rgba(0, 0, 0, 0.4)';
+      
+      this.resetVirtualKeys();
+    };
+    
+    this.joystick.element.addEventListener('touchend', endTouch);
+    this.joystick.element.addEventListener('touchcancel', endTouch);
+  }
+  
+  updateJoystick(clientX, clientY) {
+    const deltaX = clientX - this.joystick.startX;
+    const deltaY = clientY - this.joystick.startY;
+    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    
+    if (distance <= this.joystick.maxDistance) {
+      this.joystick.currentX = deltaX;
+      this.joystick.currentY = deltaY;
+    } else {
+      const angle = Math.atan2(deltaY, deltaX);
+      this.joystick.currentX = Math.cos(angle) * this.joystick.maxDistance;
+      this.joystick.currentY = Math.sin(angle) * this.joystick.maxDistance;
+    }
+    
+    // Update knob position
+    this.joystick.knob.style.transform = 
+      `translate(${-50 + this.joystick.currentX}%, ${-50 + this.joystick.currentY}%)`;
+    
+    // Update virtual keys based on joystick position
+    this.updateVirtualKeys();
+  }
+  
+  updateVirtualKeys() {
+    const threshold = 15;
+    
+    this.virtualKeys.w = this.joystick.currentY < -threshold;
+    this.virtualKeys.s = this.joystick.currentY > threshold;
+    this.virtualKeys.a = this.joystick.currentX < -threshold;
+    this.virtualKeys.d = this.joystick.currentX > threshold;
+    
+    // Update the global keys object if it exists
+    if (typeof window.keys !== 'undefined') {
+      Object.assign(window.keys, this.virtualKeys);
+    }
+    
+    // Dispatch key events for compatibility
+    this.dispatchKeyEvents();
+  }
+  
+  dispatchKeyEvents() {
+    Object.keys(this.virtualKeys).forEach(key => {
+      if (this.virtualKeys[key] !== this.lastKeys?.[key]) {
+        const event = new KeyboardEvent(
+          this.virtualKeys[key] ? 'keydown' : 'keyup',
+          { key: key, bubbles: true }
+        );
+        document.dispatchEvent(event);
+      }
+    });
+    
+    this.lastKeys = { ...this.virtualKeys };
+  }
+  
+  resetVirtualKeys() {
+    Object.keys(this.virtualKeys).forEach(key => {
+      this.virtualKeys[key] = false;
+    });
+    
+    if (typeof window.keys !== 'undefined') {
+      Object.assign(window.keys, this.virtualKeys);
+    }
+    
+    this.dispatchKeyEvents();
+  }
+  
+  initializeTouchCamera() {
+    this.camera.element = document.getElementById('touch-camera-area');
+    if (!this.camera.element) return;
+    
+    let lastTouchX = 0;
+    let lastTouchY = 0;
+    
+    this.camera.element.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        lastTouchX = e.touches[0].clientX;
+        lastTouchY = e.touches[0].clientY;
+      }
+    });
+    
+    this.camera.element.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      
+      if (e.touches.length === 1) {
+        const touch = e.touches[0];
+        const deltaX = touch.clientX - lastTouchX;
+        const deltaY = touch.clientY - lastTouchY;
+        
+        // Simulate mouse movement for camera controls
+        if (window.cameraMode === 'orbit' && window.controls) {
+          // For orbit controls
+          window.controls.object.rotation.y -= deltaX * this.camera.sensitivity;
+          window.controls.object.rotation.x -= deltaY * this.camera.sensitivity;
+        } else {
+          // For other camera modes, update rover rotation
+          if (typeof window.roverYaw !== 'undefined') {
+            window.roverYaw -= deltaX * this.camera.sensitivity;
+          }
+        }
+        
+        lastTouchX = touch.clientX;
+        lastTouchY = touch.clientY;
+      }
+    });
+  }
+  
+  initializeMobileButtons() {
+    const sampleBtn = document.getElementById('mobile-sample-btn');
+    const analyzeBtn = document.getElementById('mobile-analyze-btn');
+    const rocketBtn = document.getElementById('mobile-rocket-btn');
+    const cameraBtn = document.getElementById('mobile-camera-btn');
+    
+    // Enhanced button handler with debouncing
+    const createButtonHandler = (button, action, cooldown = 500) => {
+      let lastPress = 0;
+      let isPressed = false;
+      
+      const handlePress = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const now = Date.now();
+        if (now - lastPress < cooldown || isPressed) {
+          return;
+        }
+        
+        isPressed = true;
+        lastPress = now;
+        
+        // Visual feedback
+        button.style.transform = 'scale(0.85)';
+        button.style.background = 'rgba(255, 107, 53, 0.9)';
+        button.style.borderColor = 'rgba(255, 107, 53, 1)';
+        
+        // Haptic feedback
+        if (navigator.vibrate) {
+          navigator.vibrate(80);
+        }
+        
+        // Execute action
+        setTimeout(() => {
+          action();
+          
+          // Reset visual feedback
+          setTimeout(() => {
+            button.style.transform = 'scale(1)';
+            button.style.background = 'rgba(0, 0, 0, 0.6)';
+            button.style.borderColor = 'rgba(255, 107, 53, 0.5)';
+            isPressed = false;
+          }, 100);
+        }, 50);
+      };
+      
+      // Use touchend for better control
+      button.addEventListener('touchend', handlePress);
+      
+      // Prevent context menu and other touch interference
+      button.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      
+      button.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      
+      button.addEventListener('touchcancel', (e) => {
+        e.preventDefault();
+        button.style.transform = 'scale(1)';
+        button.style.background = 'rgba(0, 0, 0, 0.6)';
+        button.style.borderColor = 'rgba(255, 107, 53, 0.5)';
+        isPressed = false;
+      });
+    };
+    
+    // Sample Collection Button (E key equivalent)
+    if (sampleBtn) {
+      createButtonHandler(sampleBtn, () => {
+        if (window.keys && window.sampleSystem && window.rover) {
+          const collected = window.sampleSystem.collectSample(window.rover.position);
+          if (collected) {
+            this.showMobileNotification('💎 Sample Collected!', '#00ff88');
+          } else {
+            this.showMobileNotification('No samples nearby', '#ffaa44');
+          }
+        }
+      }, 600);
+    }
+    
+    // Sample Analysis Button (Q key equivalent)
+    if (analyzeBtn) {
+      createButtonHandler(analyzeBtn, () => {
+        if (window.sampleSystem) {
+          const samples = window.sampleSystem.getCollectedSamples();
+          if (samples.length > 0) {
+            const lastSample = samples[samples.length - 1];
+            const analysis = window.sampleSystem.analyzeSample(lastSample.id);
+            if (analysis && window.showAnalysisDialog) {
+              window.showAnalysisDialog(analysis);
+              this.showMobileNotification('🔬 Analysis Ready!', '#00ff88');
+            }
+          } else {
+            this.showMobileNotification('No samples to analyze', '#ffaa44');
+          }
+        }
+      }, 800);
+    }
+    
+    // Rocket Launch Button (R key equivalent)
+    if (rocketBtn) {
+      createButtonHandler(rocketBtn, () => {
+        if (window.marsSceneManager && window.marsSceneManager.rocketLaunchActive) {
+          if (!window.lastManualRocketLaunch || Date.now() - window.lastManualRocketLaunch > 3000) {
+            window.lastManualRocketLaunch = Date.now();
+            window.marsSceneManager.triggerManualLaunch();
+            this.showMobileNotification('🚀 Rocket Launch!', '#00ff88');
+          } else {
+            this.showMobileNotification('Rocket cooldown...', '#ffaa44');
+          }
+        } else {
+          this.showMobileNotification('Rockets optimized for mobile!', '#00ff88');
+        }
+      }, 1000);
+    }
+    
+    // Camera Toggle Button (C key equivalent)
+    if (cameraBtn) {
+      createButtonHandler(cameraBtn, () => {
+        if (typeof window.toggleCameraMode === 'function') {
+          window.toggleCameraMode();
+          this.showCameraModeIndicator();
+        }
+      }, 400);
+    }
+  }
+  
+  showCameraModeIndicator() {
+    const cameraMode = window.cameraMode || 'thirdPerson';
+    const modeNames = {
+      'orbit': '🌍 Orbit View',
+      'thirdPerson': '🚗 Third Person',
+      'firstPerson': '👁️ First Person'
+    };
+    
+    this.showMobileNotification(modeNames[cameraMode] || '📷 Camera Mode', '#00ff88');
+  }
+  
+  showMobileNotification(message, color = '#00ff88') {
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.9);
+      color: white;
+      padding: 12px 24px;
+      border-radius: 25px;
+      z-index: 10003;
+      font-size: 16px;
+      font-weight: bold;
+      transition: all 0.3s ease;
+      border: 2px solid ${color};
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(10px);
+    `;
+    
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    // Fade out and remove
+    setTimeout(() => {
+      notification.style.opacity = '0';
+      notification.style.transform = 'translateX(-50%) translateY(-20px)';
+      setTimeout(() => {
+        if (notification.parentNode) {
+          notification.parentNode.removeChild(notification);
+        }
+      }, 300);
+    }, 2000);
+  }
+}
+
 // Initialize enhanced systems after a short delay
 setTimeout(() => {
   initializeEnhancedSystems();
+  
+  // Initialize mobile controls if on mobile device
+  if (isMobileDevice()) {
+    window.mobileControls = new MobileControlsSystem();
+  }
   
   // Show welcome message with device-specific information
   setTimeout(() => {
