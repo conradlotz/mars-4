@@ -1,341 +1,23 @@
-// Enhanced mobile detection with improved heuristics
-function isMobileDevice() {
-  const userAgent = navigator.userAgent.toLowerCase();
-  
-  // Traditional UA detection
-  const uaCheck = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent);
-  
-  // Enhanced detection for newer iPads and tablets that report as desktop
-  const touchCheck = navigator.maxTouchPoints > 0 && window.innerWidth < 1024;
-  
-  // Additional mobile indicators
-  const orientationCheck = 'orientation' in window;
-  const smallScreenCheck = window.innerWidth <= 768;
-  
-  return uaCheck || touchCheck || (orientationCheck && smallScreenCheck);
-}
-
-// Advanced Game Systems
 function initializeGameSystems(rover, wheels, scene) {
   const perfSettings = getPerformanceSettings();
   const gameSystem = {
-    repairKits: [],
-    fuelCells: [],
-    collectibles: [],
-    damageEffects: [],
     notifications: []
   };
-  
-  // Initialize Rover Health System
-  if (perfSettings.enableDamageSystem) {
-    rover.health = 100;
-    rover.maxHealth = 100;
-    rover.lastDamageTime = 0;
-    
-    // Add damage method
-    rover.takeDamage = function(amount) {
-      this.health = Math.max(0, this.health - amount);
-      this.lastDamageTime = Date.now();
-      
-      // Visual feedback
-      if (this.health < 30) {
-        showNotification("⚠️ Structural damage critical!", 2000);
-      }
-      
-      // Spark effect (simplified)
-      createDamageEffect(this.position);
-      
-      console.log(`Rover took ${amount} damage. Health: ${this.health}/${this.maxHealth}`);
-    };
-    
-    // Add repair method
-    rover.repair = function(amount) {
-      this.health = Math.min(this.maxHealth, this.health + amount);
-      showNotification("🔧 Rover repaired! +" + amount + " HP", 2000);
-      console.log(`Rover repaired by ${amount}. Health: ${this.health}/${this.maxHealth}`);
-    };
-    
-    // Create repair kits scattered around the map
-    createRepairKits(gameSystem, scene);
-  }
-  
-  // Initialize Fuel System
-  if (perfSettings.enableFuelSystem) {
-    rover.fuel = 1000;
-    rover.maxFuel = 1000;
-    rover.fuelConsumption = 0.5; // fuel per second when moving
-    
-    // Add fuel methods
-    rover.consumeFuel = function(amount) {
-      this.fuel = Math.max(0, this.fuel - amount);
-      if (this.fuel < 100) {
-        showNotification("⛽ Fuel running low!", 1500);
-      }
-    };
-    
-    rover.addFuel = function(amount) {
-      this.fuel = Math.min(this.maxFuel, this.fuel + amount);
-      showNotification("⛽ Fuel cell collected! +" + amount + " fuel", 2000);
-    };
-    
-    // Create fuel cells
-    createFuelCells(gameSystem, scene);
-  }
-  
-  // Initialize Easter Eggs
-  if (perfSettings.enableEasterEggs) {
-    createEasterEggs(gameSystem, scene);
-  }
   
   return gameSystem;
 }
 
-// Create repair kits scattered around the map
-function createRepairKits(gameSystem, scene) {
-  const repairKitCount = 15;
-  
-  for (let i = 0; i < repairKitCount; i++) {
-    const kit = new THREE.Mesh(
-      new THREE.BoxGeometry(3, 3, 3),
-      new THREE.MeshStandardMaterial({ 
-        color: 0x00ff00, 
-        emissive: 0x004400, 
-        emissiveIntensity: 0.3 
-      })
-    );
-    
-    // Position randomly around the map
-    const angle = Math.random() * Math.PI * 2;
-    const distance = 50 + Math.random() * 300;
-    kit.position.x = Math.cos(angle) * distance;
-    kit.position.z = Math.sin(angle) * distance;
-    kit.position.y = 5; // Above ground
-    
-    // Add pulsing animation
-    kit.userData = { 
-      type: 'repairKit', 
-      originalY: kit.position.y,
-      animationTime: Math.random() * Math.PI * 2 
-    };
-    
-    scene.add(kit);
-    gameSystem.repairKits.push(kit);
-  }
-}
-
-// Create fuel cells
-function createFuelCells(gameSystem, scene) {
-  const fuelCellCount = 10;
-  
-  for (let i = 0; i < fuelCellCount; i++) {
-    const cell = new THREE.Mesh(
-      new THREE.CylinderGeometry(2, 2, 4, 8),
-      new THREE.MeshStandardMaterial({ 
-        color: 0x0066ff, 
-        emissive: 0x001144, 
-        emissiveIntensity: 0.4 
-      })
-    );
-    
-    // Position randomly around the map
-    const angle = Math.random() * Math.PI * 2;
-    const distance = 80 + Math.random() * 400;
-    cell.position.x = Math.cos(angle) * distance;
-    cell.position.z = Math.sin(angle) * distance;
-    cell.position.y = 6;
-    
-    // Add rotation animation
-    cell.userData = { 
-      type: 'fuelCell', 
-      rotationSpeed: 0.02 + Math.random() * 0.02 
-    };
-    
-    scene.add(cell);
-    gameSystem.fuelCells.push(cell);
-  }
-}
-
-// Create easter eggs
-function createEasterEggs(gameSystem, scene) {
-  // Create the monolith
-  const monolith = new THREE.Mesh(
-    new THREE.BoxGeometry(2, 12, 4),
-    new THREE.MeshStandardMaterial({ 
-      color: 0x111111, 
-      metalness: 0.9,
-      roughness: 0.1,
-      emissive: 0x000011,
-      emissiveIntensity: 0.1
-    })
-  );
-  
-  // Position in a random distant location
-  const angle = Math.random() * Math.PI * 2;
-  const distance = 800 + Math.random() * 500;
-  monolith.position.x = Math.cos(angle) * distance;
-  monolith.position.z = Math.sin(angle) * distance;
-  monolith.position.y = 6;
-  
-  monolith.userData = { 
-    type: 'monolith', 
-    discovered: false 
-  };
-  
-  scene.add(monolith);
-  gameSystem.collectibles.push(monolith);
-  
-  console.log(`Monolith hidden at coordinates: (${Math.round(monolith.position.x)}, ${Math.round(monolith.position.z)})`);
-}
-
-// Create damage effect
-function createDamageEffect(position) {
-  // Simple particle effect for damage
-  const particleCount = 10;
-  const particles = [];
-  
-  for (let i = 0; i < particleCount; i++) {
-    const particle = new THREE.Mesh(
-      new THREE.SphereGeometry(0.1, 4, 4),
-      new THREE.MeshBasicMaterial({ color: 0xff6600 })
-    );
-    
-    particle.position.copy(position);
-    particle.position.add(new THREE.Vector3(
-      (Math.random() - 0.5) * 2,
-      Math.random() * 2,
-      (Math.random() - 0.5) * 2
-    ));
-    
-    // Add to scene temporarily
-    scene.add(particle);
-    particles.push(particle);
-    
-    // Remove after 1 second
-    setTimeout(() => {
-      scene.remove(particle);
-    }, 1000);
-  }
-}
 
 // Update game systems in the animation loop
 function updateGameSystems(time, delta) {
   const perfSettings = getPerformanceSettings();
   
   if (!gameSystem || !rover) return;
-  
-  // Update damage system
-  if (perfSettings.enableDamageSystem && rover.health !== undefined) {
-    updateDamageSystem(time, delta);
-  }
-  
-  // Update fuel system
-  if (perfSettings.enableFuelSystem && rover.fuel !== undefined) {
-    updateFuelSystem(time, delta);
-  }
-  
-  // Update collectibles
-  updateCollectibles(time, delta);
-  
+ 
   // Update visual effects
   updateVisualEffects(time, delta);
 }
 
-// Update damage system
-function updateDamageSystem(time, delta) {
-  // Apply limp effect when health is low
-  if (rover.health < 30 && wheels) {
-    wheels.forEach(wheel => {
-      if (wheel.rotation) {
-        wheel.rotation.x *= 0.98; // Limp effect
-      }
-    });
-  }
-  
-  // Random damage from rough terrain (very rare)
-  if (isMoving && Math.random() < 0.0001) { // 0.01% chance per frame when moving
-    rover.takeDamage(Math.random() * 5 + 1);
-  }
-}
-
-// Update fuel system
-function updateFuelSystem(time, delta) {
-  // Consume fuel while moving
-  if (isMoving && rover.fuel > 0) {
-    rover.consumeFuel(rover.fuelConsumption * delta / 16.67); // Normalize to 60fps
-  }
-  
-  // Prevent movement if no fuel
-  if (rover.fuel <= 0 && isMoving) {
-    showNotification("⛽ Out of fuel! Find fuel cells to continue.", 3000);
-    // Stop movement by resetting position
-    rover.position.copy(previousPosition);
-    isMoving = false;
-  }
-}
-
-// Update collectibles (repair kits, fuel cells, easter eggs)
-function updateCollectibles(time, delta) {
-  // Check repair kit pickups
-  if (gameSystem.repairKits) {
-    gameSystem.repairKits.forEach((kit, index) => {
-      if (kit.visible && rover.position.distanceTo(kit.position) < 8) {
-        kit.visible = false;
-        rover.repair(25);
-        // Remove from array after pickup
-        setTimeout(() => {
-          scene.remove(kit);
-          gameSystem.repairKits.splice(index, 1);
-        }, 100);
-      }
-      
-      // Animate pulsing
-      if (kit.visible && kit.userData) {
-        kit.userData.animationTime += delta * 0.003;
-        kit.position.y = kit.userData.originalY + Math.sin(kit.userData.animationTime) * 0.5;
-      }
-    });
-  }
-  
-  // Check fuel cell pickups
-  if (gameSystem.fuelCells) {
-    gameSystem.fuelCells.forEach((cell, index) => {
-      if (cell.visible && rover.position.distanceTo(cell.position) < 8) {
-        cell.visible = false;
-        rover.addFuel(200);
-        // Remove from array after pickup
-        setTimeout(() => {
-          scene.remove(cell);
-          gameSystem.fuelCells.splice(index, 1);
-        }, 100);
-      }
-      
-      // Animate rotation
-      if (cell.visible && cell.userData) {
-        cell.rotation.y += cell.userData.rotationSpeed;
-      }
-    });
-  }
-  
-  // Check easter egg interactions
-  if (gameSystem.collectibles) {
-    gameSystem.collectibles.forEach((item) => {
-      if (item.userData.type === 'monolith' && !item.userData.discovered) {
-        if (rover.position.distanceTo(item.position) < 10) {
-          item.userData.discovered = true;
-          showNotification("🗿 MONOLITH DISCOVERED! You've found the ancient artifact!", 5000);
-          // Play a sound effect here if audio is enabled
-          console.log("🗿 MONOLITH DISCOVERED! Achievement unlocked!");
-          
-          // Unlock golden rover skin
-          if (rover.material && rover.material.color) {
-            rover.material.color.setHex(0xFFD700); // Gold color
-            showNotification("🏆 Golden Rover skin unlocked!", 3000);
-          }
-        }
-      }
-    });
-  }
-}
 
 // Update visual effects
 function updateVisualEffects(time, delta) {
@@ -382,535 +64,26 @@ function updateGameHUD() {
   }
 }
 
-// Photo mode functionality
-function togglePhotoMode() {
-  const photoMode = document.getElementById('photo-mode');
-  if (photoMode) {
-    photoMode.remove();
-    return;
-  }
-  
-  // Create photo mode overlay
-  const overlay = document.createElement('div');
-  overlay.id = 'photo-mode';
-  overlay.style.cssText = `
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.9);
-    z-index: 1000;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    color: white;
-    font-family: monospace;
-  `;
-  
-  // Hide HUD
-  const hud = document.getElementById('hud');
-  if (hud) hud.style.display = 'none';
-  
-  // Create photo controls
-  overlay.innerHTML = `
-    <div style="text-align: center; margin-bottom: 20px;">
-      <h2>📸 PHOTO MODE</h2>
-      <p>Press SPACE to capture • Press P to exit</p>
-    </div>
-    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
-      <button id="filter-normal" style="padding: 10px 20px; background: #333; color: white; border: 1px solid #666; cursor: pointer;">Normal</button>
-      <button id="filter-sepia" style="padding: 10px 20px; background: #333; color: white; border: 1px solid #666; cursor: pointer;">Sepia</button>
-      <button id="filter-retro" style="padding: 10px 20px; background: #333; color: white; border: 1px solid #666; cursor: pointer;">Retro</button>
-    </div>
-    <canvas id="photo-canvas" style="max-width: 80%; max-height: 60%; border: 2px solid #fff;"></canvas>
-  `;
-  
-  document.body.appendChild(overlay);
-  
-  // Capture current frame
-  capturePhoto();
-  
-  // Add event listeners
-  document.addEventListener('keydown', photoModeKeyHandler);
-  document.getElementById('filter-normal').addEventListener('click', () => applyFilter('normal'));
-  document.getElementById('filter-sepia').addEventListener('click', () => applyFilter('sepia'));
-  document.getElementById('filter-retro').addEventListener('click', () => applyFilter('retro'));
-}
-
-// Photo mode key handler
-function photoModeKeyHandler(event) {
-  if (event.key.toLowerCase() === 'p') {
-    exitPhotoMode();
-  } else if (event.key === ' ') {
-    event.preventDefault();
-    capturePhoto();
-  }
-}
-
-// Exit photo mode
-function exitPhotoMode() {
-  const photoMode = document.getElementById('photo-mode');
-  if (photoMode) photoMode.remove();
-  
-  // Show HUD
-  const hud = document.getElementById('hud');
-  if (hud) hud.style.display = 'block';
-  
-  // Remove event listener
-  document.removeEventListener('keydown', photoModeKeyHandler);
-}
-
-// Capture photo
-function capturePhoto() {
-  const canvas = document.getElementById('photo-canvas');
-  if (!canvas) return;
-  
-  // Copy renderer canvas to photo canvas
-  const ctx = canvas.getContext('2d');
-  canvas.width = renderer.domElement.width;
-  canvas.height = renderer.domElement.height;
-  ctx.drawImage(renderer.domElement, 0, 0);
-  
-  // Show capture effect
-  showNotification("📸 Photo captured!", 1000);
-}
-
-// Apply photo filter
-function applyFilter(filterType) {
-  const canvas = document.getElementById('photo-canvas');
-  if (!canvas) return;
-  
-  const ctx = canvas.getContext('2d');
-  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  const data = imageData.data;
-  
-  for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    
-    switch (filterType) {
-      case 'sepia':
-        data[i] = Math.min(255, (r * 0.393) + (g * 0.769) + (b * 0.189));
-        data[i + 1] = Math.min(255, (r * 0.349) + (g * 0.686) + (b * 0.168));
-        data[i + 2] = Math.min(255, (r * 0.272) + (g * 0.534) + (b * 0.131));
-        break;
-      case 'retro':
-        data[i] = Math.min(255, r * 1.2);
-        data[i + 1] = Math.min(255, g * 0.8);
-        data[i + 2] = Math.min(255, b * 0.6);
-        break;
-      case 'normal':
-      default:
-        // Keep original colors
-        break;
-    }
-  }
-  
-  ctx.putImageData(imageData, 0, 0);
-}
-
-// Konami code activation
-function activateKonamiCode() {
-  showNotification("🎮 KONAMI CODE ACTIVATED! Infinite fuel for 60 seconds!", 5000);
-  console.log("🎮 KONAMI CODE ACTIVATED! Infinite fuel mode!");
-  
-  // Store original fuel consumption
-  const originalConsumption = rover.fuelConsumption;
-  rover.fuelConsumption = 0;
-  
-  // Restore after 60 seconds
-  setTimeout(() => {
-    rover.fuelConsumption = originalConsumption;
-    showNotification("🎮 Konami code effect expired.", 2000);
-  }, 60000);
-}
-
-// Help system
-function toggleHelpSystem() {
-  const helpOverlay = document.getElementById('help-overlay');
-  if (helpOverlay) {
-    helpOverlay.remove();
-    return;
-  }
-  
-  // Create help overlay
-  const overlay = document.createElement('div');
-  overlay.id = 'help-overlay';
-  overlay.style.cssText = `
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.95);
-    z-index: 1000;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    color: white;
-    font-family: monospace;
-    overflow-y: auto;
-    padding: 20px;
-    box-sizing: border-box;
-  `;
-  
-  const perfSettings = getPerformanceSettings();
-  
-  overlay.innerHTML = `
-    <div style="max-width: 800px; width: 100%;">
-      <div style="text-align: center; margin-bottom: 30px;">
-        <h1 style="color: #ff6b35; margin: 0 0 10px 0;">🚀 MARS ROVER SIMULATOR</h1>
-        <p style="color: #888; margin: 0;">Advanced Game Features Guide</p>
-      </div>
-      
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;">
-        <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px;">
-          <h3 style="color: #00ff88; margin: 0 0 10px 0;">🎮 CONTROLS</h3>
-          <div style="font-size: 14px; line-height: 1.5;">
-            <div><strong>W/A/S/D</strong> - Move rover</div>
-            <div><strong>C</strong> - Toggle camera mode</div>
-            <div><strong>L</strong> - Toggle day/night</div>
-            <div><strong>P</strong> - Photo mode</div>
-            <div><strong>H</strong> - Help (this screen)</div>
-          </div>
-        </div>
-        
-        <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px;">
-          <h3 style="color: #ff6b35; margin: 0 0 10px 0;">🔧 DAMAGE SYSTEM</h3>
-          <div style="font-size: 14px; line-height: 1.5;">
-            ${perfSettings.enableDamageSystem ? 
-              `<div>• Rover health: 100%</div>
-               <div>• Collect <span style="color: #00ff00;">green repair kits</span></div>
-               <div>• Health drops from rough terrain</div>
-               <div>• Low health = limping movement</div>` :
-              `<div style="color: #888;">Disabled on this device</div>`
-            }
-          </div>
-        </div>
-        
-        <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px;">
-          <h3 style="color: #4488ff; margin: 0 0 10px 0;">⛽ FUEL SYSTEM</h3>
-          <div style="font-size: 14px; line-height: 1.5;">
-            ${perfSettings.enableFuelSystem ? 
-              `<div>• Fuel depletes while moving</div>
-               <div>• Collect <span style="color: #4488ff;">blue fuel cells</span></div>
-               <div>• No fuel = no movement</div>
-               <div>• Konami code = infinite fuel</div>` :
-              `<div style="color: #888;">Disabled on this device</div>`
-            }
-          </div>
-        </div>
-        
-        <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px;">
-          <h3 style="color: #ff44aa; margin: 0 0 10px 0;">📸 PHOTO MODE</h3>
-          <div style="font-size: 14px; line-height: 1.5;">
-            ${perfSettings.enablePhotoMode ? 
-              `<div>• Press <strong>P</strong> to enter photo mode</div>
-               <div>• <strong>SPACE</strong> to capture photo</div>
-               <div>• Apply Instagram-style filters</div>
-               <div>• <strong>P</strong> again to exit</div>` :
-              `<div style="color: #888;">Disabled on this device</div>`
-            }
-          </div>
-        </div>
-        
-        <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px;">
-          <h3 style="color: #ffaa44; margin: 0 0 10px 0;">🎨 CUSTOMIZATION</h3>
-          <div style="font-size: 14px; line-height: 1.5;">
-            ${perfSettings.enableCustomization ? 
-              `<div>• Color buttons in HUD</div>
-               <div>• Click to change rover color</div>
-               <div>• Find monolith for gold skin</div>
-               <div>• Express your style!</div>` :
-              `<div style="color: #888;">Disabled on this device</div>`
-            }
-          </div>
-        </div>
-        
-        <div style="background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px;">
-          <h3 style="color: #aa44ff; margin: 0 0 10px 0;">🗿 EASTER EGGS</h3>
-          <div style="font-size: 14px; line-height: 1.5;">
-            ${perfSettings.enableEasterEggs ? 
-              `<div>• Find the hidden monolith</div>
-               <div>• Konami code: ↑↑↓↓←→←→BA</div>
-               <div>• Unlocks golden rover skin</div>
-               <div>• Infinite fuel for 60 seconds</div>` :
-              `<div style="color: #888;">Disabled on this device</div>`
-            }
-          </div>
-        </div>
-      </div>
-      
-      <div style="text-align: center; margin-top: 30px; padding: 20px; background: rgba(255, 107, 53, 0.1); border-radius: 8px;">
-        <h3 style="color: #ff6b35; margin: 0 0 10px 0;">🎯 MISSION OBJECTIVES</h3>
-        <div style="font-size: 14px; line-height: 1.5;">
-          <div>• Explore the Martian landscape</div>
-          <div>• Collect samples and resources</div>
-          <div>• Maintain your rover's health and fuel</div>
-          <div>• Discover hidden secrets</div>
-          <div>• Capture stunning photos of Mars</div>
-        </div>
-      </div>
-      
-      <div style="text-align: center; margin-top: 20px;">
-        <button onclick="document.getElementById('help-overlay').remove();" style="
-          background: #ff6b35; 
-          color: white; 
-          border: none; 
-          padding: 12px 24px; 
-          font-size: 16px; 
-          border-radius: 6px; 
-          cursor: pointer;
-          font-family: monospace;
-          font-weight: bold;
-        ">🚀 START EXPLORING</button>
-      </div>
-    </div>
-  `;
-  
-  document.body.appendChild(overlay);
-  
-  // Add click to close
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) {
-      overlay.remove();
-    }
-  });
-}
-
-// Welcome message for new game features
-function showWelcomeMessage() {
-  const perfSettings = getPerformanceSettings();
-  
-  // Count enabled features
-  const enabledFeatures = [
-    perfSettings.enableDamageSystem,
-    perfSettings.enableFuelSystem,
-    perfSettings.enablePhotoMode,
-    perfSettings.enableEasterEggs,
-    perfSettings.enableCustomization
-  ].filter(Boolean).length;
-  
-  if (enabledFeatures > 0) {
-    const message = `
-      🚀 Welcome to Mars Rover Simulator!
-      
-      🎮 ${enabledFeatures} game features enabled
-      ${perfSettings.enableDamageSystem ? '🔧 Damage & Repair System' : ''}
-      ${perfSettings.enableFuelSystem ? '⛽ Fuel Management' : ''}
-      ${perfSettings.enablePhotoMode ? '📸 Photo Mode (Press P)' : ''}
-      ${perfSettings.enableEasterEggs ? '🗿 Hidden Easter Eggs' : ''}
-      ${perfSettings.enableCustomization ? '🎨 Rover Customization' : ''}
-      
-      Press H for help anytime!
-    `;
-    
-    showNotification(message, 8000);
-  }
-}
-
 // Performance-aware initialization with mobile detection
+// Cache for performance settings to avoid recreating WebGL contexts on every call
+let _cachedPerformanceSettings = null;
+
+// Day/night cycle variables - declared early to avoid temporal dead zone issues
+let lastTransitionUpdate = 0;
+let currentTimeOfDay = 0.5; // 0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk, 1 = midnight
+let dayNightCycleSpeed = 0.00001; // Speed of day/night cycle (smaller = slower)
+let isManualTransition = false;
+let manualTransitionTarget = null;
+let manualTransitionSpeed = 0.005;
+
 function getPerformanceSettings() {
-  const isMobile = isMobileDevice();
+  // Return cached settings if available (settings don't change during session)
+  if (_cachedPerformanceSettings) return _cachedPerformanceSettings;
   
-  // Samsung device detection and GPU identification
-  function detectDeviceInfo() {
-    const userAgent = navigator.userAgent.toLowerCase();
-    const isSamsung = /samsung|sm-|galaxy/i.test(userAgent);
-    const isPixel = /pixel/i.test(userAgent);
-    
-    // Get WebGL renderer info for GPU detection
-    let gpuRenderer = 'unknown';
-    let isMaliGPU = false;
-    let isAdrenoGPU = false;
-    
-    try {
-      const canvas = document.createElement('canvas');
-      const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-      if (gl) {
-        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-        if (debugInfo) {
-          gpuRenderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL).toLowerCase();
-          isMaliGPU = /mali/i.test(gpuRenderer);
-          isAdrenoGPU = /adreno/i.test(gpuRenderer);
-        }
-      }
-    } catch (e) {
-      console.warn('Could not detect GPU:', e);
-    }
-    
-    return {
-      isSamsung,
-      isPixel,
-      gpuRenderer,
-      isMaliGPU,
-      isAdrenoGPU
-    };
-  }
-  
-  // Enhanced mobile device capability detection
-  function getMobileDeviceCapabilities() {
-    const deviceMemory = navigator.deviceMemory || 4;
-    const hardwareConcurrency = navigator.hardwareConcurrency || 4;
-    const screenSize = Math.max(window.screen.width, window.screen.height);
-    const pixelRatio = window.devicePixelRatio || 1;
-    const deviceInfo = detectDeviceInfo();
-    
-    // Calculate mobile device tier
-    let mobileScore = 0;
-    if (deviceMemory >= 8) mobileScore += 30;
-    else if (deviceMemory >= 6) mobileScore += 20;
-    else if (deviceMemory >= 4) mobileScore += 10;
-    
-    if (hardwareConcurrency >= 8) mobileScore += 25;
-    else if (hardwareConcurrency >= 6) mobileScore += 15;
-    else if (hardwareConcurrency >= 4) mobileScore += 10;
-    
-    if (screenSize >= 1920) mobileScore += 20;
-    else if (screenSize >= 1440) mobileScore += 15;
-    else if (screenSize >= 1080) mobileScore += 10;
-    
-    if (pixelRatio >= 3) mobileScore += 10;
-    else if (pixelRatio >= 2) mobileScore += 5;
-    
-    // Classify mobile device tier
-    let tier = 'low';
-    if (mobileScore >= 60) tier = 'high';
-    else if (mobileScore >= 30) tier = 'medium';
-    
-    return {
-      tier,
-      deviceInfo
-    };
-  }
-  
-  // Mobile-specific settings with device tier adaptation
-  if (isMobile) {
-    const { tier: mobileTier, deviceInfo } = getMobileDeviceCapabilities();
-    
-    // Samsung-specific rendering adjustments - reduced to prevent overexposure
-    const samsungAdjustments = deviceInfo.isSamsung ? {
-      // Samsung devices need slightly brighter lighting and different gamma
-      gammaCorrection: 2.0,  // Slightly lower gamma for brighter appearance
-      ambientLightBoost: 1.2,  // Moderate increase in ambient lighting
-      materialBrightness: 1.1,  // Slight boost in material brightness
-      fogDensityReduction: 0.85,  // Slight reduction in fog density
-      samsungOptimized: true
-    } : {
-      gammaCorrection: 2.2,
-      ambientLightBoost: 1.0,
-      materialBrightness: 1.0,
-      fogDensityReduction: 1.0,
-      samsungOptimized: false
-    };
-    
-    // Base settings for device tier
-    let baseSettings = {};
-    
-    // High-end mobile devices (flagship phones/tablets) - Emergency performance mode
-    if (mobileTier === 'high') {
-      baseSettings = {
-        textureSize: 512, // Drastically reduced for emergency performance
-        particleCount: 25, // Minimal particles
-        renderDistance: 1500, // Much shorter render distance
-        shadowQuality: 'none',
-        antialiasing: false, // Disabled for performance
-        skyboxResolution: 512, // Much smaller skybox
-        detailLevel: 'low',
-        fogDistance: 1200,
-        graphicsQuality: 'low',
-        isMobile: true,
-        mobileTier: 'high',
-        disableRockets: true, // Disable all heavy effects
-        disableMeteors: true,
-        disableAtmosphericEffects: true,
-        terrainSegments: 48, // Minimal terrain
-        frameThrottle: 6, // Aggressive frame throttling
-        enableCulling: true,
-        maxLights: 2, // Minimal lights
-        // Game Features - enabled for high-end mobile
-        enableDamageSystem: true,
-        enableFuelSystem: true,
-        enablePhotoMode: true,
-        enableEasterEggs: true,
-        enableCustomization: true,
-        enableWeatherForecast: false // Disable weather forecast on mobile for performance
-      };
-    }
-    // Mid-range mobile devices - Emergency performance mode
-    else if (mobileTier === 'medium') {
-      baseSettings = {
-        textureSize: 256, // Extremely reduced
-        particleCount: 10, // Almost no particles
-        renderDistance: 1200,
-        shadowQuality: 'none',
-        antialiasing: false,
-        skyboxResolution: 256, // Tiny skybox
-        detailLevel: 'low',
-        fogDistance: 1000,
-        graphicsQuality: 'low',
-        isMobile: true,
-        mobileTier: 'medium',
-        disableRockets: true, // Disable all effects for performance
-        disableMeteors: true,
-        disableAtmosphericEffects: true,
-        terrainSegments: 32, // Minimal terrain
-        frameThrottle: 8, // Very aggressive throttling
-        enableCulling: true,
-        maxLights: 1, // Single light only
-        // Game Features - reduced for medium-end mobile
-        enableDamageSystem: true,
-        enableFuelSystem: true,
-        enablePhotoMode: true,
-        enableEasterEggs: false,
-        enableCustomization: true,
-        enableWeatherForecast: false
-      };
-    }
-    // Low-end mobile devices (budget phones) - Ultra minimal mode
-    else {
-      baseSettings = {
-        textureSize: 128, // Ultra minimal textures
-        particleCount: 0, // No particles at all
-        renderDistance: 800, // Very short render distance
-        shadowQuality: 'none',
-        antialiasing: false,
-        skyboxResolution: 128, // Minimal skybox
-        detailLevel: 'low',
-        fogDistance: 600,
-        graphicsQuality: 'low',
-        isMobile: true,
-        mobileTier: 'low',
-        disableRockets: true,
-        disableMeteors: true,
-        disableAtmosphericEffects: true,
-        terrainSegments: 16, // Ultra minimal terrain
-        frameThrottle: 12, // Skip most frames
-        enableCulling: true,
-        maxLights: 1, // Single light only
-        // Game Features - minimal for low-end mobile
-        enableDamageSystem: false,
-        enableFuelSystem: false,
-        enablePhotoMode: true,
-        enableEasterEggs: false,
-        enableCustomization: false,
-        enableWeatherForecast: false
-      };
-    }
-    
-    // Apply Samsung-specific adjustments
-    return {
-      ...baseSettings,
-      ...samsungAdjustments,
-      deviceInfo
-    };
-  }
+  const isMobile = false;
   
   // Desktop settings - capped to prevent GPU crashes
-  return window.GAME_PERFORMANCE_SETTINGS || {
+  _cachedPerformanceSettings = window.GAME_PERFORMANCE_SETTINGS || {
     textureSize: 2048, // Cap at 2048 for safety
     particleCount: 500,
     renderDistance: 5000,
@@ -936,6 +109,7 @@ function getPerformanceSettings() {
     enableCustomization: true,
     enableWeatherForecast: true
   };
+  return _cachedPerformanceSettings;
 }
 
 // Global renderer check to prevent multiple contexts
@@ -955,16 +129,16 @@ camera.position.set(0, 10, 20);
 // Performance-optimized renderer with adaptive settings - MOBILE EMERGENCY MODE
 const perfSettings = getPerformanceSettings();
 const renderer = new THREE.WebGLRenderer({
-  antialias: false, // Force disabled on ALL devices for performance
-  powerPreference: 'low-power', // Force low power on ALL devices
-  precision: 'lowp', // Force lowest precision on ALL devices
+  antialias: false, // Disabled for performance
+  powerPreference: perfSettings.isMobile ? 'low-power' : 'high-performance', // Use discrete GPU on desktop
+  precision: perfSettings.isMobile ? 'lowp' : 'mediump', // Higher precision on desktop for quality
   alpha: false,
   stencil: false,
   depth: true,
   logarithmicDepthBuffer: false,
   preserveDrawingBuffer: false,
   failIfMajorPerformanceCaveat: false, // Don't fail on performance issues
-  premultipliedAlpha: false // Reduce GPU load
+  premultipliedAlpha: false
 });
 
 // Store renderer globally to prevent duplicates
@@ -984,8 +158,6 @@ renderer.setPixelRatio(pixelRatio);
   // Mobile-specific renderer optimizations
 if (perfSettings.isMobile) {
   renderer.shadowMap.enabled = false;
-  
-  // Samsung-specific rendering adjustments - reduced exposure to prevent overexposure
   if (perfSettings.samsungOptimized) {
     // Samsung devices need different color encoding and gamma
     renderer.outputEncoding = THREE.LinearEncoding;  // Better for Samsung displays
@@ -993,9 +165,6 @@ if (perfSettings.isMobile) {
     renderer.toneMapping = THREE.ReinhardToneMapping;
     renderer.toneMappingExposure = 1.1;  // Slightly brighter exposure for Samsung
     
-    console.log('Samsung device detected - applying display optimizations:');
-    console.log('- GPU:', perfSettings.deviceInfo.gpuRenderer);
-    console.log('- Gamma correction:', perfSettings.gammaCorrection);
     console.log('- Ambient light boost:', perfSettings.ambientLightBoost);
     console.log('- Material brightness:', perfSettings.materialBrightness);
     console.log('- Fog density reduction:', perfSettings.fogDensityReduction);
@@ -1114,8 +283,30 @@ document.addEventListener('visibilitychange', () => {
 });
 document.body.appendChild(renderer.domElement);
 
-// Prepare the night skybox (starry sky) for the day/night system
-let spaceSkybox = createSpaceSkybox();
+// Defer night skybox creation - game starts in day mode, so create it in background
+let spaceSkybox = null;
+let _spaceSkyboxCreating = false;
+
+function ensureSpaceSkybox() {
+  if (spaceSkybox || _spaceSkyboxCreating) return;
+  _spaceSkyboxCreating = true;
+  // Create skybox asynchronously in the next idle period
+  if (typeof requestIdleCallback !== 'undefined') {
+    requestIdleCallback(() => {
+      spaceSkybox = createSpaceSkybox();
+      scene.add(spaceSkybox);
+      console.log('Skybox created in background (idle callback)');
+    }, { timeout: 5000 });
+  } else {
+    setTimeout(() => {
+      spaceSkybox = createSpaceSkybox();
+      console.log('Skybox created in background (setTimeout)');
+    }, 2000);
+  }
+}
+
+// Start creating skybox in background after a short delay (not blocking initial load)
+setTimeout(ensureSpaceSkybox, 100);
 
 // Adaptive fog based on performance settings with Samsung adjustments
 const fogColor = perfSettings.samsungOptimized ? 0xd4a574 : 0xb77c5a;  // Lighter fog for Samsung
@@ -1194,7 +385,7 @@ function createRealisticRover() {
   });
   const chassis = new THREE.Mesh(chassisGeometry, chassisMaterial);
   chassis.position.y = 0.6;
-  chassis.castShadow = true;
+  // chassis.castShadow = true; // Disabled for cleaner look
   roverGroup.add(chassis);
 
   // Main body - central electronics box
@@ -1211,7 +402,7 @@ function createRealisticRover() {
   bodyMaterial.userData = { isBody: true };
   const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
   body.position.y = 1.0;
-  body.castShadow = true;
+  // body.castShadow = true; // Disabled for cleaner look
   roverGroup.add(body);
 
   // RTG power source (radioisotope thermoelectric generator)
@@ -1224,7 +415,7 @@ function createRealisticRover() {
   const rtg = new THREE.Mesh(rtgGeometry, rtgMaterial);
   rtg.position.set(-0.8, 1.0, -1.2);
   rtg.rotation.x = Math.PI / 2;
-  rtg.castShadow = true;
+  // rtg.castShadow = true; // Disabled for cleaner look
   roverGroup.add(rtg);
 
   // Heat radiators
@@ -1237,12 +428,12 @@ function createRealisticRover() {
 
   const radiator1 = new THREE.Mesh(radiatorGeometry, radiatorMaterial);
   radiator1.position.set(0, 1.3, -1.2);
-  radiator1.castShadow = true;
+  // radiator1.castShadow = true; // Disabled for cleaner look
   roverGroup.add(radiator1);
 
   const radiator2 = new THREE.Mesh(radiatorGeometry, radiatorMaterial);
   radiator2.position.set(0, 1.3, 1.2);
-  radiator2.castShadow = true;
+  // radiator2.castShadow = true; // Disabled for cleaner look
   roverGroup.add(radiator2);
 
   // Camera mast
@@ -1250,7 +441,7 @@ function createRealisticRover() {
   const mastMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
   const mast = new THREE.Mesh(mastGeometry, mastMaterial);
   mast.position.set(0, 1.9, 0.8);
-  mast.castShadow = true;
+  // mast.castShadow = true; // Disabled for cleaner look
   roverGroup.add(mast);
 
   // Mastcam (stereo cameras)
@@ -1258,7 +449,7 @@ function createRealisticRover() {
   const cameraBoxMaterial = new THREE.MeshStandardMaterial({ color: 0x222222 });
   const cameraBox = new THREE.Mesh(cameraBoxGeometry, cameraBoxMaterial);
   cameraBox.position.y = 0.6;
-  cameraBox.castShadow = true;
+  // cameraBox.castShadow = true; // Disabled for cleaner look
   mast.add(cameraBox);
 
   // Camera lenses
@@ -1290,7 +481,7 @@ function createRealisticRover() {
   });
   const panel = new THREE.Mesh(panelGeometry, panelMaterial);
   panel.position.y = 1.5;
-  panel.castShadow = true;
+  // panel.castShadow = true; // Disabled for cleaner look
   roverGroup.add(panel);
 
   // Solar panel details - cells
@@ -1415,7 +606,7 @@ function createRealisticRover() {
     const wheel = new THREE.Mesh(wheelGeometry, wheelMaterialWithTexture);
     wheel.position.set(pos.x, pos.y, pos.z);
     wheel.rotation.z = Math.PI / 2; // Rotate to correct orientation
-    wheel.castShadow = true;
+    // wheel.castShadow = true; // Disabled for cleaner look
 
     // Store original position for suspension
     originalWheelPositions.push(pos.y);
@@ -1540,6 +731,9 @@ if (perfSettingsForRover.isMobile) {
   // Ensure rover is at a visible position
   rover.position.set(0, 0, 0);
   
+  // Position rover on terrain initially
+  positionRoverOnTerrain();
+  
   // Force rover to be visible
   rover.visible = true;
   rover.traverse((child) => {
@@ -1551,6 +745,71 @@ if (perfSettingsForRover.isMobile) {
   // Make sure camera can see rover area
   camera.position.set(0, 10, 20);
   camera.lookAt(0, 0, 0);
+}
+
+function showWelcomeMessage() {
+  if (typeof document === 'undefined') return;
+
+  try {
+    if (window.localStorage && localStorage.getItem('mars_welcome_shown') === '1') {
+      return;
+    }
+  } catch (e) {
+    // Ignore storage errors and just show the message once per load
+  }
+
+  if (document.getElementById('mars-welcome-message')) {
+    return;
+  }
+
+  const notification = document.createElement('div');
+  notification.id = 'mars-welcome-message';
+  notification.style.cssText = `
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.85);
+    color: #ffffff;
+    padding: 12px 20px;
+    border-radius: 20px;
+    z-index: 10001;
+    font-size: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    max-width: 320px;
+    text-align: center;
+    cursor: pointer;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  `;
+
+  notification.innerHTML = `
+    <div style="font-weight: bold; margin-bottom: 4px;">Welcome to Drive on Mars</div>
+    <div style="opacity: 0.85;">Use WASD or the on-screen controls to drive the rover. Open the settings panel to tweak performance and visuals.</div>
+  `;
+
+  document.body.appendChild(notification);
+
+  const hide = () => {
+    notification.style.opacity = '0';
+    notification.style.transform = 'translate(-50%, 20px)';
+    setTimeout(() => {
+      if (notification.parentNode) {
+        notification.parentNode.removeChild(notification);
+      }
+    }, 300);
+  };
+
+  notification.addEventListener('click', hide);
+
+  try {
+    if (window.localStorage) {
+      localStorage.setItem('mars_welcome_shown', '1');
+    }
+  } catch (e) {
+    // Ignore storage errors
+  }
+
+  setTimeout(hide, 8000);
 }
 
 // Initialize Game Systems
@@ -1634,15 +893,15 @@ const sunIntensity = perfSettings.samsungOptimized ? 1.0 * perfSettings.material
 const sunColor = perfSettings.samsungOptimized ? 0xff9955 : 0xff7744;  // Slightly warmer for Samsung
 const sunLight = new THREE.DirectionalLight(sunColor, sunIntensity);
 sunLight.position.set(-50, 30, 50); // Position the sun lower on the horizon
-sunLight.castShadow = true;
-sunLight.shadow.mapSize.width = 2048;
-sunLight.shadow.mapSize.height = 2048;
-sunLight.shadow.camera.near = 0.5;
-sunLight.shadow.camera.far = 500;
-sunLight.shadow.camera.left = -100;
-sunLight.shadow.camera.right = 100;
-sunLight.shadow.camera.top = 100;
-sunLight.shadow.camera.bottom = -100;
+// sunLight.castShadow = true; // Disabled for better performance and cleaner look
+// sunLight.shadow.mapSize.width = 2048;
+// sunLight.shadow.mapSize.height = 2048;
+// sunLight.shadow.camera.near = 0.5;
+// sunLight.shadow.camera.far = 500;
+// sunLight.shadow.camera.left = -100;
+// sunLight.shadow.camera.right = 100;
+// sunLight.shadow.camera.top = 100;
+// sunLight.shadow.camera.bottom = -100;
 scene.add(sunLight);
 
 // Add a subtle hemisphere light to simulate light bouncing off the surface with Samsung adjustments
@@ -2598,1764 +1857,172 @@ class MarsAtmosphericEffects {
 class MarsSceneManager {
   constructor(scene, terrainSize) {
     this.scene = scene;
-    //this.terrainSize = terrainSize;
-    //this.backgroundElements = new Map();
     this.rocketLaunchSites = [];
-    this.marsBases = [];
     this.activeEvents = new Set();
     this.lastPlayerPosition = new THREE.Vector3();
-    this.sceneRepeatDistance = 5000; // Distance after which scenes repeat
+    this.sceneRepeatDistance = 5000;
+    this.animatedObjects = []; // Track animated elements for update loop
 
-    // Initialize background elements
-    this.initializeBackgroundScenes();
-  }
+    // Get reference to the terrain mesh for proper ground placement
+    // The terrain is the largest PlaneGeometry in the scene (3000-5000 units wide)
+    this.terrainMesh = null;
+    this.scene.traverse(child => {
+      if (child.isMesh && child.geometry && child.geometry.parameters &&
+          child.geometry.parameters.width >= 2000 && child.geometry.parameters.height >= 2000) {
+        this.terrainMesh = child;
+      }
+    });
+    // Fallback: use the global marsSurface if available
+    if (!this.terrainMesh && typeof marsSurface !== 'undefined') {
+      this.terrainMesh = marsSurface;
+    }
 
-  initializeBackgroundScenes() {
-    // Create Mars skyscraper city
-    this.createMarsBase();
-    // Create rocket launch sites
-    this.createLaunchSites();
-    // Create SpaceX Starship display lineup
-    this.createStarshipDisplay();
-    
-    // Initialize rocket launch timing system
-    this.initializeRocketLaunchSystem();
+    // Background elements removed - keeping only terrain and sky
   }
 
   initializeRocketLaunchSystem() {
-    // Rocket launch timing variables - reduced frequency for better performance
-    this.rocketLaunchInterval = 60000; // 1 minute = 60000ms
-    this.lastRocketLaunch = 0;
-    this.rocketLaunchActive = false; // Disabled by default - starships stay on ground
-    this.maxSimultaneousRockets = 3; // Reduced for better performance
-    
-    // Simplified launch patterns for better performance
-    this.launchPatterns = [
-      { type: 'single', count: 1, delay: 0 },
-      { type: 'double', count: 2, delay: 3000 },
-      { type: 'triple', count: 3, delay: 2000 }
-    ];
-    
-    // Start the rocket launch cycle
-    this.startRocketLaunchCycle();
+    // Rocket launch system removed - keeping only terrain and sky
   }
 
   // Control methods for rocket launch system
   setRocketLaunchInterval(milliseconds) {
-    this.rocketLaunchInterval = milliseconds;
+    // Rocket launch system removed - keeping only terrain and sky
   }
 
   enableRocketLaunches() {
-    this.rocketLaunchActive = true;
-    // Removed notification - starships stay on ground
+    // Rocket launch system removed - keeping only terrain and sky
   }
 
   disableRocketLaunches() {
-    this.rocketLaunchActive = false;
-    // Removed notification - starships stay on ground
+    // Rocket launch system removed - keeping only terrain and sky
   }
 
   triggerManualLaunch(patternType = 'random') {
-    if (patternType === 'random') {
-      this.triggerRocketLaunchSequence();
-    } else {
-      const pattern = this.launchPatterns.find(p => p.type === patternType) || this.launchPatterns[0];
-      const eventType = Math.random() > 0.5 ? 'launch' : 'landing';
-      
-      for (let i = 0; i < pattern.count; i++) {
-        setTimeout(() => {
-          if (this.activeEvents.size < this.maxSimultaneousRockets) {
-            this.triggerRocketEvent(eventType);
-          }
-        }, i * pattern.delay);
-      }
-    }
+    // Rocket launch system removed - keeping only terrain and sky
   }
 
   startRocketLaunchCycle() {
-    // Schedule the first launch after 15 seconds to allow system to load
-    setTimeout(() => {
-      this.triggerRocketLaunchSequence();
-      
-      // Set up recurring launches every minute with performance check
-      setInterval(() => {
-        if (this.rocketLaunchActive && this.activeEvents.size < this.maxSimultaneousRockets) {
-          // Only launch if system isn't overloaded
-          if (performance.now() - (window.lastFrameTime || 0) < 100) {
-            this.triggerRocketLaunchSequence();
-          }
-        }
-      }, this.rocketLaunchInterval);
-    }, 15000);
+    // Rocket launch system removed - keeping only terrain and sky
   }
 
   triggerRocketLaunchSequence() {
-    // Choose a random launch pattern
-    const pattern = this.launchPatterns[Math.floor(Math.random() * this.launchPatterns.length)];
-    
-    // Decide if this is a launch or landing sequence
-    const isLaunch = Math.random() > 0.3; // 70% chance of launch, 30% chance of landing
-    const eventType = isLaunch ? 'launch' : 'landing';
-    
-    // Launch notification removed - starships stay on ground
-    // if (window.showNotification) {
-    //   window.showNotification(`🚀 SpaceX ${eventType.toUpperCase()} Sequence! ${pattern.count} Starship rockets ${eventType === 'launch' ? 'launching' : 'landing'} (${pattern.type})`, 6000);
-    // }
-    
-    // Launch rockets with delays based on pattern
-    for (let i = 0; i < pattern.count; i++) {
-      setTimeout(() => {
-        if (this.activeEvents.size < this.maxSimultaneousRockets) {
-          this.triggerRocketEvent(eventType);
-        }
-      }, i * pattern.delay);
-    }
-    
-    // Schedule additional mixed launches/landings for more activity
-    if (Math.random() > 0.5) {
-      setTimeout(() => {
-        const additionalCount = Math.floor(Math.random() * 2) + 1;
-        const additionalType = eventType === 'launch' ? 'landing' : 'launch';
-        
-        for (let i = 0; i < additionalCount; i++) {
-          setTimeout(() => {
-            if (this.activeEvents.size < this.maxSimultaneousRockets) {
-              this.triggerRocketEvent(additionalType);
-            }
-          }, i * 2000);
-        }
-      }, 20000); // 20 seconds after main sequence
-    }
+    // Rocket launch system removed - keeping only terrain and sky
   }
 
-  createSingleBase(x, z, type = 'metropolis') {
-    const baseGroup = new THREE.Group();
-    baseGroup.position.set(x, 0, z);
-
-    // Add base structures based on type
-    const structures = this.createBaseStructures(type);
-    baseGroup.add(...structures);
-
-    // Add appropriate lighting based on colony type
-    let lightColor, lightIntensity;
-    switch (type) {
-      case 'metropolis':
-        lightColor = 0x88aaff;
-        lightIntensity = 1.5;
-        break;
-      case 'research':
-        lightColor = 0xaaffaa;
-        lightIntensity = 1.0;
-        break;
-      case 'mining':
-        lightColor = 0xffaa88;
-        lightIntensity = 1.2;
-        break;
-      case 'agricultural':
-        lightColor = 0xaaffcc;
-        lightIntensity = 0.8;
-        break;
-      case 'industrial':
-        lightColor = 0xff8888;
-        lightIntensity = 1.3;
-        break;
-      case 'outpost':
-        lightColor = 0xccccff;
-        lightIntensity = 0.6;
-        break;
-      default:
-        lightColor = 0x88aaff;
-        lightIntensity = 1.0;
-    }
-
-    const baseLight = new THREE.PointLight(lightColor, lightIntensity, 800);
-    baseLight.position.set(0, 100, 0);
-    baseGroup.add(baseLight);
-
-    // Position on terrain
-    const raycaster = new THREE.Raycaster();
-    raycaster.set(new THREE.Vector3(x, 1000, z), new THREE.Vector3(0, -1, 0));
-    const intersects = raycaster.intersectObjects(this.scene.children, true);
-    if (intersects.length > 0) {
-      baseGroup.position.y = intersects[0].point.y;
-    }
-
-    return baseGroup;
-  }
-
-  createMarsBase() {
-    // Clear any existing bases
-    this.marsBases.forEach(base => {
-      if (base && base.parent) {
-        base.parent.remove(base);
-      }
-    });
-    this.marsBases = [];
-
-    // Create multiple diverse colonies
-    const colonies = [
-      { x: 1500, z: 1000, type: 'metropolis', name: 'New Olympia' },
-      { x: -2000, z: 1500, type: 'research', name: 'Exploration Base Alpha' },
-      { x: 2500, z: -800, type: 'mining', name: 'Mineral Extraction Complex' },
-      { x: -1200, z: -2000, type: 'agricultural', name: 'Terra Verde Farms' },
-      { x: 800, z: 2200, type: 'industrial', name: 'Manufacturing Hub Beta' },
-      { x: 3000, z: 500, type: 'outpost', name: 'Frontier Station' }
-    ];
-
-    colonies.forEach(colony => {
-      const base = this.createSingleBase(colony.x, colony.z, colony.type);
-      base.userData = { name: colony.name, type: colony.type };
-      this.marsBases.push(base);
-      this.scene.add(base);
-
-      // Add atmospheric effects around each colony
-      this.addCityAtmosphere(base);
-    });
-  }
-
-  // Add atmospheric effects around the city
-  addCityAtmosphere(city) {
-    const cityPosition = city.position;
-    
-    // Add atmospheric dome around the city
-    const atmosphereGeometry = new THREE.SphereGeometry(500, 32, 32);
-    const atmosphereMaterial = new THREE.MeshBasicMaterial({
-      color: 0x4488ff,
-      transparent: true,
-      opacity: 0.1,
-      side: THREE.DoubleSide
-    });
-    const atmosphere = new THREE.Mesh(atmosphereGeometry, atmosphereMaterial);
-    atmosphere.position.copy(cityPosition);
-    atmosphere.position.y += 200;
-    city.add(atmosphere);
-
-    // Add city-wide ambient lighting
-    const cityAmbientLight = new THREE.AmbientLight(0x4488ff, 0.3);
-    city.add(cityAmbientLight);
-
-    // Add directional light for the city
-    const cityDirectionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-    cityDirectionalLight.position.set(100, 300, 100);
-    cityDirectionalLight.target.position.copy(cityPosition);
-    cityDirectionalLight.castShadow = true;
-    cityDirectionalLight.shadow.mapSize.width = 2048;
-    cityDirectionalLight.shadow.mapSize.height = 2048;
-    cityDirectionalLight.shadow.camera.near = 0.5;
-    cityDirectionalLight.shadow.camera.far = 1000;
-    cityDirectionalLight.shadow.camera.left = -500;
-    cityDirectionalLight.shadow.camera.right = 500;
-    cityDirectionalLight.shadow.camera.top = 500;
-    cityDirectionalLight.shadow.camera.bottom = -500;
-    city.add(cityDirectionalLight);
-    city.add(cityDirectionalLight.target);
-
-    // Add floating particles around the city
-    this.addCityParticles(city);
-  }
-
-  // Add floating particles for atmospheric effect
-  addCityParticles(city) {
-    const particleCount = 200;
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-    const colors = new Float32Array(particleCount * 3);
-
-    for (let i = 0; i < particleCount; i++) {
-      // Random positions around the city
-      const angle = Math.random() * Math.PI * 2;
-      const radius = 200 + Math.random() * 300;
-      const height = 50 + Math.random() * 400;
-
-      positions[i * 3] = Math.cos(angle) * radius;
-      positions[i * 3 + 1] = height;
-      positions[i * 3 + 2] = Math.sin(angle) * radius;
-
-      // Soft blue/white colors
-      const intensity = 0.5 + Math.random() * 0.5;
-      colors[i * 3] = intensity * 0.8;     // R
-      colors[i * 3 + 1] = intensity * 0.9; // G  
-      colors[i * 3 + 2] = intensity;       // B
-    }
-
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-    const material = new THREE.PointsMaterial({
-      size: 3,
-      transparent: true,
-      opacity: 0.6,
-      vertexColors: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false
-    });
-
-    const particles = new THREE.Points(geometry, material);
-    city.add(particles);
-
-    // Animate particles
-    const animateParticles = () => {
-      const positions = particles.geometry.attributes.position.array;
-      const time = Date.now() * 0.001;
-
-      for (let i = 0; i < particleCount; i++) {
-        positions[i * 3 + 1] += Math.sin(time + i * 0.1) * 0.2;
-        
-        // Reset particles that drift too high
-        if (positions[i * 3 + 1] > 500) {
-          positions[i * 3 + 1] = 50;
-        }
-      }
-
-      particles.geometry.attributes.position.needsUpdate = true;
-      requestAnimationFrame(animateParticles);
-    };
-
-    animateParticles();
-  }
-
-  createBaseStructures(type = 'metropolis') {
-    const structures = [];
-
-    switch (type) {
-      case 'metropolis':
-        return this.createMetropolisStructures();
-      case 'research':
-        return this.createResearchStructures();
-      case 'mining':
-        return this.createMiningStructures();
-      case 'agricultural':
-        return this.createAgriculturalStructures();
-      case 'industrial':
-        return this.createIndustrialStructures();
-      case 'outpost':
-        return this.createOutpostStructures();
-      default:
-        return this.createMetropolisStructures();
-    }
-  }
-
-  createMetropolisStructures() {
-    const structures = [];
-
-    // Create main circular platform foundation
-    const basePlatform = new THREE.Mesh(
-      new THREE.CylinderGeometry(400, 420, 30, 64),
-      new THREE.MeshStandardMaterial({
-        color: 0x333344,
-        roughness: 0.8,
-        metalness: 0.4
-      })
-    );
-    basePlatform.position.y = 15;
-    basePlatform.castShadow = true;
-    basePlatform.receiveShadow = true;
-    structures.push(basePlatform);
-
-    // Create central mega skyscraper
-    const centralTower = this.createSkyscraper(0, 0, 80, 600, 0x4455aa, 'central');
-    structures.push(...centralTower);
-
-    // Create ring of tall skyscrapers
-    const ringCount = 8;
-    for (let i = 0; i < ringCount; i++) {
-      const angle = (i / ringCount) * Math.PI * 2;
-      const radius = 250;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      
-      const height = 300 + Math.random() * 200;
-      const width = 40 + Math.random() * 20;
-      const color = [0x5566bb, 0x6677cc, 0x7788dd, 0x4455aa][Math.floor(Math.random() * 4)];
-      
-      const skyscraper = this.createSkyscraper(x, z, width, height, color, 'residential');
-      structures.push(...skyscraper);
-    }
-
-    // Create outer ring of medium skyscrapers
-    const outerRingCount = 12;
-    for (let i = 0; i < outerRingCount; i++) {
-      const angle = (i / outerRingCount) * Math.PI * 2;
-      const radius = 350;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      
-      const height = 150 + Math.random() * 150;
-      const width = 25 + Math.random() * 15;
-      const color = [0x6677cc, 0x7788dd, 0x8899ee, 0x5566bb][Math.floor(Math.random() * 4)];
-      
-      const skyscraper = this.createSkyscraper(x, z, width, height, color, 'commercial');
-      structures.push(...skyscraper);
-    }
-
-    // Create scattered smaller buildings
-    const smallBuildingCount = 20;
-    for (let i = 0; i < smallBuildingCount; i++) {
-      const angle = Math.random() * Math.PI * 2;
-      const radius = 150 + Math.random() * 100;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      
-      const height = 50 + Math.random() * 100;
-      const width = 15 + Math.random() * 10;
-      const color = [0x7788dd, 0x8899ee, 0x99aaff, 0x6677cc][Math.floor(Math.random() * 4)];
-      
-      const building = this.createSkyscraper(x, z, width, height, color, 'utility');
-      structures.push(...building);
-    }
-
-    // Add connecting bridges between tall buildings
-    this.createSkyBridges(structures);
-
-    return structures;
-  }
-
-  createResearchStructures() {
-    const structures = [];
-
-    // Create research base platform
-    const basePlatform = new THREE.Mesh(
-      new THREE.CylinderGeometry(200, 220, 20, 32),
-      new THREE.MeshStandardMaterial({
-        color: 0x444455,
-        roughness: 0.6,
-        metalness: 0.6
-      })
-    );
-    basePlatform.position.y = 10;
-    basePlatform.castShadow = true;
-    basePlatform.receiveShadow = true;
-    structures.push(basePlatform);
-
-    // Central research tower
-    const centralTower = this.createSkyscraper(0, 0, 40, 200, 0x55aa55, 'research');
-    structures.push(...centralTower);
-
-    // Laboratory domes
-    const domeCount = 6;
-    for (let i = 0; i < domeCount; i++) {
-      const angle = (i / domeCount) * Math.PI * 2;
-      const radius = 120;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(25, 16, 16),
-        new THREE.MeshStandardMaterial({
-          color: 0x77dd77,
-          roughness: 0.3,
-          metalness: 0.8,
-          transparent: true,
-          opacity: 0.8
-        })
-      );
-      dome.position.set(x, 35, z);
-      dome.castShadow = true;
-      structures.push(dome);
-    }
-
-    // Add communication arrays
-    for (let i = 0; i < 3; i++) {
-      const angle = (i / 3) * Math.PI * 2;
-      const radius = 80;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      
-      const array = new THREE.Mesh(
-        new THREE.CylinderGeometry(2, 2, 50, 8),
-        new THREE.MeshStandardMaterial({
-          color: 0xcccccc,
-          roughness: 0.2,
-          metalness: 0.9
-        })
-      );
-      array.position.set(x, 40, z);
-      array.castShadow = true;
-      structures.push(array);
-    }
-
-    return structures;
-  }
-
-  createMiningStructures() {
-    const structures = [];
-
-    // Create mining platform
-    const basePlatform = new THREE.Mesh(
-      new THREE.BoxGeometry(300, 20, 300),
-      new THREE.MeshStandardMaterial({
-        color: 0x553322,
-        roughness: 0.9,
-        metalness: 0.3
-      })
-    );
-    basePlatform.position.y = 10;
-    basePlatform.castShadow = true;
-    basePlatform.receiveShadow = true;
-    structures.push(basePlatform);
-
-    // Mining towers
-    const towerCount = 4;
-    for (let i = 0; i < towerCount; i++) {
-      const angle = (i / towerCount) * Math.PI * 2;
-      const radius = 100;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      
-      const tower = this.createSkyscraper(x, z, 30, 150, 0xaa5522, 'mining');
-      structures.push(...tower);
-    }
-
-    // Add mining drills
-    for (let i = 0; i < 8; i++) {
-      const x = (Math.random() - 0.5) * 200;
-      const z = (Math.random() - 0.5) * 200;
-      
-      const drill = new THREE.Mesh(
-        new THREE.CylinderGeometry(8, 8, 60, 16),
-        new THREE.MeshStandardMaterial({
-          color: 0x666666,
-          roughness: 0.8,
-          metalness: 0.7
-        })
-      );
-      drill.position.set(x, 50, z);
-      drill.castShadow = true;
-      structures.push(drill);
-    }
-
-    return structures;
-  }
-
-  createAgriculturalStructures() {
-    const structures = [];
-
-    // Create agricultural platform
-    const basePlatform = new THREE.Mesh(
-      new THREE.CylinderGeometry(250, 270, 15, 32),
-      new THREE.MeshStandardMaterial({
-        color: 0x335544,
-        roughness: 0.7,
-        metalness: 0.3
-      })
-    );
-    basePlatform.position.y = 7.5;
-    basePlatform.castShadow = true;
-    basePlatform.receiveShadow = true;
-    structures.push(basePlatform);
-
-    // Greenhouse domes
-    const domeCount = 12;
-    for (let i = 0; i < domeCount; i++) {
-      const angle = (i / domeCount) * Math.PI * 2;
-      const radius = 80 + (i % 3) * 40;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      
-      const dome = new THREE.Mesh(
-        new THREE.SphereGeometry(20 + Math.random() * 10, 16, 16),
-        new THREE.MeshStandardMaterial({
-          color: 0x88cc88,
-          roughness: 0.1,
-          metalness: 0.9,
-          transparent: true,
-          opacity: 0.6
-        })
-      );
-      dome.position.set(x, 30, z);
-      dome.castShadow = true;
-      structures.push(dome);
-    }
-
-    // Central processing facility
-    const centralBuilding = this.createSkyscraper(0, 0, 50, 100, 0x66bb66, 'agricultural');
-    structures.push(...centralBuilding);
-
-    return structures;
-  }
-
-  createIndustrialStructures() {
-    const structures = [];
-
-    // Create industrial platform
-    const basePlatform = new THREE.Mesh(
-      new THREE.BoxGeometry(400, 25, 400),
-      new THREE.MeshStandardMaterial({
-        color: 0x442222,
-        roughness: 0.8,
-        metalness: 0.5
-      })
-    );
-    basePlatform.position.y = 12.5;
-    basePlatform.castShadow = true;
-    basePlatform.receiveShadow = true;
-    structures.push(basePlatform);
-
-    // Factory buildings
-    const factoryCount = 8;
-    for (let i = 0; i < factoryCount; i++) {
-      const x = (Math.random() - 0.5) * 300;
-      const z = (Math.random() - 0.5) * 300;
-      
-      const factory = this.createSkyscraper(x, z, 40 + Math.random() * 20, 80 + Math.random() * 60, 0xaa4444, 'industrial');
-      structures.push(...factory);
-    }
-
-    // Add smokestacks
-    for (let i = 0; i < 6; i++) {
-      const x = (Math.random() - 0.5) * 200;
-      const z = (Math.random() - 0.5) * 200;
-      
-      const smokestack = new THREE.Mesh(
-        new THREE.CylinderGeometry(6, 8, 120, 16),
-        new THREE.MeshStandardMaterial({
-          color: 0x666666,
-          roughness: 0.9,
-          metalness: 0.6
-        })
-      );
-      smokestack.position.set(x, 85, z);
-      smokestack.castShadow = true;
-      structures.push(smokestack);
-    }
-
-    return structures;
-  }
-
-  createOutpostStructures() {
-    const structures = [];
-
-    // Create small outpost platform
-    const basePlatform = new THREE.Mesh(
-      new THREE.CylinderGeometry(80, 90, 10, 16),
-      new THREE.MeshStandardMaterial({
-        color: 0x444444,
-        roughness: 0.8,
-        metalness: 0.4
-      })
-    );
-    basePlatform.position.y = 5;
-    basePlatform.castShadow = true;
-    basePlatform.receiveShadow = true;
-    structures.push(basePlatform);
-
-    // Small habitat modules
-    const moduleCount = 4;
-    for (let i = 0; i < moduleCount; i++) {
-      const angle = (i / moduleCount) * Math.PI * 2;
-      const radius = 40;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-      
-      const module = new THREE.Mesh(
-        new THREE.CylinderGeometry(12, 12, 30, 16),
-        new THREE.MeshStandardMaterial({
-          color: 0x6666aa,
-          roughness: 0.5,
-          metalness: 0.7
-        })
-      );
-      module.position.set(x, 25, z);
-      module.castShadow = true;
-      structures.push(module);
-    }
-
-    // Central command tower
-    const commandTower = this.createSkyscraper(0, 0, 15, 50, 0x5555aa, 'outpost');
-    structures.push(...commandTower);
-
-    return structures;
-  }
-
-  createSkyscraper(x, z, width, height, color, type) {
-    const parts = [];
-    
-    // Main building structure
-    const buildingGeometry = new THREE.BoxGeometry(width, height, width * 0.8);
-    const buildingMaterial = new THREE.MeshStandardMaterial({
-      color: color,
-      roughness: 0.3,
-      metalness: 0.7
-    });
-    const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
-    building.position.set(x, height / 2 + 30, z);
-    building.castShadow = true;
-    building.receiveShadow = true;
-    parts.push(building);
-
-    // Add building details based on type
-    if (type === 'central') {
-      // Central spire
-      const spireGeometry = new THREE.CylinderGeometry(width * 0.2, width * 0.4, height * 0.3, 16);
-      const spire = new THREE.Mesh(spireGeometry, buildingMaterial);
-      spire.position.set(x, height + height * 0.15 + 30, z);
-      spire.castShadow = true;
-      parts.push(spire);
-
-      // Communication array
-      const arrayGeometry = new THREE.CylinderGeometry(2, 2, 50, 8);
-      const arrayMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.9 });
-      const array = new THREE.Mesh(arrayGeometry, arrayMaterial);
-      array.position.set(x, height + height * 0.3 + 55, z);
-      parts.push(array);
-    }
-
-    // Add windows pattern
-    const windowRows = Math.floor(height / 20);
-    const windowCols = Math.floor(width / 8);
-    
-    for (let row = 0; row < windowRows; row++) {
-      for (let col = 0; col < windowCols; col++) {
-        if (Math.random() > 0.3) { // 70% chance for lit windows
-          const windowGeometry = new THREE.PlaneGeometry(3, 3);
-          const windowMaterial = new THREE.MeshBasicMaterial({
-            color: Math.random() > 0.5 ? 0xffffaa : 0xaaffff,
-            transparent: true,
-            opacity: 0.8
-          });
-          
-          const window = new THREE.Mesh(windowGeometry, windowMaterial);
-          window.position.set(
-            x + (width / 2) + 0.1,
-            30 + (row * 20) + 10,
-            z - (width * 0.4) + (col * 8)
-          );
-          window.rotation.y = -Math.PI / 2;
-          parts.push(window);
-        }
-      }
-    }
-
-    // Add landing platforms for flying vehicles
-    if (height > 200) {
-      const platformCount = Math.floor(height / 150);
-      for (let i = 0; i < platformCount; i++) {
-        const platformY = 100 + (i * 150);
-        const platformGeometry = new THREE.CylinderGeometry(width * 0.8, width * 0.8, 3, 16);
-        const platformMaterial = new THREE.MeshStandardMaterial({
-          color: 0x666677,
-          metalness: 0.8,
-          roughness: 0.2
-        });
-        const platform = new THREE.Mesh(platformGeometry, platformMaterial);
-        platform.position.set(x, platformY, z);
-        platform.castShadow = true;
-        parts.push(platform);
-
-        // Add platform lights
-        const lightGeometry = new THREE.CylinderGeometry(1, 1, 2, 8);
-        const lightMaterial = new THREE.MeshBasicMaterial({ color: 0x00ffff });
-        for (let j = 0; j < 4; j++) {
-          const lightAngle = (j / 4) * Math.PI * 2;
-          const lightRadius = width * 0.6;
-          const light = new THREE.Mesh(lightGeometry, lightMaterial);
-          light.position.set(
-            x + Math.cos(lightAngle) * lightRadius,
-            platformY + 2,
-            z + Math.sin(lightAngle) * lightRadius
-          );
-          parts.push(light);
-        }
-      }
-    }
-
-    // Add atmospheric lighting
-    const buildingLight = new THREE.PointLight(color, 0.5, width * 3);
-    buildingLight.position.set(x, height / 2 + 30, z);
-    parts.push(buildingLight);
-
-    return parts;
-  }
-
-  createSkyBridges(structures) {
-    // Add bridges between the tallest buildings
-    const tallBuildings = [];
-    
-    // Find buildings over 250 units tall
-    structures.forEach(structure => {
-      if (structure.geometry && structure.geometry.type === 'BoxGeometry' && 
-          structure.position.y > 150) {
-        tallBuildings.push(structure);
-      }
-    });
-
-    // Create bridges between nearby tall buildings
-    for (let i = 0; i < tallBuildings.length; i++) {
-      for (let j = i + 1; j < tallBuildings.length; j++) {
-        const building1 = tallBuildings[i];
-        const building2 = tallBuildings[j];
-        const distance = building1.position.distanceTo(building2.position);
-        
-        if (distance < 200 && distance > 50) { // Optimal bridge distance
-          const bridgeHeight = Math.min(building1.position.y, building2.position.y) - 50;
-          const bridgeGeometry = new THREE.BoxGeometry(distance, 8, 12);
-          const bridgeMaterial = new THREE.MeshStandardMaterial({
-            color: 0x555566,
-            metalness: 0.8,
-            roughness: 0.3,
-            transparent: true,
-            opacity: 0.9
-          });
-          
-          const bridge = new THREE.Mesh(bridgeGeometry, bridgeMaterial);
-          bridge.position.set(
-            (building1.position.x + building2.position.x) / 2,
-            bridgeHeight,
-            (building1.position.z + building2.position.z) / 2
-          );
-          
-          // Rotate bridge to connect buildings
-          const angle = Math.atan2(
-            building2.position.z - building1.position.z,
-            building2.position.x - building1.position.x
-          );
-          bridge.rotation.y = angle;
-          bridge.castShadow = true;
-          bridge.receiveShadow = true;
-          
-          structures.push(bridge);
-
-          // Add bridge lighting
-          const bridgeLightCount = Math.floor(distance / 30);
-          for (let k = 0; k < bridgeLightCount; k++) {
-            const lightProgress = k / (bridgeLightCount - 1);
-            const lightGeometry = new THREE.SphereGeometry(2, 8, 8);
-            const lightMaterial = new THREE.MeshBasicMaterial({ color: 0x00aaff });
-            const bridgeLight = new THREE.Mesh(lightGeometry, lightMaterial);
-            
-            bridgeLight.position.set(
-              building1.position.x + (building2.position.x - building1.position.x) * lightProgress,
-              bridgeHeight + 5,
-              building1.position.z + (building2.position.z - building1.position.z) * lightProgress
-            );
-            structures.push(bridgeLight);
-          }
-        }
+  // --- UPDATE animated objects ---
+  updateAnimations(time) {
+    // Animated objects (beacons, radar dishes)
+    for (const anim of this.animatedObjects) {
+      if (!anim.mesh) continue;
+      if (anim.type === 'blink') {
+        const on = Math.sin(time * 0.003 + anim.phase) > 0.3;
+        anim.mesh.visible = on;
+      } else if (anim.type === 'rotate') {
+        anim.mesh.rotation.y += anim.speed;
       }
     }
   }
-
 
   createLaunchSites() {
-    const siteLocations = [
-      { x: 300, z: 300 },    // Closer to starting position
-      { x: -400, z: 200 },   // Closer to starting position
-      { x: 200, z: -300 },   // Closer to starting position
-      { x: 500, z: -100 },   // Additional closer site
-      { x: -300, z: -400 }   // Additional closer site
-    ];
-
-    siteLocations.forEach(loc => {
-      const site = this.createLaunchSite(loc.x, loc.z);
-      this.rocketLaunchSites.push(site);
-      this.scene.add(site);
-    });
+    // Launch sites removed - keeping only terrain and sky
   }
 
   createStarshipDisplay() {
-    // Create a spectacular SpaceX Starship display lineup
-    const displayCenter = { x: -600, z: 0 }; // Position to the left of starting area
-    const rocketSpacing = 80; // Distance between rockets
-    const rocketCount = 6; // Number of rockets in display
-    
-    // Create display group
-    const displayGroup = new THREE.Group();
-    
-    for (let i = 0; i < rocketCount; i++) {
-      // Calculate position for each rocket
-      const rocketX = displayCenter.x;
-      const rocketZ = displayCenter.z + (i - (rocketCount - 1) / 2) * rocketSpacing;
-      
-      // Create different rocket types for variety
-      let rocketType = 'starship';
-      if (i === 2 || i === 3) {
-        rocketType = 'fullstack'; // Middle rockets are full stacks
-      } else if (i === 1 || i === 4) {
-        rocketType = 'superheavy'; // Some are boosters
-      }
-      
-      const displayRocket = this.createRocket(rocketType);
-      displayRocket.position.set(rocketX, 0, rocketZ);
-      
-      // Add dramatic lighting for each rocket
-      this.addDisplayLighting(displayRocket, i);
-      
-      // Add SpaceX display signage
-      if (i === Math.floor(rocketCount / 2)) {
-        this.addSpaceXSignage(displayRocket);
-      }
-      
-      displayGroup.add(displayRocket);
-    }
-    
-    // Add display platform
-    this.addDisplayPlatform(displayGroup, displayCenter, rocketCount * rocketSpacing);
-    
-    // Position on terrain
-    this.positionOnTerrain(displayGroup, displayCenter.x, displayCenter.z);
-    
-    this.scene.add(displayGroup);
-    
-    // Display notification removed - starships remain as static ground display
-    // if (window.showNotification) {
-    //   setTimeout(() => {
-    //     window.showNotification('🚀 SpaceX Starship Display Area Discovered! Drive West to see the lineup!', 6000);
-    //   }, 8000);
-    // }
+    // Starship display removed - keeping only terrain and sky
   }
 
   addDisplayLighting(rocket, index) {
-    // Add dramatic spotlights for each rocket
-    const spotLight = new THREE.SpotLight(0xffffff, 2, 200, Math.PI / 6, 0.3);
-    spotLight.position.set(30, 100, 0);
-    spotLight.target = rocket;
-    spotLight.castShadow = true;
-    this.scene.add(spotLight);
-    
-    // Add colored accent lighting
-    const colors = [0xff3300, 0x00ff88, 0x3388ff, 0xffaa00, 0xff6b35, 0x88ff00];
-    const accentLight = new THREE.PointLight(colors[index % colors.length], 1, 50);
-    accentLight.position.set(0, 80, 20);
-    rocket.add(accentLight);
+    // Display lighting removed - keeping only terrain and sky
   }
 
   addSpaceXSignage(rocket) {
-    // Create large SpaceX logo/sign
-    const signGeometry = new THREE.PlaneGeometry(40, 8);
-    const signMaterial = new THREE.MeshStandardMaterial({
-      color: 0x000000,
-      transparent: true,
-      opacity: 0.9
-    });
-    const sign = new THREE.Mesh(signGeometry, signMaterial);
-    sign.position.set(0, 200, 30);
-    sign.rotation.y = Math.PI;
-    this.scene.add(sign);
-    
-    // Add "SPACEX STARSHIP DISPLAY" text effect
-    const textGeometry = new THREE.PlaneGeometry(60, 6);
-    const textMaterial = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.8,
-      emissive: 0x333333
-    });
-    const textSign = new THREE.Mesh(textGeometry, textMaterial);
-    textSign.position.set(0, 210, 29);
-    textSign.rotation.y = Math.PI;
-    this.scene.add(textSign);
+    // SpaceX signage removed - keeping only terrain and sky
   }
 
   addDisplayPlatform(displayGroup, center, totalWidth) {
-    // Create elevated display platform
-    const platformGeometry = new THREE.BoxGeometry(totalWidth + 40, 5, 120);
-    const platformMaterial = new THREE.MeshStandardMaterial({
-      color: 0x444444,
-      metalness: 0.3,
-      roughness: 0.7
-    });
-    const platform = new THREE.Mesh(platformGeometry, platformMaterial);
-    platform.position.set(0, -2.5, 0);
-    displayGroup.add(platform);
+    // Display platform removed - keeping only terrain and sky
+  }
+
+  getTerrainHeight(x, z) {
+    // Raycast only against the terrain mesh for accurate ground placement
+    const raycaster = new THREE.Raycaster();
+    raycaster.set(new THREE.Vector3(x, 500, z), new THREE.Vector3(0, -1, 0));
     
-    // Add platform details and markings
-    for (let i = 0; i < 6; i++) {
-      const markingGeometry = new THREE.CylinderGeometry(15, 15, 0.5, 32);
-      const markingMaterial = new THREE.MeshStandardMaterial({
-        color: 0xff6b35,
-        emissive: 0x331100,
-        emissiveIntensity: 0.2
+    // Try to find terrain mesh if not already set - search more thoroughly
+    if (!this.terrainMesh) {
+      // First try: look for large PlaneGeometry (main terrain)
+      this.scene.traverse(child => {
+        if (child.isMesh && child.geometry) {
+          const params = child.geometry.parameters;
+          if (params && (params.width >= 2000 || params.height >= 2000)) {
+            this.terrainMesh = child;
+            return;
+          }
+          // Also check if it's a large plane by checking vertices
+          if (child.geometry.attributes && child.geometry.attributes.position) {
+            const pos = child.geometry.attributes.position;
+            const count = pos.count;
+            // Large terrain will have many vertices (1000+)
+            if (count > 1000) {
+              // Check bounding box to confirm it's large
+              child.geometry.computeBoundingBox();
+              const box = child.geometry.boundingBox;
+              if (box && (box.max.x - box.min.x > 2000 || box.max.z - box.min.z > 2000)) {
+                this.terrainMesh = child;
+                return;
+              }
+            }
+          }
+        }
       });
-      const marking = new THREE.Mesh(markingGeometry, markingMaterial);
-      marking.position.set(0, 2.75, (i - 2.5) * 80);
-      displayGroup.add(marking);
+      
+      // Fallback: use the global marsSurface if available
+      if (!this.terrainMesh && typeof marsSurface !== 'undefined' && marsSurface) {
+        this.terrainMesh = marsSurface;
+      }
+      
+      // Last resort: search all meshes for the largest one
+      if (!this.terrainMesh) {
+        let largestMesh = null;
+        let largestSize = 0;
+        this.scene.traverse(child => {
+          if (child.isMesh && child.geometry) {
+            child.geometry.computeBoundingBox();
+            const box = child.geometry.boundingBox;
+            if (box) {
+              const size = Math.max(
+                box.max.x - box.min.x,
+                box.max.z - box.min.z,
+                box.max.y - box.min.y
+              );
+              if (size > largestSize) {
+                largestSize = size;
+                largestMesh = child;
+              }
+            }
+          }
+        });
+        if (largestMesh && largestSize > 1000) {
+          this.terrainMesh = largestMesh;
+        }
+      }
     }
+    
+    if (this.terrainMesh) {
+      const intersects = raycaster.intersectObject(this.terrainMesh, false);
+      if (intersects.length > 0) {
+        return intersects[0].point.y;
+      }
+    }
+    
+    // Fallback: return 0 if terrain not found (will log warning)
+    console.warn(`Could not find terrain at (${x}, ${z}), using y=0. Terrain mesh:`, this.terrainMesh ? 'found' : 'NOT FOUND');
+    return 0;
   }
 
   positionOnTerrain(group, x, z) {
-    // Use raycasting to position on terrain
-    const raycaster = new THREE.Raycaster();
-    raycaster.set(new THREE.Vector3(x, 1000, z), new THREE.Vector3(0, -1, 0));
-    
-    let y = 0; // default height
-    if (this.scene && this.scene.children) {
-      const intersects = raycaster.intersectObjects(this.scene.children, true);
-      if (intersects.length > 0) {
-        y = intersects[0].point.y;
-      }
-    }
-    
+    const y = this.getTerrainHeight(x, z);
     group.position.set(x, y, z);
-  }
-
-  createLaunchSite(x, z) {
-    const siteGroup = new THREE.Group();
-    siteGroup.position.set(x, 0, z);
-
-    // Launch pad
-    const padGeometry = new THREE.CylinderGeometry(50, 50, 10, 32);
-    const padMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
-    const launchPad = new THREE.Mesh(padGeometry, padMaterial);
-
-    // Support structures
-    const supportStructures = this.createLaunchSupports();
-    siteGroup.add(launchPad, ...supportStructures);
-
-    // Position on terrain
-    const raycaster = new THREE.Raycaster();
-    raycaster.set(new THREE.Vector3(x, 1000, z), new THREE.Vector3(0, -1, 0));
-    const intersects = raycaster.intersectObjects(this.scene.children, true);
-    if (intersects.length > 0) {
-      siteGroup.position.y = intersects[0].point.y;
-    }
-
-    return siteGroup;
-  }
-
-  createLaunchSupports() {
-    const supports = [];
-
-    // Add tower and support structures
-    const towerGeometry = new THREE.BoxGeometry(10, 100, 10);
-    const towerMaterial = new THREE.MeshStandardMaterial({ color: 0x666666 });
-
-    for (let i = 0; i < 4; i++) {
-      const angle = (i / 4) * Math.PI * 2;
-      const radius = 30;
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
-
-      const tower = new THREE.Mesh(towerGeometry, towerMaterial);
-      tower.position.set(x, 50, z);
-      supports.push(tower);
-    }
-
-    return supports;
-  }
-
-  createRocket(type = 'starship') {
-    if (type === 'starship') {
-      return this.createStarshipRocket();
-    } else if (type === 'superheavy') {
-      return this.createSuperHeavyBooster();
-    } else if (type === 'fullstack') {
-      return this.createFullStackRocket();
-    }
-    return this.createStarshipRocket();
-  }
-
-  createStarshipRocket() {
-    const rocketGroup = new THREE.Group();
-
-    // Main body - stainless steel with metallic finish (taller for more realistic proportions)
-    const bodyGeometry = new THREE.CylinderGeometry(9, 9, 160, 32);
-    const bodyMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0xE8E8E8,
-      metalness: 0.8,
-      roughness: 0.15,
-      envMapIntensity: 1.2
-    });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-
-    // Nose section - more tapered like real Starship
-    const noseGeometry = new THREE.CylinderGeometry(3, 9, 40, 32);
-    const nose = new THREE.Mesh(noseGeometry, bodyMaterial);
-    nose.position.y = 100;
-
-    // Black thermal protection tiles (more realistic pattern)
-    const heatShieldGeometry = new THREE.CylinderGeometry(9.1, 9.1, 50, 32);
-    const heatShieldMaterial = new THREE.MeshStandardMaterial({
-      color: 0x1a1a1a,
-      roughness: 0.9,
-      metalness: 0.1
-    });
-    const heatShield = new THREE.Mesh(heatShieldGeometry, heatShieldMaterial);
-    heatShield.position.y = -55;
-
-    // Forward fins (more realistic proportions)
-    const forwardFlapGeometry = new THREE.BoxGeometry(12, 3, 6);
-    const flapMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0xE8E8E8,
-      metalness: 0.8,
-      roughness: 0.15
-    });
-
-    // Two forward flaps
-    const forwardFlapLeft = new THREE.Mesh(forwardFlapGeometry, flapMaterial);
-    forwardFlapLeft.position.set(-10, 50, 0);
-    forwardFlapLeft.rotation.z = -0.1;
-    
-    const forwardFlapRight = new THREE.Mesh(forwardFlapGeometry, flapMaterial);
-    forwardFlapRight.position.set(10, 50, 0);
-    forwardFlapRight.rotation.z = 0.1;
-
-    // Aft fins (larger and more prominent)
-    const aftFlapGeometry = new THREE.BoxGeometry(18, 4, 8);
-    
-    const aftFlapLeft = new THREE.Mesh(aftFlapGeometry, flapMaterial);
-    aftFlapLeft.position.set(-12, -40, 0);
-    aftFlapLeft.rotation.z = 0.15;
-    
-    const aftFlapRight = new THREE.Mesh(aftFlapGeometry, flapMaterial);
-    aftFlapRight.position.set(12, -40, 0);
-    aftFlapRight.rotation.z = -0.15;
-
-    // Engine section with 3 Raptor engines (more detailed)
-    const engineSection = new THREE.Group();
-    const engineCount = 3;
-    const engineRadius = 5;
-
-    for (let i = 0; i < engineCount; i++) {
-      const angle = (i / engineCount) * Math.PI * 2;
-      
-      // Engine bell (more detailed)
-      const engineGeometry = new THREE.CylinderGeometry(1.8, 2.8, 10, 16);
-      const engineMaterial = new THREE.MeshStandardMaterial({
-        color: 0x444444,
-        metalness: 0.9,
-        roughness: 0.2
-      });
-      const engine = new THREE.Mesh(engineGeometry, engineMaterial);
-      
-      engine.position.x = Math.cos(angle) * engineRadius;
-      engine.position.z = Math.sin(angle) * engineRadius;
-      engine.position.y = -85;
-      
-      // Add engine detail (injector plate)
-      const injectorGeometry = new THREE.CylinderGeometry(1.3, 1.3, 1.5, 16);
-      const injectorMaterial = new THREE.MeshStandardMaterial({
-        color: 0x666666,
-        metalness: 0.8,
-        roughness: 0.3
-      });
-      const injector = new THREE.Mesh(injectorGeometry, injectorMaterial);
-      injector.position.y = 6;
-      engine.add(injector);
-      
-      // Add engine gimbal mechanism
-      const gimbalGeometry = new THREE.CylinderGeometry(2.2, 2.2, 3, 16);
-      const gimbal = new THREE.Mesh(gimbalGeometry, engineMaterial);
-      gimbal.position.y = -7;
-      engine.add(gimbal);
-      
-      engineSection.add(engine);
-    }
-
-    // Add more detailed surface features
-    this.addStarshipSurfaceDetails(body, bodyMaterial, heatShieldMaterial);
-
-    // Add header tank (for realistic Starship appearance)
-    const headerTankGeometry = new THREE.CylinderGeometry(8, 8, 20, 32);
-    const headerTank = new THREE.Mesh(headerTankGeometry, bodyMaterial);
-    headerTank.position.y = 20;
-    rocketGroup.add(headerTank);
-
-    // Add payload bay doors
-    const payloadDoorGeometry = new THREE.BoxGeometry(16, 2, 1);
-    const payloadDoorLeft = new THREE.Mesh(payloadDoorGeometry, bodyMaterial);
-    payloadDoorLeft.position.set(-8.5, 60, 0);
-    payloadDoorLeft.rotation.z = -0.05;
-    
-    const payloadDoorRight = new THREE.Mesh(payloadDoorGeometry, bodyMaterial);
-    payloadDoorRight.position.set(8.5, 60, 0);
-    payloadDoorRight.rotation.z = 0.05;
-
-    // Combine all parts
-    rocketGroup.add(body, nose, heatShield, forwardFlapLeft, forwardFlapRight, 
-                    aftFlapLeft, aftFlapRight, engineSection, payloadDoorLeft, payloadDoorRight);
-
-    // Add SpaceX logo
-    const logoGeometry = new THREE.PlaneGeometry(8, 2);
-    const logoMaterial = new THREE.MeshStandardMaterial({
-      color: 0x000000,
-      transparent: true,
-      opacity: 0.8
-    });
-    const logo = new THREE.Mesh(logoGeometry, logoMaterial);
-    logo.position.set(0, 40, 9.2);
-    rocketGroup.add(logo);
-
-    return rocketGroup;
-  }
-
-  createSuperHeavyBooster() {
-    const boosterGroup = new THREE.Group();
-
-    // Main body - larger and more robust
-    const bodyGeometry = new THREE.CylinderGeometry(9, 9, 200, 32);
-    const bodyMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0xE8E8E8,
-      metalness: 0.8,
-      roughness: 0.15,
-      envMapIntensity: 1.2
-    });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-
-    // Engine section with 33 Raptor engines
-    const engineSection = new THREE.Group();
-    const innerEngineCount = 13; // Inner ring
-    const outerEngineCount = 20; // Outer ring
-    const innerRadius = 4;
-    const outerRadius = 7;
-
-    // Inner ring of engines
-    for (let i = 0; i < innerEngineCount; i++) {
-      const angle = (i / innerEngineCount) * Math.PI * 2;
-      const engine = this.createRaptorEngine();
-      engine.position.x = Math.cos(angle) * innerRadius;
-      engine.position.z = Math.sin(angle) * innerRadius;
-      engine.position.y = -105;
-      engineSection.add(engine);
-    }
-
-    // Outer ring of engines
-    for (let i = 0; i < outerEngineCount; i++) {
-      const angle = (i / outerEngineCount) * Math.PI * 2;
-      const engine = this.createRaptorEngine();
-      engine.position.x = Math.cos(angle) * outerRadius;
-      engine.position.z = Math.sin(angle) * outerRadius;
-      engine.position.y = -105;
-      engineSection.add(engine);
-    }
-
-    // Add grid fins for reentry control
-    const gridFinGeometry = new THREE.BoxGeometry(8, 12, 2);
-    const gridFinMaterial = new THREE.MeshStandardMaterial({
-      color: 0xcccccc,
-      metalness: 0.9,
-      roughness: 0.1
-    });
-
-    for (let i = 0; i < 4; i++) {
-      const angle = (i / 4) * Math.PI * 2;
-      const gridFin = new THREE.Mesh(gridFinGeometry, gridFinMaterial);
-      gridFin.position.x = Math.cos(angle) * 10;
-      gridFin.position.z = Math.sin(angle) * 10;
-      gridFin.position.y = 60;
-      gridFin.rotation.y = angle;
-      boosterGroup.add(gridFin);
-    }
-
-    // Add landing legs
-    const legGeometry = new THREE.CylinderGeometry(0.5, 0.5, 15, 8);
-    const legMaterial = new THREE.MeshStandardMaterial({
-      color: 0x888888,
-      metalness: 0.7,
-      roughness: 0.3
-    });
-
-    for (let i = 0; i < 4; i++) {
-      const angle = (i / 4) * Math.PI * 2;
-      const leg = new THREE.Mesh(legGeometry, legMaterial);
-      leg.position.x = Math.cos(angle) * 8;
-      leg.position.z = Math.sin(angle) * 8;
-      leg.position.y = -95;
-      leg.rotation.x = Math.PI / 6;
-      boosterGroup.add(leg);
-    }
-
-    boosterGroup.add(body, engineSection);
-    return boosterGroup;
-  }
-
-  createFullStackRocket() {
-    const fullStackGroup = new THREE.Group();
-    
-    // Create Super Heavy booster
-    const booster = this.createSuperHeavyBooster();
-    fullStackGroup.add(booster);
-    
-    // Create Starship on top
-    const starship = this.createStarshipRocket();
-    starship.position.y = 250; // Position on top of booster
-    fullStackGroup.add(starship);
-    
-    return fullStackGroup;
-  }
-
-  createRaptorEngine() {
-    const engineGroup = new THREE.Group();
-    
-    // Engine bell
-    const engineGeometry = new THREE.CylinderGeometry(1.5, 2.5, 8, 16);
-    const engineMaterial = new THREE.MeshStandardMaterial({
-      color: 0x444444,
-      metalness: 0.9,
-      roughness: 0.2
-    });
-    const engine = new THREE.Mesh(engineGeometry, engineMaterial);
-    engineGroup.add(engine);
-    
-    // Injector plate
-    const injectorGeometry = new THREE.CylinderGeometry(1.2, 1.2, 1, 16);
-    const injector = new THREE.Mesh(injectorGeometry, engineMaterial);
-    injector.position.y = 4.5;
-    engineGroup.add(injector);
-    
-    return engineGroup;
-  }
-
-  addStarshipSurfaceDetails(body, bodyMaterial, heatShieldMaterial) {
-    // Add hexagonal heat shield tiles
-    const tileCount = 200;
-    for (let i = 0; i < tileCount; i++) {
-      const tileGeometry = new THREE.CylinderGeometry(0.8, 0.8, 0.1, 6);
-      const tile = new THREE.Mesh(tileGeometry, heatShieldMaterial);
-      
-      // Random position on lower half of rocket
-      const angle = Math.random() * Math.PI * 2;
-      const height = -80 + Math.random() * 100;
-      const radius = 9.2;
-      
-      tile.position.x = Math.cos(angle) * radius;
-      tile.position.z = Math.sin(angle) * radius;
-      tile.position.y = height;
-      body.add(tile);
-    }
-
-    // Add propellant tank lines
-    const tankLineGeometry = new THREE.CylinderGeometry(0.2, 0.2, 160, 8);
-    for (let i = 0; i < 8; i++) {
-      const angle = (i / 8) * Math.PI * 2;
-      const tankLine = new THREE.Mesh(tankLineGeometry, bodyMaterial);
-      tankLine.position.x = Math.cos(angle) * 9.3;
-      tankLine.position.z = Math.sin(angle) * 9.3;
-      body.add(tankLine);
-    }
-
-    // Add RCS thrusters
-    const rcsGeometry = new THREE.CylinderGeometry(0.3, 0.3, 1, 8);
-    const rcsMaterial = new THREE.MeshStandardMaterial({
-      color: 0x666666,
-      metalness: 0.8,
-      roughness: 0.3
-    });
-    
-    for (let i = 0; i < 16; i++) {
-      const angle = (i / 16) * Math.PI * 2;
-      const height = 30 + (i % 4) * 20;
-      const rcs = new THREE.Mesh(rcsGeometry, rcsMaterial);
-      rcs.position.x = Math.cos(angle) * 9.5;
-      rcs.position.z = Math.sin(angle) * 9.5;
-      rcs.position.y = height;
-      body.add(rcs);
-    }
-  }
-
-  triggerRocketEvent(type, startPosition) {
-    // Choose rocket type based on probability
-    let rocketType = 'starship';
-    const rand = Math.random();
-    if (rand < 0.6) {
-      rocketType = 'starship';
-    } else if (rand < 0.8) {
-      rocketType = 'superheavy';
-    } else {
-      rocketType = 'fullstack';
-    }
-    
-    const rocket = this.createRocket(rocketType);
-    const startPos = startPosition || this.getRandomLaunchSite().position;
-    rocket.position.copy(startPos);
-  
-    // Adjust duration based on rocket type
-    let duration = 10000; // Default 10 seconds
-    if (rocketType === 'fullstack') {
-      duration = 20000; // 20 seconds for full stack
-    } else if (rocketType === 'superheavy') {
-      duration = 15000; // 15 seconds for booster
-    }
-  
-    const event = {
-      type: type,
-      rocket: rocket,
-      rocketType: rocketType,
-      startTime: Date.now(),
-      duration: duration,
-      startPos: startPos.clone(),
-      endPos: type === 'launch' ?
-        startPos.clone().add(new THREE.Vector3(0, 1500, 0)) :
-        startPos.clone(),
-      engineParticles: this.createRocketEngineEffect(rocket)
-    };
-  
-    this.scene.add(rocket);
-    this.activeEvents.add(event);
-    
-    // Launch notification removed - starships stay on ground
-    // if (window.showNotification) {
-    //   const rocketName = rocketType === 'fullstack' ? 'Starship + Super Heavy' : 
-    //                     rocketType === 'superheavy' ? 'Super Heavy Booster' : 'Starship';
-    //   window.showNotification(`${rocketName} ${type} detected!`, 5000);
-    // }
-  }
-  
-  
-  
-  createEngineParticleTexture() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 64;
-    canvas.height = 64;
-    const context = canvas.getContext('2d');
-  
-    // Create radial gradient for soft particles
-    const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 32);
-    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-    gradient.addColorStop(0.3, 'rgba(255, 200, 100, 0.8)');
-    gradient.addColorStop(1, 'rgba(255, 100, 50, 0)');
-  
-    context.fillStyle = gradient;
-    context.fillRect(0, 0, 64, 64);
-  
-    return new THREE.CanvasTexture(canvas);
-  }
-  
-  // Update the updateActiveEvents method to include particle updates
-  updateActiveEvents() {
-    for (const event of this.activeEvents) {
-      const progress = (Date.now() - event.startTime) / event.duration;
-  
-      if (progress >= 1) {
-        this.scene.remove(event.rocket);
-        this.activeEvents.delete(event);
-        continue;
-      }
-  
-      if (event.type === 'launch') {
-        // Add easing for smoother acceleration
-        const easeProgress = this.easeInOutCubic(progress);
-        event.rocket.position.lerp(event.endPos, easeProgress);
-        
-        // Add slight wobble
-        event.rocket.rotation.z = Math.sin(progress * Math.PI * 4) * 0.05;
-        
-        // Update engine effects
-        if (event.engineParticles) {
-          event.engineParticles.update(progress);
-        }
-      } else {
-        // Landing animation
-        const easeProgress = this.easeInOutCubic(1 - progress);
-        event.rocket.position.lerp(event.endPos, easeProgress);
-        event.rocket.rotation.z = Math.sin(progress * Math.PI * 4) * 0.05;
-        
-        if (event.engineParticles) {
-          event.engineParticles.update(1 - progress);
-        }
-      }
-    }
-  }
-  
-  // Add easing function for smoother motion
-  easeInOutCubic(x) {
-    return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-  }
-
-  easeInQuad(x) {
-    return x * x;
-  }
-  
-  easeInOutQuad(x) {
-    return x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
-  }
-  
-  createRocketEngineEffect(rocket) {
-    const perfSettings = getPerformanceSettings();
-    
-    // Create enhanced burner effects with multiple layers
-    // Use darker, more visible colors for mobile devices
-    const burnerEffects = perfSettings.isMobile ? {
-      innerFlame: this.createFlameParticleSystem(800, 0xff3300, 0xff6600), // Bright red-orange core for mobile
-      middleFlame: this.createFlameParticleSystem(1000, 0xaa1100, 0xff2200), // Dark red-orange flame
-      outerFlame: this.createFlameParticleSystem(1200, 0x660000, 0xaa1100), // Dark red outer flame
-      smokeTrail: this.createSmokeParticleSystem(600, 0x222222), // Darker smoke
-      shockWave: this.createShockWaveEffect()
-    } : {
-      innerFlame: this.createFlameParticleSystem(1500, 0xffffff, 0xffff88), // White-yellow core for desktop
-      middleFlame: this.createFlameParticleSystem(2000, 0xff4400, 0xff8800), // Orange flame
-      outerFlame: this.createFlameParticleSystem(2500, 0xff1100, 0xff4400), // Red outer flame
-      smokeTrail: this.createSmokeParticleSystem(1000, 0x888888),
-      shockWave: this.createShockWaveEffect()
-    };
-    
-    // Create dramatic engine lighting - adjust for mobile visibility
-    const engineLights = perfSettings.isMobile ? [
-      new THREE.PointLight(0xff6600, 8, 120), // Brighter orange light for mobile
-      new THREE.PointLight(0xff2200, 6, 100), // Bright red glow
-      new THREE.PointLight(0xaa1100, 4, 80),  // Dark red heat
-      new THREE.SpotLight(0xff3300, 5, 250, Math.PI / 4, 0.3) // Brighter directional thrust
-    ] : [
-      new THREE.PointLight(0xffffff, 5, 100), // Main white light for desktop
-      new THREE.PointLight(0xff3300, 4, 80),  // Orange glow
-      new THREE.PointLight(0xff6600, 3, 60),  // Red heat
-      new THREE.SpotLight(0xff4400, 3, 200, Math.PI / 4, 0.3) // Directional thrust
-    ];
-  
-    // Position lights at engine base
-    engineLights.forEach((light, index) => {
-      light.position.y = -90 + index * 5; // Stagger lights
-      if (light.type === 'SpotLight') {
-        light.target.position.set(0, -200, 0);
-        light.angle = Math.PI / 4;
-      }
-      rocket.add(light);
-    });
-    
-    // Add particle systems to rocket
-    Object.values(burnerEffects).forEach(effect => {
-      if (effect.mesh) {
-        effect.mesh.position.y = -85; // Position at engine base
-        rocket.add(effect.mesh);
-      }
-    });
-  
-    return {
-      effects: burnerEffects,
-      lights: engineLights,
-      update: (intensity) => {
-        const time = Date.now() * 0.001;
-        
-        // Update each flame layer
-        this.updateFlameEffect(burnerEffects.innerFlame, intensity, time, 0.8, 15);
-        this.updateFlameEffect(burnerEffects.middleFlame, intensity, time, 1.2, 25);
-        this.updateFlameEffect(burnerEffects.outerFlame, intensity, time, 1.6, 35);
-        this.updateSmokeEffect(burnerEffects.smokeTrail, intensity, time);
-        this.updateShockWaveEffect(burnerEffects.shockWave, intensity, time);
-  
-        // Animate engine lights with realistic flickering
-        engineLights.forEach((light, index) => {
-          const flicker = 1 + Math.sin(time * (20 + index * 5)) * 0.1 + 
-                         Math.sin(time * (30 + index * 7)) * 0.05;
-          const baseIntensity = [5, 4, 3, 3][index] || 2;
-          light.intensity = baseIntensity * intensity * flicker;
-          
-          // Add color temperature variation
-          if (index === 0) {
-            const temp = 0.9 + Math.sin(time * 15) * 0.1;
-            light.color.setRGB(1, temp, temp * 0.8);
-          }
-        });
-      }
-    };
-  }
-
-  createFlameParticleSystem(count, color1, color2) {
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(count * 3);
-    const colors = new Float32Array(count * 3);
-    const sizes = new Float32Array(count);
-    const velocities = new Float32Array(count * 3);
-    
-    // Initialize particles
-    for (let i = 0; i < count; i++) {
-      const i3 = i * 3;
-      
-      // Position at engine base
-      positions[i3] = (Math.random() - 0.5) * 8;
-      positions[i3 + 1] = 0;
-      positions[i3 + 2] = (Math.random() - 0.5) * 8;
-      
-      // Color gradient
-      const colorFactor = Math.random();
-      const color = color1.clone ? color1.clone().lerp(color2, colorFactor) : new THREE.Color(color1).lerp(new THREE.Color(color2), colorFactor);
-      colors[i3] = color.r;
-      colors[i3 + 1] = color.g;
-      colors[i3 + 2] = color.b;
-      
-      // Size variation
-      sizes[i] = Math.random() * 4 + 2;
-      
-      // Initial velocity
-      velocities[i3] = (Math.random() - 0.5) * 2;
-      velocities[i3 + 1] = -(Math.random() * 30 + 10);
-      velocities[i3 + 2] = (Math.random() - 0.5) * 2;
-    }
-    
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-    
-    const material = new THREE.PointsMaterial({
-      size: 8,
-      sizeAttenuation: true,
-      blending: THREE.AdditiveBlending,
-      transparent: true,
-      vertexColors: true,
-      opacity: 0.8
-    });
-    
-    const mesh = new THREE.Points(geometry, material);
-    
-    return {
-      mesh,
-      positions,
-      colors,
-      sizes,
-      velocities,
-      count
-    };
-  }
-
-  createSmokeParticleSystem(count, color) {
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(count * 3);
-    const colors = new Float32Array(count * 3);
-    const sizes = new Float32Array(count);
-    
-    for (let i = 0; i < count; i++) {
-      const i3 = i * 3;
-      positions[i3] = (Math.random() - 0.5) * 15;
-      positions[i3 + 1] = -Math.random() * 20;
-      positions[i3 + 2] = (Math.random() - 0.5) * 15;
-      
-      const smokeColor = new THREE.Color(color);
-      colors[i3] = smokeColor.r;
-      colors[i3 + 1] = smokeColor.g;
-      colors[i3 + 2] = smokeColor.b;
-      
-      sizes[i] = Math.random() * 6 + 4;
-    }
-    
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-    
-    const material = new THREE.PointsMaterial({
-      size: 12,
-      sizeAttenuation: true,
-      blending: THREE.NormalBlending,
-      transparent: true,
-      vertexColors: true,
-      opacity: 0.4
-    });
-    
-    return {
-      mesh: new THREE.Points(geometry, material),
-      positions,
-      count
-    };
-  }
-
-  createShockWaveEffect() {
-    const geometry = new THREE.RingGeometry(0, 30, 32);
-    const material = new THREE.MeshBasicMaterial({
-      color: 0xff4400,
-      transparent: true,
-      opacity: 0.3,
-      side: THREE.DoubleSide
-    });
-    
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.rotation.x = -Math.PI / 2; // Horizontal
-    mesh.position.y = -90;
-    
-    return { mesh };
-  }
-
-  updateFlameEffect(flame, intensity, time, spread, speed) {
-    const positions = flame.positions;
-    
-    for (let i = 0; i < flame.count; i++) {
-      const i3 = i * 3;
-      
-      // Create expanding cone shape
-      const angle = Math.random() * Math.PI * 2;
-      const radius = Math.random() * spread * intensity;
-      const velocity = speed * intensity;
-      
-      positions[i3] = Math.cos(angle) * radius;
-      positions[i3 + 1] = -(Math.random() * velocity + velocity * 0.5);
-      positions[i3 + 2] = Math.sin(angle) * radius;
-    }
-    
-    flame.mesh.geometry.attributes.position.needsUpdate = true;
-  }
-
-  updateSmokeEffect(smoke, intensity, time) {
-    const positions = smoke.positions;
-    
-    for (let i = 0; i < smoke.count; i++) {
-      const i3 = i * 3;
-      
-      positions[i3] += (Math.random() - 0.5) * 0.5;
-      positions[i3 + 1] -= (2 + Math.random() * 3) * intensity;
-      positions[i3 + 2] += (Math.random() - 0.5) * 0.5;
-      
-      // Reset particles that have moved too far
-      if (positions[i3 + 1] < -100) {
-        positions[i3] = (Math.random() - 0.5) * 15;
-        positions[i3 + 1] = 0;
-        positions[i3 + 2] = (Math.random() - 0.5) * 15;
-      }
-    }
-    
-    smoke.mesh.geometry.attributes.position.needsUpdate = true;
-  }
-
-  updateShockWaveEffect(shockWave, intensity, time) {
-    if (shockWave.mesh) {
-      // Pulsing ring effect
-      const pulse = 1 + Math.sin(time * 20) * 0.2;
-      shockWave.mesh.scale.setScalar(pulse * intensity);
-      shockWave.mesh.material.opacity = 0.3 * intensity * (1 - pulse * 0.3);
-    }
-  }
-  
-  createParticleSystem(count, color) {
-    const geometry = new THREE.BufferGeometry();
-    const positions = new Float32Array(count * 3);
-    const colors = new Float32Array(count * 3);
-    const sizes = new Float32Array(count);
-  
-    for (let i = 0; i < count; i++) {
-      positions[i * 3] = 0;
-      positions[i * 3 + 1] = -2;
-      positions[i * 3 + 2] = 0;
-  
-      // Create color gradient
-      const colorObj = new THREE.Color(color);
-      colors[i * 3] = colorObj.r;
-      colors[i * 3 + 1] = colorObj.g;
-      colors[i * 3 + 2] = colorObj.b;
-  
-      sizes[i] = Math.random() * 2 + 1;
-    }
-  
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-  
-    const material = new THREE.ShaderMaterial({
-      uniforms: {
-        time: { value: 0 },
-        pointTexture: { value: this.createEngineParticleTexture() }
-      },
-      vertexShader: `
-        attribute float size;
-        varying vec3 vColor;
-        void main() {
-          vColor = color;
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = size * (300.0 / -mvPosition.z);
-          gl_Position = projectionMatrix * mvPosition;
-        }
-      `,
-      fragmentShader: `
-        uniform sampler2D pointTexture;
-        varying vec3 vColor;
-        void main() {
-          gl_FragColor = vec4(vColor, 1.0) * texture2D(pointTexture, gl_PointCoord);
-        }
-      `,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      transparent: true,
-      vertexColors: true
-    });
-  
-    const particleSystem = new THREE.Points(geometry, material);
-    particleSystem.position.y = -2;
-    return particleSystem;
   }
 
   getRandomLaunchSite() {
@@ -4374,6 +2041,12 @@ class MarsSceneManager {
 
     // Update city lighting based on time of day
     this.updateCityLighting();
+
+    // Update animated objects and vehicle convoys
+    this.updateAnimations(performance.now());
+    
+    // Rocket events removed - keeping only terrain and sky
+    // this.updateActiveEvents();
   }
 
   updateActiveEvents() {
@@ -4420,37 +2093,12 @@ class MarsSceneManager {
   }
 
   repositionSceneElements(playerPosition) {
-    // Move city if player has moved too far away
-    this.marsBases.forEach(city => {
-      if (city.position.distanceTo(playerPosition) > this.sceneRepeatDistance * 1.5) {
-        const newPos = this.getNewElementPosition(playerPosition);
-        city.position.set(newPos.x, newPos.y, newPos.z);
-      }
-    });
+    // No bases to reposition
   }
 
   // Update city lighting based on time of day
   updateCityLighting() {
-    if (typeof timeOfDay !== 'undefined') {
-      const intensity = this.getCityLightIntensity(timeOfDay);
-      
-      this.marsBases.forEach(city => {
-        // Update building lights
-        city.traverse((child) => {
-          if (child.material && child.material.color) {
-            // Adjust building window brightness
-            if (child.material.color.r > 0.8) { // Likely a window
-              child.material.opacity = intensity;
-            }
-          }
-          
-          // Update point lights
-          if (child.isPointLight) {
-            child.intensity = intensity * 0.5;
-          }
-        });
-      });
-    }
+    // No bases to update lighting for
   }
 
   // Calculate city light intensity based on time of day
@@ -4647,17 +2295,18 @@ class MarsSceneManager {
   // }
 }
 
-// Initialize scene manager after scene setup
-const sceneManager = new MarsSceneManager(scene, 5000);
+// Scene manager is created via loadNonEssentialComponents / initializeScene - no duplicate needed here
+let sceneManager = null;
 
 // Add scene manager update to animation loop
 const originalAnimate = animate;
 animate = function (time) {
   originalAnimate(time);
 
-  // Update scene manager with rover position
-  if (rover) {
-    sceneManager.update(rover.position);
+  // Update scene manager with rover position (uses the one from lazy loader)
+  const mgr = sceneManager || window.marsSceneManager;
+  if (mgr && rover) {
+    mgr.update(rover.position);
   }
 };
 
@@ -4786,14 +2435,24 @@ function animate(time) {
       }
     }
   } else {
-    // // Make the skybox follow the camera ONLY if it exists
-    // if (window.spaceSkybox) {
-    //   window.spaceSkybox.position.copy(camera.position);
-    // }
+    // Make the skybox follow the camera so the sky always surrounds the player
+    if (spaceSkybox) {
+      spaceSkybox.position.copy(camera.position);
+    }
 
     // Update meteor system if it exists and we're in night mode (throttled)
     if (window.meteorSystem && (!isDaytime || isTransitioning) && frameCount % frameThrottle === 0) {
       window.meteorSystem.update(delta);
+    }
+
+    // Update day/night cycle (throttled to every 10 frames for performance)
+    if (frameCount % 10 === 0 && typeof updateDayNightCycle === 'function') {
+      updateDayNightCycle(time);
+    }
+
+    // Update enhanced night sky (twinkling stars + shooting stars)
+    if (spaceSkybox && spaceSkybox.userData && spaceSkybox.userData.update && !isDaytime) {
+      spaceSkybox.userData.update(time);
     }
 
     // Update Mars Scene Manager if it exists (heavily throttled for performance)
@@ -4820,6 +2479,9 @@ function animate(time) {
     // Update rover position
     rover.position.x += moveX;
     rover.position.z += moveZ;
+
+    // Position rover on terrain after movement
+    positionRoverOnTerrain();
 
     // Set current speed based on direction - FIXED: positive for forward (w key)
     currentSpeed = speed * (keys.w ? 1 : -1); // Positive for forward, negative for backward
@@ -4851,7 +2513,7 @@ function animate(time) {
     const turnDirection = keys.a ? 1 : -1;
     roverYaw += rotationSpeed * turnDirection;
 
-    // Normalize roverYaw to keep it within 0-2π range to prevent floating point issues
+    // Normalize roverYaw to keep it within 0-2Ï€ range to prevent floating point issues
     roverYaw = roverYaw % (Math.PI * 2);
     if (roverYaw < 0) roverYaw += Math.PI * 2;
     
@@ -4940,10 +2602,7 @@ function animate(time) {
     }
   }
 
-  // Update Mars Scene Manager and its events (throttled for performance)
-  if (window.marsSceneManager && frameCount % frameThrottle === 0) {
-    window.marsSceneManager.updateActiveEvents();
-  }
+  // Mars Scene Manager events are now updated via marsSceneManager.update() call
   
   // Track frame time for performance monitoring
   window.lastFrameTime = time;
@@ -5174,43 +2833,10 @@ function updateCamera() {
 
 animate(0);
 // Add a simple HUD to show camera mode
-function createHUD() {
-  const hudElement = document.createElement('div');
-  hudElement.style.position = 'absolute';
-  hudElement.style.bottom = '20px';
-  hudElement.style.left = '20px';
-  hudElement.style.color = 'white';
-  hudElement.style.fontFamily = 'Arial, sans-serif';
-  hudElement.style.fontSize = '16px';
-  hudElement.style.padding = '10px';
-  hudElement.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-  hudElement.style.borderRadius = '5px';
-  hudElement.style.pointerEvents = 'none'; // Don't interfere with mouse events
-  hudElement.id = 'cameraHUD';
-  // hudElement.innerHTML = '<p>Camera: Third Person Mode (Press C to change)<br /><br />Controls: W/A/S/D to move, Arrow keys to rotate camera</p>';
-  document.body.appendChild(hudElement);
 
-  // Create a text element for distance traveled
-  window.distanceText = document.createElement('div');
-  window.distanceText.style.position = 'absolute';
-  window.distanceText.style.top = '20px';
-  window.distanceText.style.left = '20px';
-  window.distanceText.style.color = 'white';
-  window.distanceText.style.fontSize = '16px';
-  window.distanceText.style.fontFamily = 'Arial, sans-serif';
-  window.distanceText.style.padding = '10px';
-  window.distanceText.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-  window.distanceText.style.borderRadius = '5px';
-  window.distanceText.style.pointerEvents = 'none';
-  window.distanceText.id = 'distanceHUD';
-  //window.distanceText.innerHTML = 'Distance Traveled: 0.00 miles';
-  document.body.appendChild(window.distanceText);
 
-  // HUD update is now handled in the main keydown handler to prevent duplicate listeners
-}
 
-// Create the HUD
-createHUD();
+
 
 // Resize Window - using centralized event listener management
 const resizeHandler = () => {
@@ -5953,41 +3579,383 @@ function createMarsRoughnessMap() {
   return new THREE.CanvasTexture(canvas);
 }
 
-// Create a skybox with Milky Way and planets - improved dome-like version
+// Create a skybox with Milky Way and planets - optimized smooth version
 function createSpaceSkybox() {
-  console.log("Creating skybox...");
+  console.log("Creating smooth night sky...");
 
-  // Use a higher-resolution sphere for smoother appearance
-  const skyboxGeometry = new THREE.SphereGeometry(6000, 256, 256);
+  const perfSettings = getPerformanceSettings();
+  const skyboxGroup = new THREE.Group();
+  skyboxGroup.renderOrder = -1000;
 
-  // Create a higher resolution texture - capped to prevent memory issues
-  const texture = createSphericalSkyTexture(perfSettings.isMobile ? 1024 : 4096); // Cap at 4096 for desktop, 1024 for mobile
-
-  // Apply advanced texture filtering for smoother appearance
-  texture.minFilter = THREE.LinearMipmapLinearFilter; // Use trilinear filtering
+  // === LAYER 1: Static background sphere (smooth, high-quality) ===
+  // Increased segments for smoother appearance (no triangles visible)
+  const skyboxGeometry = new THREE.SphereGeometry(5900, 128, 96); // More segments for ultra-smooth appearance
+  const texture = createSphericalSkyTexture(perfSettings.isMobile ? 1024 : 2048); // Reduced from 4096 to prevent hanging
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
-  texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
-  texture.generateMipmaps = true; // Enable mipmaps for better distance rendering
+  texture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 4); // Cap anisotropy
+  texture.generateMipmaps = true;
 
   const skyboxMaterial = new THREE.MeshBasicMaterial({
-    map: texture,
-    side: THREE.BackSide,
-    fog: false,
+    map: texture, side: THREE.BackSide, fog: false,
+    transparent: true, opacity: 1.0, depthWrite: false
+  });
+  const skyboxMesh = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
+  skyboxMesh.frustumCulled = false;
+  skyboxGroup.add(skyboxMesh);
+
+  // === LAYER 2: Twinkling star particles (reduced count for performance) ===
+  const starSystem = createTwinklingStars();
+  skyboxGroup.add(starSystem.points);
+  skyboxGroup.userData.starSystem = starSystem;
+
+  // === LAYER 3: Shooting star system ===
+  const shootingStarSystem = createShootingStarSystem();
+  skyboxGroup.add(shootingStarSystem.group);
+  skyboxGroup.userData.shootingStars = shootingStarSystem;
+
+  // Store update function for animation loop
+  skyboxGroup.userData.update = function(time) {
+    // Twinkle stars
+    if (starSystem && starSystem.update) starSystem.update(time);
+    // Shooting stars
+    if (shootingStarSystem && shootingStarSystem.update) shootingStarSystem.update(time);
+  };
+
+  skyboxGroup.frustumCulled = false;
+  console.log("Smooth night sky created successfully");
+  return skyboxGroup;
+}
+
+// ============================================================
+// TWINKLING STAR PARTICLE SYSTEM
+// ============================================================
+function createTwinklingStars() {
+  const perfSettings = getPerformanceSettings();
+  // Higher star count for denser field, still performance-aware
+  const starCount = perfSettings.isMobile ? 4000 : 12000;
+  const skyRadius = 5500;
+
+  const positions = new Float32Array(starCount * 3);
+  const colors = new Float32Array(starCount * 3);
+  const sizes = new Float32Array(starCount);
+  const phases = new Float32Array(starCount); // twinkle phase
+  const speeds = new Float32Array(starCount); // twinkle speed
+
+  for (let i = 0; i < starCount; i++) {
+    // Distribute on sphere using fibonacci sphere for even distribution
+    const phi = Math.acos(1 - 2 * (i + 0.5) / starCount);
+    const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+    // Add small jitter so it doesn't look too uniform
+    const jitterPhi = phi + (Math.random() - 0.5) * 0.02;
+    const jitterTheta = theta + (Math.random() - 0.5) * 0.02;
+
+    positions[i * 3]     = skyRadius * Math.sin(jitterPhi) * Math.cos(jitterTheta);
+    positions[i * 3 + 1] = skyRadius * Math.cos(jitterPhi);
+    positions[i * 3 + 2] = skyRadius * Math.sin(jitterPhi) * Math.sin(jitterTheta);
+
+    // Star color variety
+    const colorType = Math.random();
+    if (colorType < 0.55) {
+      // Cool white-blue
+      colors[i * 3] = 0.85 + Math.random() * 0.15;
+      colors[i * 3 + 1] = 0.88 + Math.random() * 0.12;
+      colors[i * 3 + 2] = 1.0;
+    } else if (colorType < 0.75) {
+      // Warm white
+      colors[i * 3] = 1.0;
+      colors[i * 3 + 1] = 0.95 + Math.random() * 0.05;
+      colors[i * 3 + 2] = 0.85 + Math.random() * 0.1;
+    } else if (colorType < 0.88) {
+      // Golden/yellow
+      colors[i * 3] = 1.0;
+      colors[i * 3 + 1] = 0.85 + Math.random() * 0.1;
+      colors[i * 3 + 2] = 0.6 + Math.random() * 0.2;
+    } else if (colorType < 0.95) {
+      // Orange/red giant
+      colors[i * 3] = 1.0;
+      colors[i * 3 + 1] = 0.6 + Math.random() * 0.2;
+      colors[i * 3 + 2] = 0.4 + Math.random() * 0.2;
+    } else {
+      // Rare blue supergiant
+      colors[i * 3] = 0.6 + Math.random() * 0.2;
+      colors[i * 3 + 1] = 0.7 + Math.random() * 0.2;
+      colors[i * 3 + 2] = 1.0;
+    }
+
+    // Star size: mostly very small; only a few larger highlights
+    const sizeRoll = Math.random();
+    if (sizeRoll < 0.7) sizes[i] = 1.2 + Math.random() * 1.6;       // Tiny
+    else if (sizeRoll < 0.93) sizes[i] = 2.4 + Math.random() * 1.8; // Small
+    else if (sizeRoll < 0.985) sizes[i] = 4.0 + Math.random() * 2.0; // Medium
+    else sizes[i] = 6.0 + Math.random() * 3.0;                      // Rare bright
+
+    phases[i] = Math.random() * Math.PI * 2;
+    speeds[i] = 0.3 + Math.random() * 2.5; // Various twinkle speeds
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+  // Create soft circular star texture
+  const starTexture = createStarTexture();
+
+  const material = new THREE.PointsMaterial({
+    size: 4, // Slightly smaller base size for sharper, higher-definition stars
+    map: starTexture,
+    vertexColors: true,
     transparent: true,
     opacity: 1.0,
-    depthWrite: false
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    sizeAttenuation: true,
+    alphaTest: 0.01 // Prevent rendering fully transparent pixels
   });
 
-  // Create the skybox mesh
-  const skybox = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
+  const points = new THREE.Points(geometry, material);
+  points.frustumCulled = false;
 
-  // Ensure skybox is visible by explicitly setting these properties
-  skybox.renderOrder = -1000;
-  skybox.frustumCulled = false;
+  // Return system with update function
+  return {
+    points,
+    phases,
+    speeds,
+    sizes,
+    originalSizes: new Float32Array(sizes), // copy for reference
+    update(time) {
+      const t = time * 0.001;
+      const sizeAttr = geometry.attributes.size;
+      const arr = sizeAttr.array;
+      for (let i = 0; i < starCount; i++) {
+        // Smooth sinusoidal twinkling with harmonics for natural look
+        const twinkle = 0.55 + 0.45 * (
+          Math.sin(t * speeds[i] + phases[i]) * 0.5 +
+          Math.sin(t * speeds[i] * 1.7 + phases[i] * 2.3) * 0.3 +
+          Math.sin(t * speeds[i] * 0.4 + phases[i] * 0.7) * 0.2
+        );
+        arr[i] = this.originalSizes[i] * twinkle;
+      }
+      sizeAttr.needsUpdate = true;
+    }
+  };
+}
 
-  console.log("Skybox created successfully");
+function createStarTexture() {
+  // Higher resolution texture for smoother stars (no pixelation)
+  const canvas = document.createElement('canvas');
+  canvas.width = 128; // Increased from 64 for smoother appearance
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
 
-  return skybox;
+  // Very soft radial gradient for smooth, beautiful star glow (BRIGHTER)
+  const center = 64;
+  const gradient = ctx.createRadialGradient(center, center, 0, center, center, center);
+  gradient.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+  gradient.addColorStop(0.1, 'rgba(255, 255, 255, 0.98)');
+  gradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.85)');
+  gradient.addColorStop(0.35, 'rgba(255, 255, 255, 0.6)');
+  gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.3)');
+  gradient.addColorStop(0.7, 'rgba(255, 255, 255, 0.1)');
+  gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 128, 128);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter; // Smooth filtering
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+// ============================================================
+// SHOOTING STAR SYSTEM
+// ============================================================
+function createShootingStarSystem() {
+  const group = new THREE.Group();
+  const skyRadius = 5000;
+  // Keep only a few visible shooting stars at once
+  const maxTrails = 3;
+  const trails = [];
+
+  // Create a reusable trail texture
+  const trailTexture = createTrailTexture();
+
+  function spawnShootingStar() {
+    // Random start point on upper hemisphere
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI * 0.4 + 0.1; // upper sky
+    const startX = skyRadius * 0.9 * Math.sin(phi) * Math.cos(theta);
+    const startY = skyRadius * 0.9 * Math.cos(phi);
+    const startZ = skyRadius * 0.9 * Math.sin(phi) * Math.sin(theta);
+
+    // Direction: mostly downward and to the side
+    const dirTheta = theta + (Math.random() - 0.5) * 1.5;
+    const dirPhi = phi + 0.3 + Math.random() * 0.5;
+    const endX = skyRadius * 0.8 * Math.sin(dirPhi) * Math.cos(dirTheta);
+    const endY = skyRadius * 0.8 * Math.cos(dirPhi);
+    const endZ = skyRadius * 0.8 * Math.sin(dirPhi) * Math.sin(dirTheta);
+
+    const start = new THREE.Vector3(startX, startY, startZ);
+    const end = new THREE.Vector3(endX, endY, endZ);
+    const direction = end.clone().sub(start);
+    const length = direction.length();
+    direction.normalize();
+
+    // Trail length
+    const trailLen = 150 + Math.random() * 250;
+
+    // Create trail geometry (thin stretched plane)
+    const trailGeo = new THREE.PlaneGeometry(trailLen, 3 + Math.random() * 4);
+    const trailMat = new THREE.MeshBasicMaterial({
+      map: trailTexture,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
+    const trail = new THREE.Mesh(trailGeo, trailMat);
+    trail.frustumCulled = false;
+
+    // Bright head glow
+    const headGeo = new THREE.SphereGeometry(4, 8, 8);
+    const headMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const head = new THREE.Mesh(headGeo, headMat);
+
+    // Head glow light
+    const glowLight = new THREE.PointLight(0xaaccff, 0, 200);
+
+    group.add(trail);
+    group.add(head);
+    group.add(glowLight);
+
+    const speed = 1500 + Math.random() * 2000;
+    const lifetime = length / speed;
+    // Slightly brighter so the few stars are clearly visible
+    const brightness = 0.8 + Math.random() * 0.3;
+
+    return {
+      trail, head, glowLight, trailMat, headMat,
+      start, end, direction, length, trailLen,
+      speed, lifetime, brightness,
+      progress: 0, active: true,
+      fadeIn: 0.1, fadeOut: 0.7 // fade timing
+    };
+  }
+
+  function updateTrail(t, dt) {
+    if (!t.active) return;
+    t.progress += dt / t.lifetime;
+
+    if (t.progress >= 1) {
+      t.active = false;
+      t.trailMat.opacity = 0;
+      t.headMat.opacity = 0;
+      t.glowLight.intensity = 0;
+      return;
+    }
+
+    // Position along path
+    const pos = t.start.clone().lerp(t.end, t.progress);
+    t.head.position.copy(pos);
+    t.glowLight.position.copy(pos);
+
+    // Trail behind the head
+    const trailEnd = t.start.clone().lerp(t.end, Math.max(0, t.progress - t.trailLen / t.length));
+    const mid = pos.clone().add(trailEnd).multiplyScalar(0.5);
+    t.trail.position.copy(mid);
+    t.trail.lookAt(pos);
+
+    // Fade in/out
+    let alpha = t.brightness;
+    if (t.progress < t.fadeIn) {
+      alpha *= t.progress / t.fadeIn;
+    } else if (t.progress > t.fadeOut) {
+      alpha *= 1 - (t.progress - t.fadeOut) / (1 - t.fadeOut);
+    }
+
+    t.trailMat.opacity = alpha * 0.8;
+    t.headMat.opacity = alpha;
+    t.glowLight.intensity = alpha * 2;
+  }
+
+  // Spawn timer
+  let nextSpawn = 2 + Math.random() * 4;
+  let elapsed = 0;
+
+  return {
+    group,
+    update(time) {
+      const dt = 0.016; // ~60fps timestep
+      elapsed += dt;
+
+      // Spawn new shooting stars periodically (a few, not a shower)
+      if (elapsed >= nextSpawn && trails.filter(t => t.active).length < maxTrails) {
+        trails.push(spawnShootingStar());
+        nextSpawn = elapsed + 1.5 + Math.random() * 6; // 1.5-7.5s between stars
+      }
+
+      // Update active trails
+      for (const t of trails) {
+        updateTrail(t, dt);
+      }
+
+      // Cleanup inactive trails (keep array manageable)
+      while (trails.length > 30) {
+        const old = trails.shift();
+        if (old.trail.parent) old.trail.parent.remove(old.trail);
+        if (old.head.parent) old.head.parent.remove(old.head);
+        if (old.glowLight.parent) old.glowLight.parent.remove(old.glowLight);
+        old.trail.geometry.dispose();
+        old.trailMat.dispose();
+        old.head.geometry.dispose();
+        old.headMat.dispose();
+      }
+    }
+  };
+}
+
+function createTrailTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 16;
+  const ctx = canvas.getContext('2d');
+
+  // Gradient: bright white head fading to transparent tail
+  const gradient = ctx.createLinearGradient(256, 8, 0, 8);
+  gradient.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
+  gradient.addColorStop(0.05, 'rgba(200, 220, 255, 0.9)');
+  gradient.addColorStop(0.15, 'rgba(150, 180, 255, 0.6)');
+  gradient.addColorStop(0.4, 'rgba(100, 140, 255, 0.25)');
+  gradient.addColorStop(0.7, 'rgba(80, 120, 200, 0.08)');
+  gradient.addColorStop(1, 'rgba(60, 100, 180, 0)');
+
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 256, 16);
+
+  // Soft vertical fade for trail width
+  const vGrad = ctx.createLinearGradient(0, 0, 0, 16);
+  vGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  vGrad.addColorStop(0.3, 'rgba(255, 255, 255, 1)');
+  vGrad.addColorStop(0.5, 'rgba(255, 255, 255, 1)');
+  vGrad.addColorStop(0.7, 'rgba(255, 255, 255, 1)');
+  vGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.fillStyle = vGrad;
+  ctx.fillRect(0, 0, 256, 16);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
 }
 
 // Create a single spherical texture for the dome-like skybox
@@ -6014,35 +3982,67 @@ function createSphericalSkyTexture(size = null) {
   gradient.addColorStop(1, '#000002');
   context.fillStyle = gradient;
   context.fillRect(0, 0, canvas.width, canvas.height);
+  // Add subtle bluish-violet color wash to bias the sky like the reference image
+  context.globalCompositeOperation = 'screen';
+  const colorWash = context.createLinearGradient(0, 0, size, size);
+  colorWash.addColorStop(0, 'rgba(10,8,30,0.05)');
+  colorWash.addColorStop(0.4, 'rgba(20,30,80,0.08)');
+  colorWash.addColorStop(0.7, 'rgba(40,60,140,0.09)');
+  colorWash.addColorStop(1, 'rgba(20,20,60,0.04)');
+  context.fillStyle = colorWash;
+  context.fillRect(0, 0, size, size);
 
-  // Add nebulae and cosmic dust first (background layer)
-  addCosmicNebulae(context, size);
-  addDistantGalaxies(context, size);
+  // Add faint, dense background star speckle (small, faint points) to give the milky texture
+  context.globalCompositeOperation = 'lighter';
+  const speckleCount = Math.floor(size * size / 1200);
+  for (let i = 0; i < speckleCount; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = Math.random() * 0.8; // tiny
+    const a = 0.02 + Math.random() * 0.06; // very faint
+    context.beginPath();
+    context.fillStyle = `rgba(${200 + Math.floor(Math.random()*55)}, ${200 + Math.floor(Math.random()*55)}, ${230 + Math.floor(Math.random()*25)}, ${a})`;
+    context.arc(x, y, r, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  // Add faint grain/noise to avoid perfectly smooth gradients
+  context.globalCompositeOperation = 'source-over';
+  const grainCanvas = document.createElement('canvas');
+  grainCanvas.width = 256; grainCanvas.height = 256;
+  const gctx = grainCanvas.getContext('2d');
+  const gImg = gctx.createImageData(256,256);
+  for (let i = 0; i < gImg.data.length; i += 4) {
+    const v = 220 + Math.floor(Math.random() * 36);
+    gImg.data[i] = v; gImg.data[i+1] = v; gImg.data[i+2] = v; gImg.data[i+3] = 6; // very low alpha
+  }
+  gctx.putImageData(gImg, 0, 0);
+  context.globalAlpha = 0.10;
+  context.drawImage(grainCanvas, 0, 0, size, size);
+  context.globalAlpha = 1.0;
+
+  // For this Milky Way style, keep the background simple and let the main band dominate.
+  // (Previously added larger nebulae and distant galaxies here; these are disabled
+  // to better match a clean long-exposure Milky Way photograph.)
   
-  // Add stars and other elements with higher quality
+  // Add dimmer background stars (the 3D twinkling particles handle the bright ones)
   addBrighterBackgroundStars(context, size);
-  addBrighterMidLayerStars(context, size);
-  addBrighterForegroundStars(context, size);
   addBrighterMilkyWay(context, size);
+  addBrighterForegroundStars(context, size);
 
   // Add atmospheric glow for realism
   addAtmosphericGlow(context, size);
 
-  // Add some distant planets (including Earth visible as a pale blue dot)
-  addPlanetToCanvas(context, size * 0.8, size * 0.2, size * 0.03, '#A67B5B'); // Mars in distance
-  addPlanetToCanvas(context, size * 0.15, size * 0.75, size * 0.02, '#C8A080', true); // Saturn-like
-  addPlanetToCanvas(context, size * 0.6, size * 0.4, size * 0.008, '#6BA6CD'); // Earth as pale blue dot
+  // Add Mars moons with higher definition (replace distant planets)
+  // Phobos (larger, closer moon)
+  addMoonToCanvas(context, size * 0.78, size * 0.22, size * 0.022);
+  // Deimos (smaller, more distant moon)
+  addMoonToCanvas(context, size * 0.83, size * 0.18, size * 0.014);
 
-  // Apply a subtle blur to reduce pixelation
-  context.filter = 'blur(0px)';
-  const tempCanvas = document.createElement('canvas');
-  tempCanvas.width = size;
-  tempCanvas.height = size;
-  const tempContext = tempCanvas.getContext('2d');
-  tempContext.drawImage(canvas, 0, 0);
-  context.clearRect(0, 0, size, size);
-  context.drawImage(tempCanvas, 0, 0);
-  context.filter = 'none';
+  // Add a single large, high-definition planet for visual impact
+  addLargePlanetToCanvas(context, size);
+
+  // Note: blur(0px) is a no-op, removed unnecessary canvas copy for performance
 
   // Create texture with proper settings
   const texture = new THREE.CanvasTexture(canvas);
@@ -6050,92 +4050,13 @@ function createSphericalSkyTexture(size = null) {
   return texture;
 }
 
-// Add cosmic nebulae for background depth
-function addCosmicNebulae(context, size) {
-  const perfSettings = getPerformanceSettings();
-  const nebulaeCount = perfSettings.detailLevel === 'high' ? 8 : 
-                       perfSettings.detailLevel === 'normal' ? 5 : 3;
-  
-  for (let i = 0; i < nebulaeCount; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
-    const radius = Math.random() * size * 0.15 + size * 0.05;
-    
-    // Create nebula gradient
-    const nebula = context.createRadialGradient(x, y, 0, x, y, radius);
-    
-    // Random nebula colors
-    const colorType = Math.random();
-    if (colorType < 0.3) {
-      // Red nebulae (like Orion)
-      nebula.addColorStop(0, 'rgba(255, 100, 100, 0.15)');
-      nebula.addColorStop(0.5, 'rgba(200, 50, 50, 0.08)');
-      nebula.addColorStop(1, 'rgba(100, 20, 20, 0)');
-    } else if (colorType < 0.6) {
-      // Blue nebulae
-      nebula.addColorStop(0, 'rgba(100, 150, 255, 0.12)');
-      nebula.addColorStop(0.5, 'rgba(50, 100, 200, 0.06)');
-      nebula.addColorStop(1, 'rgba(20, 50, 100, 0)');
-    } else {
-      // Purple/magenta nebulae
-      nebula.addColorStop(0, 'rgba(200, 100, 255, 0.10)');
-      nebula.addColorStop(0.5, 'rgba(150, 50, 200, 0.05)');
-      nebula.addColorStop(1, 'rgba(100, 20, 150, 0)');
-    }
-    
-    context.fillStyle = nebula;
-    context.fillRect(x - radius, y - radius, radius * 2, radius * 2);
-  }
-}
-
-// Add distant galaxies
-function addDistantGalaxies(context, size) {
-  const perfSettings = getPerformanceSettings();
-  const galaxyCount = perfSettings.detailLevel === 'high' ? 4 : 
-                      perfSettings.detailLevel === 'normal' ? 2 : 1;
-  
-  for (let i = 0; i < galaxyCount; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
-    const width = Math.random() * size * 0.08 + size * 0.02;
-    const height = width * (0.3 + Math.random() * 0.4);
-    const rotation = Math.random() * Math.PI * 2;
-    
-    context.save();
-    context.translate(x, y);
-    context.rotate(rotation);
-    
-    // Create galaxy spiral gradient
-    const galaxy = context.createRadialGradient(0, 0, 0, 0, 0, width / 2);
-    galaxy.addColorStop(0, 'rgba(255, 255, 220, 0.08)');
-    galaxy.addColorStop(0.3, 'rgba(255, 255, 180, 0.05)');
-    galaxy.addColorStop(0.7, 'rgba(255, 255, 150, 0.02)');
-    galaxy.addColorStop(1, 'rgba(255, 255, 100, 0)');
-    
-    context.fillStyle = galaxy;
-    context.fillRect(-width / 2, -height / 2, width, height);
-    
-    // Add galaxy core
-    const core = context.createRadialGradient(0, 0, 0, 0, 0, width * 0.1);
-    core.addColorStop(0, 'rgba(255, 255, 255, 0.12)');
-    core.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    
-    context.fillStyle = core;
-    context.beginPath();
-    context.arc(0, 0, width * 0.1, 0, Math.PI * 2);
-    context.fill();
-    
-    context.restore();
-  }
-}
-
 // Add much brighter background stars
 function addBrighterBackgroundStars(context, size) {
-  // Adaptive star density based on performance settings
+  // Reduced star density for faster texture generation (3D particles handle most stars)
   const perfSettings = getPerformanceSettings();
-  const densityMultiplier = perfSettings.detailLevel === 'high' ? 1.0 : 
-                            perfSettings.detailLevel === 'normal' ? 0.6 : 0.3;
-  const starCount = Math.floor(size * size / 50 * densityMultiplier);
+  const densityMultiplier = perfSettings.detailLevel === 'high' ? 0.3 : 
+                            perfSettings.detailLevel === 'normal' ? 0.2 : 0.1;
+  const starCount = Math.min(Math.floor(size * size / 800 * densityMultiplier), 5000); // Reduced from 50000
 
   for (let i = 0; i < starCount; i++) {
     // Create cluster-like distribution
@@ -6195,351 +4116,147 @@ function addBrighterBackgroundStars(context, size) {
 }
 
 // Add brighter mid-layer stars
-function addBrighterMidLayerStars(context, size) {
-  // Adaptive medium density star layer
-  const perfSettings = getPerformanceSettings();
-  const densityMultiplier = perfSettings.detailLevel === 'high' ? 1.0 : 
-                            perfSettings.detailLevel === 'normal' ? 0.6 : 0.3;
-  const starCount = Math.floor(size * size / 300 * densityMultiplier);
-
-  for (let i = 0; i < starCount; i++) {
-    let x, y;
-
-    // Similar clustering as background layer but with different distribution
-    if (Math.random() < 0.6) {
-      const clusterCount = 15;
-      const clusterIndex = Math.floor(Math.random() * clusterCount);
-      const clusterCenterX = (clusterIndex % 5) * (size / 5) + (size / 10) + (Math.random() - 0.5) * size / 10;
-      const clusterCenterY = Math.floor(clusterIndex / 3) * (size / 3) + (size / 6) + (Math.random() - 0.5) * size / 10;
-
-      const distance = Math.pow(Math.random(), 1.5) * size / 6;
-      const angle = Math.random() * Math.PI * 2;
-      x = clusterCenterX + Math.cos(angle) * distance;
-      y = clusterCenterY + Math.sin(angle) * distance;
-
-      x = Math.max(0, Math.min(size - 1, x));
-      y = Math.max(0, Math.min(size - 1, y));
-    } else {
-      x = Math.random() * size;
-      y = Math.random() * size;
-    }
-
-    // Larger stars for better visibility
-    const radius = Math.random() * 1.0 + 0.3;
-
-    // Much brighter stars
-    const colorVariation = Math.random();
-    let starColor;
-
-    if (colorVariation < 0.75) {
-      // White to slightly blue stars (most common)
-      const blueIntensity = 225 + Math.floor(Math.random() * 30);
-      const brightness = Math.random() * 0.5 + 0.2;  // Much brighter
-      starColor = `rgba(255, 255, ${blueIntensity}, ${brightness})`;
-    } else if (colorVariation < 0.9) {
-      // Slightly yellow/orange stars
-      const redGreen = 225 + Math.floor(Math.random() * 30);
-      const blue = 180 + Math.floor(Math.random() * 20);
-      const brightness = Math.random() * 0.5 + 0.2;  // Much brighter
-      starColor = `rgba(${redGreen}, ${redGreen - 5}, ${blue}, ${brightness})`;
-    } else {
-      // Slightly red stars (least common)
-      const brightness = Math.random() * 0.5 + 0.2;  // Much brighter
-      starColor = `rgba(255, 200, 200, ${brightness})`;
-    }
-
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fillStyle = starColor;
-    context.fill();
-  }
-}
-
-// Add brighter foreground stars
+// Add brighter foreground stars (small, crisp, and sparse — no big spikes)
 function addBrighterForegroundStars(context, size) {
-  // Adaptive brighter stars count
   const perfSettings = getPerformanceSettings();
-  const densityMultiplier = perfSettings.detailLevel === 'high' ? 1.0 : 
-                            perfSettings.detailLevel === 'normal' ? 0.6 : 0.3;
-  const brightStarCount = Math.floor(size * size / 3000 * densityMultiplier);
+  const densityMultiplier = perfSettings.detailLevel === 'high' ? 1.0 :
+                            perfSettings.detailLevel === 'normal' ? 0.7 : 0.4;
+
+  // Fewer, smaller foreground stars so the Milky Way band stays the focus
+  const brightStarCount = Math.floor(size * size / 8000 * densityMultiplier);
 
   for (let i = 0; i < brightStarCount; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
 
-    // Larger stars for visibility
-    const radius = Math.random() * 1.5 + 0.6;
+    const radius = Math.random() * 0.9 + 0.3;
 
-    // Vary bright star colors for realism
     const colorVariation = Math.random();
-    let coreColor, glowColor;
-
-    if (colorVariation < 0.6) {
-      // White/blue stars
-      coreColor = 'rgba(255, 255, 255, 1.0)';  // Full opacity
-      glowColor = 'rgba(240, 250, 255, 0.7)';  // More visible glow
-    } else if (colorVariation < 0.85) {
-      // Yellow/orange stars
-      coreColor = 'rgba(255, 250, 230, 1.0)';  // Full opacity
-      glowColor = 'rgba(255, 240, 190, 0.7)';  // More visible glow
+    let coreColor;
+    if (colorVariation < 0.8) {
+      coreColor = 'rgba(235, 240, 255, 1.0)';
     } else {
-      // Red stars
-      coreColor = 'rgba(255, 230, 230, 1.0)';  // Full opacity
-      glowColor = 'rgba(255, 190, 190, 0.7)';  // More visible glow
+      coreColor = 'rgba(255, 235, 220, 1.0)';
     }
 
-    // Create a more prominent glow
-    const gradient = context.createRadialGradient(x, y, 0, x, y, radius * 3.0);
+    const glowRadius = radius * 2.2;
+    const gradient = context.createRadialGradient(x, y, 0, x, y, glowRadius);
     gradient.addColorStop(0, coreColor);
-    gradient.addColorStop(0.5, glowColor);
+    gradient.addColorStop(0.4, 'rgba(235, 240, 255, 0.55)');
     gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
     context.beginPath();
-    context.arc(x, y, radius * 3.0, 0, Math.PI * 2);
+    context.arc(x, y, glowRadius, 0, Math.PI * 2);
     context.fillStyle = gradient;
     context.fill();
 
-    // Star core
     context.beginPath();
     context.arc(x, y, radius, 0, Math.PI * 2);
     context.fillStyle = coreColor;
     context.fill();
-
-    // Add subtle diffraction spikes to only the brightest stars
-    if (Math.random() > 0.5) { // More stars get spikes (50% vs 30% before)
-      const spikeLength = radius * (Math.random() * 3 + 3); // Longer spikes
-      context.strokeStyle = glowColor;
-      context.lineWidth = Math.random() * 0.7 + 0.3; // Slightly thicker spikes
-
-      // Horizontal spike
-      context.beginPath();
-      context.moveTo(x - spikeLength, y);
-      context.lineTo(x + spikeLength, y);
-      context.stroke();
-
-      // Vertical spike
-      context.beginPath();
-      context.moveTo(x, y - spikeLength);
-      context.lineTo(x, y + spikeLength);
-      context.stroke();
-
-      // More stars get diagonal spikes (30% vs 10% before)
-      if (Math.random() > 0.7) {
-        const diagonalLength = spikeLength * 0.7;
-
-        // Diagonal spike 1
-        context.beginPath();
-        context.moveTo(x - diagonalLength * 0.7, y - diagonalLength * 0.7);
-        context.lineTo(x + diagonalLength * 0.7, y + diagonalLength * 0.7);
-        context.stroke();
-
-        // Diagonal spike 2
-        context.beginPath();
-        context.moveTo(x - diagonalLength * 0.7, y + diagonalLength * 0.7);
-        context.lineTo(x + diagonalLength * 0.7, y - diagonalLength * 0.7);
-        context.stroke();
-      }
-    }
   }
 }
 
-// Add a brighter Milky Way
+// Add a brighter Milky Way that matches a long, thin, bluish diagonal band
 function addBrighterMilkyWay(context, size) {
-  // Create a wide, sweeping Milky Way band across the sky
-  const centerY = size * 0.5;
-  const bandWidth = size * 0.5; // Wider band for better visibility
-
-  // Use screen blend mode for brighter appearance
+  const prevComposite = context.globalCompositeOperation;
   context.globalCompositeOperation = 'screen';
 
-  // Main Milky Way band - brighter
-  const mainGradient = context.createLinearGradient(0, centerY - bandWidth / 2, 0, centerY + bandWidth / 2);
-  mainGradient.addColorStop(0, 'rgba(10, 20, 40, 0)');
-  mainGradient.addColorStop(0.2, 'rgba(30, 40, 70, 0.2)'); // Brighter
-  mainGradient.addColorStop(0.5, 'rgba(40, 50, 90, 0.3)'); // Brighter
-  mainGradient.addColorStop(0.8, 'rgba(30, 40, 70, 0.2)'); // Brighter
-  mainGradient.addColorStop(1, 'rgba(10, 20, 40, 0)');
+  const centerX = size / 2;
+  const centerY = size / 2;
 
-  context.fillStyle = mainGradient;
-  context.fillRect(0, centerY - bandWidth / 2, size, bandWidth);
+  // Draw in a rotated coordinate system so the band runs diagonally
+  const bandAngle = -0.6; // approx bottom-left to top-right
+  const bandLength = size * 1.4;
+  const bandThickness = size * 0.22;
 
-  // Secondary bands for more complexity
-  const secondaryBandCount = 4;
-  for (let i = 0; i < secondaryBandCount; i++) {
-    const bandPosition = centerY + (Math.random() - 0.5) * bandWidth * 0.6;
-    const bandThickness = size * (0.08 + Math.random() * 0.12);
+  context.save();
+  context.translate(centerX, centerY);
+  context.rotate(bandAngle);
 
-    const secondaryGradient = context.createLinearGradient(0, bandPosition - bandThickness / 2, 0, bandPosition + bandThickness / 2);
-    secondaryGradient.addColorStop(0, 'rgba(15, 25, 50, 0)');
-    secondaryGradient.addColorStop(0.5, 'rgba(40, 60, 100, 0.25)'); // Brighter
-    secondaryGradient.addColorStop(1, 'rgba(15, 25, 50, 0)');
+  // Soft base band
+  const baseGradient = context.createLinearGradient(0, -bandThickness / 2, 0, bandThickness / 2);
+  baseGradient.addColorStop(0, 'rgba(5, 8, 20, 0)');
+  baseGradient.addColorStop(0.25, 'rgba(40, 60, 110, 0.18)');
+  baseGradient.addColorStop(0.5, 'rgba(90, 120, 190, 0.32)');
+  baseGradient.addColorStop(0.75, 'rgba(40, 60, 110, 0.18)');
+  baseGradient.addColorStop(1, 'rgba(5, 8, 20, 0)');
 
-    context.fillStyle = secondaryGradient;
-    context.fillRect(0, bandPosition - bandThickness / 2, size, bandThickness);
-  }
-
-  // Reset blend mode
-  context.globalCompositeOperation = 'source-over';
-
-  // Add a few subtle dust lanes
-  const dustLaneCount = 4;
-  for (let i = 0; i < dustLaneCount; i++) {
-    const laneY = centerY + (Math.random() - 0.5) * bandWidth * 0.7;
-    const laneThickness = size * (0.01 + Math.random() * 0.03);
-    const laneOpacity = Math.random() * 0.2 + 0.05;
-
-    // Draw curved dust lane
-    context.beginPath();
-    context.moveTo(0, laneY);
-
-    // Create wavy path for dust lane
-    const segments = 20;
-    for (let j = 1; j <= segments; j++) {
-      const x = size * j / segments;
-      const waveAmplitude = Math.random() * laneThickness * 4;
-      const waveFrequency = 2 + Math.random() * 3;
-      const y = laneY + Math.sin(j * waveFrequency) * waveAmplitude;
-
-      if (j === 1) {
-        context.moveTo(x, y);
-      } else {
-        context.lineTo(x, y);
-      }
-    }
-
-    context.strokeStyle = `rgba(0, 0, 0, ${laneOpacity})`;
-    context.lineWidth = laneThickness;
-    context.stroke();
-  }
-
-  // Add brighter nebula-like clouds
-  const nebulaCount = 30;
-  for (let i = 0; i < nebulaCount; i++) {
-    // Position nebulae along the Milky Way band with some variation
-    const angle = Math.random() * Math.PI * 2;
-    const distance = Math.random() * size * 0.35;
-    const cloudX = size / 2 + Math.cos(angle) * distance;
-    const cloudY = size / 2 + Math.sin(angle) * distance;
-    const cloudRadius = Math.random() * size * 0.1 + size * 0.03; // Larger nebulae
-
-    const cloudGradient = context.createRadialGradient(
-      cloudX, cloudY, 0,
-      cloudX, cloudY, cloudRadius
-    );
-
-    // More visible nebula colors
-    const colorType = Math.random();
-    let hue, saturation, lightness, opacity;
-
-    if (colorType < 0.4) {
-      // Blue to purple nebulae
-      hue = Math.floor(Math.random() * 60 + 200);
-      saturation = 50 + Math.floor(Math.random() * 20);
-      lightness = 40 + Math.floor(Math.random() * 15);
-      opacity = 0.15 + Math.random() * 0.15; // Brighter
-    } else if (colorType < 0.75) {
-      // Red to orange nebulae
-      hue = Math.floor(Math.random() * 40);
-      saturation = 50 + Math.floor(Math.random() * 20);
-      lightness = 40 + Math.floor(Math.random() * 15);
-      opacity = 0.15 + Math.random() * 0.15; // Brighter
-    } else if (colorType < 0.9) {
-      // Teal to green nebulae
-      hue = Math.floor(Math.random() * 40 + 160);
-      saturation = 40 + Math.floor(Math.random() * 20);
-      lightness = 35 + Math.floor(Math.random() * 15);
-      opacity = 0.15 + Math.random() * 0.15; // Brighter
-    } else {
-      // Pink to magenta nebulae (rare)
-      hue = Math.floor(Math.random() * 30 + 300);
-      saturation = 50 + Math.floor(Math.random() * 20);
-      lightness = 40 + Math.floor(Math.random() * 15);
-      opacity = 0.15 + Math.random() * 0.15; // Brighter
-    }
-
-    // Use screen blend mode for brighter effect
-    context.globalCompositeOperation = 'screen';
-
-    cloudGradient.addColorStop(0, `hsla(${hue}, ${saturation}%, ${lightness}%, ${opacity})`);
-    cloudGradient.addColorStop(0.5, `hsla(${hue}, ${saturation - 10}%, ${lightness - 5}%, ${opacity * 0.6})`);
-    cloudGradient.addColorStop(1, 'hsla(0, 0%, 0%, 0)');
-
-    context.fillStyle = cloudGradient;
-    context.beginPath();
-    context.arc(cloudX, cloudY, cloudRadius, 0, Math.PI * 2);
-    context.fill();
-
-    // Reset blend mode
-    context.globalCompositeOperation = 'source-over';
-
-    // Add stars within nebulae
-    const clusterStarCount = Math.floor(Math.random() * 25 + 15);
-    for (let j = 0; j < clusterStarCount; j++) {
-      // Position stars within the nebula
-      const starAngle = Math.random() * Math.PI * 2;
-      const starDistance = Math.random() * cloudRadius * 0.8;
-      const starX = cloudX + Math.cos(starAngle) * starDistance;
-      const starY = cloudY + Math.sin(starAngle) * starDistance;
-      const starRadius = Math.random() * 0.6 + 0.2;
-
-      // Brighter stars in the nebula
-      context.beginPath();
-      context.arc(starX, starY, starRadius, 0, Math.PI * 2);
-      context.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.4 + 0.2})`; // Brighter
-      context.fill();
-    }
-  }
-
-  // Add a brighter galactic core
-  context.globalCompositeOperation = 'screen';
-
-  const coreGradient = context.createRadialGradient(
-    size * 0.6, size * 0.5, 0,
-    size * 0.6, size * 0.5, size * 0.2
-  );
-
-  coreGradient.addColorStop(0, 'rgba(80, 70, 60, 0.3)'); // Brighter
-  coreGradient.addColorStop(0.2, 'rgba(70, 60, 50, 0.25)'); // Brighter
-  coreGradient.addColorStop(0.5, 'rgba(60, 50, 40, 0.2)'); // Brighter
-  coreGradient.addColorStop(0.8, 'rgba(50, 40, 30, 0.1)'); // Brighter
-  coreGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-
-  context.fillStyle = coreGradient;
+  context.fillStyle = baseGradient;
   context.beginPath();
-  context.arc(size * 0.6, size * 0.5, size * 0.2, 0, Math.PI * 2);
+  context.ellipse(0, 0, bandLength / 2, bandThickness / 2, 0, 0, Math.PI * 2);
   context.fill();
 
-  // Add dense star field in the galactic core
-  for (let i = 0; i < 400; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const distance = Math.random() * size * 0.15;
-    const x = size * 0.6 + Math.cos(angle) * distance;
-    const y = size * 0.5 + Math.sin(angle) * distance;
-    const radius = Math.random() * 0.7 + 0.2;
+  // Dense fine speckle along the band for the "milky" look
+  const speckleCount = Math.floor(size * 0.22);
+  for (let i = 0; i < speckleCount; i++) {
+    const t = (Math.random() - 0.5) * bandLength;
+    const offset = (Math.random() - 0.5) * bandThickness * 0.9;
+
+    const x = t;
+    const y = offset * (0.5 + Math.random() * 0.7); // slightly flattened
+
+    const r = Math.random() * 1.3 + 0.2;
+    const a = 0.05 + Math.random() * 0.35;
+
+    const b = 220 + Math.floor(Math.random() * 30);
+    const g = 210 + Math.floor(Math.random() * 25);
+    const rCol = 200 + Math.floor(Math.random() * 25);
+
+    const dotGrad = context.createRadialGradient(x, y, 0, x, y, r * 2.2);
+    dotGrad.addColorStop(0, `rgba(${rCol}, ${g}, ${b}, ${a})`);
+    dotGrad.addColorStop(1, 'rgba(0,0,0,0)');
 
     context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.5 + 0.2})`; // Brighter
+    context.arc(x, y, r * 2.2, 0, Math.PI * 2);
+    context.fillStyle = dotGrad;
     context.fill();
   }
 
-  // Add central bulge
-  const bulgeGradient = context.createRadialGradient(
-    size * 0.6, size * 0.5, 0,
-    size * 0.6, size * 0.5, size * 0.07
-  );
+  // Brighter knots along the band (the slightly pinkish regions)
+  const knotCount = 10;
+  for (let i = 0; i < knotCount; i++) {
+    const t = (Math.random() - 0.1) * bandLength * 0.9; // bias nearer to one side
+    const y = (Math.random() - 0.5) * bandThickness * 0.4;
+    const x = t;
 
-  bulgeGradient.addColorStop(0, 'rgba(90, 80, 70, 0.25)'); // Brighter
-  bulgeGradient.addColorStop(0.5, 'rgba(80, 70, 60, 0.2)'); // Brighter
-  bulgeGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    const knotRadius = size * (0.02 + Math.random() * 0.02);
+    const knotGrad = context.createRadialGradient(x, y, 0, x, y, knotRadius);
 
-  context.fillStyle = bulgeGradient;
+    // cool white-blue core with faint magenta tint
+    knotGrad.addColorStop(0, 'rgba(245, 250, 255, 0.95)');
+    knotGrad.addColorStop(0.4, 'rgba(210, 220, 255, 0.65)');
+    knotGrad.addColorStop(0.8, 'rgba(150, 170, 235, 0.25)');
+    knotGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+    context.beginPath();
+    context.arc(x, y, knotRadius, 0, Math.PI * 2);
+    context.fillStyle = knotGrad;
+    context.fill();
+  }
+
+  // Dark dust lane through the midline of the band
+  context.globalCompositeOperation = 'multiply';
+  const dustThickness = bandThickness * 0.45;
+  const dustGrad = context.createLinearGradient(0, -dustThickness / 2, 0, dustThickness / 2);
+  dustGrad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  dustGrad.addColorStop(0.4, 'rgba(0, 0, 0, 0.55)');
+  dustGrad.addColorStop(0.5, 'rgba(0, 0, 0, 0.75)');
+  dustGrad.addColorStop(0.6, 'rgba(0, 0, 0, 0.55)');
+  dustGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+  context.fillStyle = dustGrad;
   context.beginPath();
-  context.arc(size * 0.6, size * 0.5, size * 0.07, 0, Math.PI * 2);
+  context.ellipse(0, 0, bandLength / 2, dustThickness / 2, 0, 0, Math.PI * 2);
   context.fill();
 
-  // Reset blend mode
-  context.globalCompositeOperation = 'source-over';
+  // Slight irregular dust patches disabled to avoid large dark circular blobs
+  // that look like shadows when projected onto the sky dome.
+
+  context.restore();
+
+  // Restore normal blending
+  context.globalCompositeOperation = prevComposite;
 }
 
 // Add atmospheric glow at the horizon
@@ -6624,6 +4341,190 @@ function addPlanetToCanvas(context, x, y, radius, color, hasRings = false) {
 
     context.restore();
   }
+}
+
+// Add a higher-definition moon to the canvas
+function addMoonToCanvas(context, x, y, radius) {
+  context.save();
+
+  // Base moon body with stronger contrast
+  const bodyGradient = context.createRadialGradient(
+    x - radius * 0.35, y - radius * 0.35, 0,
+    x, y, radius
+  );
+  bodyGradient.addColorStop(0, 'rgba(230, 230, 230, 1)');
+  bodyGradient.addColorStop(0.5, 'rgba(190, 190, 190, 1)');
+  bodyGradient.addColorStop(1, 'rgba(90, 90, 90, 1)');
+
+  context.fillStyle = bodyGradient;
+  context.beginPath();
+  context.arc(x, y, radius, 0, Math.PI * 2);
+  context.fill();
+
+  // Subtle terminator shadow to avoid "flat" round disk look,
+  // kept gentle so the moon doesn't appear as a harsh dark disk.
+  const terminatorGradient = context.createRadialGradient(
+    x + radius * 0.3, y + radius * 0.1, 0,
+    x + radius * 0.4, y + radius * 0.2, radius * 1.3
+  );
+  terminatorGradient.addColorStop(0, 'rgba(0, 0, 0, 0.0)');
+  terminatorGradient.addColorStop(0.4, 'rgba(0, 0, 0, 0.15)');
+  terminatorGradient.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+
+  context.globalCompositeOperation = 'multiply';
+  context.fillStyle = terminatorGradient;
+  context.beginPath();
+  context.arc(x, y, radius * 1.05, 0, Math.PI * 2);
+  context.fill();
+
+  // Restore to normal blending for craters
+  context.globalCompositeOperation = 'source-over';
+
+  // Add a few small craters for surface detail
+  const craterCount = 5;
+  for (let i = 0; i < craterCount; i++) {
+    const angle = (Math.PI * 2 * i) / craterCount + Math.random() * 0.4;
+    const dist = radius * (0.25 + Math.random() * 0.4);
+    const cx = x + Math.cos(angle) * dist;
+    const cy = y + Math.sin(angle) * dist;
+    const cr = radius * (0.15 + Math.random() * 0.12);
+
+    const craterGradient = context.createRadialGradient(
+      cx - cr * 0.3, cy - cr * 0.3, 0,
+      cx, cy, cr
+    );
+    craterGradient.addColorStop(0, 'rgba(230, 230, 230, 0.9)');
+    craterGradient.addColorStop(0.5, 'rgba(140, 140, 140, 0.9)');
+    craterGradient.addColorStop(1, 'rgba(60, 60, 60, 0.0)');
+
+    context.fillStyle = craterGradient;
+    context.beginPath();
+    context.arc(cx, cy, cr, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  context.restore();
+}
+
+// Add a large, high-definition planet to the sky
+function addLargePlanetToCanvas(context, size) {
+  // Position the planet near the central upper sky so it's easy to see
+  const x = size * 0.5;
+  const y = size * 0.4;
+  const radius = size * 0.04;
+
+  context.save();
+
+  // Base planet body (Jupiter-like, warm with subtle depth)
+  const baseColor = '#c58a4a';
+  const planetGradient = context.createRadialGradient(
+    x - radius * 0.35, y - radius * 0.4, 0,
+    x, y, radius * 1.1
+  );
+  planetGradient.addColorStop(0, lightenColor(baseColor, 45));
+  planetGradient.addColorStop(0.5, baseColor);
+  planetGradient.addColorStop(1, darkenColor(baseColor, 35));
+
+  context.fillStyle = planetGradient;
+  context.beginPath();
+  context.arc(x, y, radius, 0, Math.PI * 2);
+  context.fill();
+
+  // Clip to planet disk so bands and storms stay inside the silhouette
+  context.save();
+  context.beginPath();
+  context.arc(x, y, radius, 0, Math.PI * 2);
+  context.clip();
+
+  // Add a few soft storm systems / ovals for surface interest
+  const stormCount = 3;
+  for (let i = 0; i < stormCount; i++) {
+    const angle = (Math.PI * 2 * i) / stormCount + Math.random() * 0.4;
+    const dist = radius * (0.35 + Math.random() * 0.35);
+    const sx = x + Math.cos(angle) * dist;
+    const sy = y + Math.sin(angle) * dist * 0.6;
+    const srX = radius * (0.16 + Math.random() * 0.05);
+    const srY = srX * (0.65 + Math.random() * 0.2);
+
+    const stormGradient = context.createRadialGradient(
+      sx - srX * 0.4, sy - srY * 0.4, 0,
+      sx, sy, srX
+    );
+    stormGradient.addColorStop(0, 'rgba(255, 230, 210, 0.9)');
+    stormGradient.addColorStop(0.4, 'rgba(230, 180, 150, 0.85)');
+    stormGradient.addColorStop(1, 'rgba(40, 20, 10, 0.0)');
+
+    context.save();
+    context.translate(sx, sy);
+    context.rotate(Math.random() * Math.PI * 2);
+    context.scale(1.6, 1.0);
+    context.fillStyle = stormGradient;
+    context.beginPath();
+    context.arc(0, 0, srX, 0, Math.PI * 2);
+    context.fill();
+    context.restore();
+  }
+
+  // Subtle surface mottling for texture
+  const patchCount = 28;
+  for (let i = 0; i < patchCount; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const dist = radius * (0.0 + Math.random() * 0.85);
+    const px = x + Math.cos(angle) * dist;
+    const py = y + Math.sin(angle) * dist * 0.85;
+    const pr = radius * (0.05 + Math.random() * 0.055);
+
+    const patchGrad = context.createRadialGradient(
+      px - pr * 0.3, py - pr * 0.3, 0,
+      px, py, pr
+    );
+    const tone = Math.random() < 0.5
+      ? lightenColor(baseColor, 8 + Math.random() * 10)
+      : darkenColor(baseColor, 6 + Math.random() * 10);
+    patchGrad.addColorStop(0, `${tone}ee`); // will be overridden by rgba below if hex, but keeps tone consistent
+    patchGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+
+    // Convert tone hex to rgba-ish by blending via globalAlpha
+    context.globalAlpha = 0.16;
+    context.fillStyle = patchGrad;
+    context.beginPath();
+    context.arc(px, py, pr, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  context.restore(); // end clip and restore alpha
+
+  // Soft terminator shadow for depth
+  const terminatorGradient = context.createRadialGradient(
+    x + radius * 0.8, y, 0,
+    x + radius * 1.1, y, radius * 1.6
+  );
+  terminatorGradient.addColorStop(0, 'rgba(0, 0, 0, 0.0)');
+  terminatorGradient.addColorStop(0.45, 'rgba(0, 0, 0, 0.26)');
+  terminatorGradient.addColorStop(1, 'rgba(0, 0, 0, 0.65)');
+
+  context.globalCompositeOperation = 'multiply';
+  context.fillStyle = terminatorGradient;
+  context.beginPath();
+  context.arc(x, y, radius * 1.15, 0, Math.PI * 2);
+  context.fill();
+
+  // Atmospheric rim glow
+  context.globalCompositeOperation = 'screen';
+  const atmGradient = context.createRadialGradient(
+    x, y, radius * 0.85,
+    x, y, radius * 1.35
+  );
+  atmGradient.addColorStop(0, 'rgba(160, 200, 255, 0.0)');
+  atmGradient.addColorStop(0.4, 'rgba(160, 210, 255, 0.45)');
+  atmGradient.addColorStop(1, 'rgba(120, 180, 255, 0.0)');
+
+  context.fillStyle = atmGradient;
+  context.beginPath();
+  context.arc(x, y, radius * 1.4, 0, Math.PI * 2);
+  context.fill();
+
+  context.restore();
 }
 
 // Helper function to lighten a color - optimized
@@ -6775,13 +4676,13 @@ function loadNonEssentialComponents() {
     });
   }
 
-  // Load Mars scene manager with longer delay for better performance
+  // Load Mars scene manager after initial render settles
   setTimeout(() => {
     lazyLoader.loadInBackground('marsSceneManager', () => {
       window.marsSceneManager = new MarsSceneManager(scene, 5000);
       return Promise.resolve();
     });
-  }, 5000);
+  }, 500);
 
   // Load atmospheric effects system only on higher performance
   if (perfSettings.detailLevel !== 'low') {
@@ -6823,2821 +4724,3 @@ function loadNonEssentialComponents() {
 let isDaytime = true; // Ensure this is true by default
 console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
 
-function updateSkyAppearance(transitionProgress = null) {
-  console.log("Updating sky appearance - isDaytime:", isDaytime);
-
-  // Define sunSphere if it is not already defined
-  if (typeof sunSphere === 'undefined') {
-    console.log('Defining sunSphere...');
-    sunSphere = new THREE.Mesh(
-      new THREE.SphereGeometry(50, 32, 32),
-      new THREE.MeshBasicMaterial({ color: 0xffffff })
-    );
-    sunSphere.position.set(500, 300, -1000);
-    scene.add(sunSphere);
-  }
-
-  // If we're not transitioning, use the current state
-  const isDay = transitionProgress === null ? (isDaytime ? 1 : 0) :
-    (transitionStartState === 'day' ? 1 - transitionProgress : transitionProgress);
-  console.log("isDay value:", isDay);
-
-  // Create or update fog based on time of day
-  // Use more realistic Mars fog colors when in realistic mode
-  const dayFog = isRealisticMode
-    ? new THREE.Fog(0xd8a282, 200, 2000) // Realistic dusty orange-tan fog based on NASA imagery
-    : new THREE.Fog(0xd09060, 200, 2000); // Original stylized fog
-
-  const nightFog = new THREE.Fog(0xb77c5a, 500, 5000);
-
-  if (transitionProgress === null) {
-    // No transition, just set the fog directly
-    scene.fog = isDaytime ? dayFog : nightFog;
-    console.log("Setting fog for:", isDaytime ? "DAY" : "NIGHT");
-  } else {
-    // Interpolate fog color and near/far values
-    const fogColor = new THREE.Color();
-    fogColor.r = dayFog.color.r * isDay + nightFog.color.r * (1 - isDay);
-    fogColor.g = dayFog.color.g * isDay + nightFog.color.g * (1 - isDay);
-    fogColor.b = dayFog.color.b * isDay + nightFog.color.b * (1 - isDay);
-
-    const fogNear = dayFog.near * isDay + nightFog.near * (1 - isDay);
-    const fogFar = dayFog.far * isDay + nightFog.far * (1 - isDay);
-
-    scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
-    console.log("Setting transitional fog - isDay:", isDay);
-  }
-
-  // Handle skybox and background
-  if (transitionProgress !== null) {
-    // During transition, create a blended sky texture
-    if (isDay > 0.01 && isDay < 0.99) {
-      // Create a blended sky texture during transition
-      console.log("Creating blended sky texture - isDay:", isDay);
-      scene.background = createBlendedSkyTexture(isDay);
-    }
-  } else {
-    // Not transitioning, use appropriate sky
-    if (isDaytime) {
-      // Use realistic or stylized sky texture based on mode
-      console.log("Setting DAY sky texture - isRealisticMode:", isRealisticMode);
-      try {
-        const skyTexture = isRealisticMode ? createRealisticMarsDaySkyTexture() : createMarsDaySkyTexture();
-        scene.background = skyTexture;
-        console.log("Day sky texture created and set successfully");
-      } catch (error) {
-        console.error("Error creating day sky texture:", error);
-      }
-
-      // Remove night skybox if it exists
-      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && scene.getObjectById(spaceSkybox.id)) {
-        console.log("Removing night skybox");
-        scene.remove(spaceSkybox);
-      }
-    } else {
-      // Add night skybox if not already in scene
-      console.log("Setting NIGHT sky");
-      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && !scene.getObjectById(spaceSkybox.id)) {
-        console.log("Adding night skybox to scene");
-
-        scene.add(spaceSkybox);
-      }
-    }
-  }
-
-  // Adjust lighting based on time of day or transition progress
-  // Use more realistic lighting values when in realistic mode
-  const daySunIntensity = isRealisticMode ? 0.8 : 0.9; // Slightly dimmer in realistic mode (Mars is further from sun)
-  const nightSunIntensity = 0.3;
-  const dayAmbientIntensity = isRealisticMode ? 0.6 : 0.7; // Slightly dimmer ambient in realistic mode
-  const nightAmbientIntensity = 0.4;
-
-  // Interpolate light intensities
-  sunLight.intensity = daySunIntensity * isDay + nightSunIntensity * (1 - isDay);
-  ambientLight.intensity = dayAmbientIntensity * isDay + nightAmbientIntensity * (1 - isDay);
-
-  console.log("Sun light intensity set to:", sunLight.intensity);
-  console.log("Ambient light intensity set to:", ambientLight.intensity);
-
-  // Interpolate sun position
-  const daySunPosition = new THREE.Vector3(10, 100, 10);
-  const nightSunPosition = new THREE.Vector3(-10, -5, 10);
-  sunLight.position.set(
-    daySunPosition.x * isDay + nightSunPosition.x * (1 - isDay),
-    daySunPosition.y * isDay + nightSunPosition.y * (1 - isDay),
-    daySunPosition.z * isDay + nightSunPosition.z * (1 - isDay)
-  );
-
-  // Interpolate ambient light color
-  // Use more realistic Mars ambient light color in realistic mode
-  const dayAmbientColor = isRealisticMode
-    ? new THREE.Color(0xd8a282) // Realistic dusty orange ambient light
-    : new THREE.Color(0xff9966); // Original stylized ambient light
-  const nightAmbientColor = new THREE.Color(0xff8866);
-  ambientLight.color.set(
-    dayAmbientColor.r * isDay + nightAmbientColor.r * (1 - isDay),
-    dayAmbientColor.g * isDay + nightAmbientColor.g * (1 - isDay),
-    dayAmbientColor.b * isDay + nightAmbientColor.b * (1 - isDay)
-  );
-
-  // Handle sun visibility with opacity for smooth transition
-  if (typeof sunSphere !== 'undefined' && sunSphere) {
-    sunSphere.visible = true;
-    sunSphere.material.opacity = isDay * 0.9; // Fade out when transitioning to night
-
-    // Also move the sun position during transition
-    const daySunSpherePosition = new THREE.Vector3(500, 300, -1000);
-    const nightSunSpherePosition = new THREE.Vector3(500, -300, -1000);
-    sunSphere.position.set(
-      daySunSpherePosition.x * isDay + nightSunSpherePosition.x * (1 - isDay),
-      daySunSpherePosition.y * isDay + nightSunSpherePosition.y * (1 - isDay),
-      daySunSpherePosition.z * isDay + nightSunSpherePosition.z * (1 - isDay)
-    );
-
-    // Adjust sun color in realistic mode
-    if (isRealisticMode && isDay > 0.5) {
-      // More pale, dusty sun appearance as seen through Mars atmosphere
-      sunSphere.material.color.setHex(0xfff0e0);
-    } else {
-      // Original sun color
-      sunSphere.material.color.setHex(0xffffff);
-    }
-  }
-
-  // Handle night skybox opacity for smooth transition
-  if (typeof spaceSkybox !== 'undefined' && spaceSkybox) {
-    if (isDay < 0.5) {
-      // Show night skybox when transitioning to night
-      if (!scene.getObjectById(spaceSkybox.id)) {
-        scene.add(spaceSkybox);
-      }
-      // Set opacity based on transition
-      spaceSkybox.traverse(obj => {
-        if (obj.isMesh && obj.material) {
-          obj.material.transparent = true;
-          obj.material.opacity = 1 - isDay * 2; // Fade in as day transitions to night
-        }
-      });
-    } else if (isDay >= 0.5 && scene.getObjectById(spaceSkybox.id)) {
-      // Fade out night skybox when transitioning to day
-      spaceSkybox.traverse(obj => {
-        if (obj.isMesh && obj.material) {
-          obj.material.transparent = true;
-          obj.material.opacity = (1 - isDay) * 2; // Fade out as night transitions to day
-        }
-      });
-    }
-  }
-}
-
-// Start the day/night cycle
-startDayNightCycle();
-
-// Day/night toggle is now handled in the main keydown handler to prevent duplicate listeners
-
-// Run the initialization in the correct order
-initializeScene();
-
-function updateDistanceTraveled(currentTime) {
-  if (lastUpdateTime === 0) {
-    lastUpdateTime = currentTime;
-    return;
-  }
-  const deltaTime = (currentTime - lastUpdateTime) / 1000; // Convert to seconds
-  lastUpdateTime = currentTime;
-
-  // Assuming speed is in meters per second, convert to miles
-  const speedInMilesPerSecond = roverSpeed * 0.000621371;
-  distanceTraveled += speedInMilesPerSecond * deltaTime;
-
-  // Update the HUD or console with the distance traveled
-  console.log(`Distance Traveled: ${distanceTraveled.toFixed(2)} miles`);
-}
-
-// Create a visible sun sphere
-
-
-
-// Create a realistic Mars day sky texture based on NASA imagery and scientific data
-function createRealisticMarsDaySkyTexture() {
-  const canvas = document.createElement('canvas');
-  const canvasSize = perfSettings.isMobile ? 1024 : 2048; // Responsive to device capabilities
-  canvas.width = canvasSize;
-  canvas.height = canvasSize;
-  const context = canvas.getContext('2d');
-
-  // Create scientifically accurate gradient from horizon to zenith
-  // Based on NASA's Curiosity and Perseverance rover images
-  const gradient = context.createLinearGradient(0, canvasSize, 0, 0);
-
-  // Mars sky colors based on NASA imagery
-  // Horizon: Butterscotch/light brown due to dust scattering
-  gradient.addColorStop(0, '#d8a282');
-
-  // Mid-sky: Pale orange-brown transitioning to salmon pink
-  gradient.addColorStop(0.2, '#c79078');
-  gradient.addColorStop(0.4, '#b67c6e');
-
-  // Upper sky: Transitions to a dusty pale blue-gray
-  gradient.addColorStop(0.7, '#a57a6c');
-  gradient.addColorStop(0.85, '#9a7a74');
-
-  // Zenith: Darker blue-gray (Rayleigh scattering is much weaker on Mars)
-  gradient.addColorStop(1, '#8e7a7c');
-
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, canvasSize, canvasSize);
-
-  // Add realistic atmospheric haze/dust based on Martian conditions
-  // Mars has frequent dust in atmosphere that creates a hazy appearance
-  context.fillStyle = 'rgba(210, 170, 130, 0.15)';
-  for (let i = 0; i < 150; i++) {
-    const x = Math.random() * canvasSize;
-    // More dust near horizon, gradually decreasing with height
-    const heightFactor = Math.pow(Math.random(), 0.5); // More dust lower in sky
-    const y = canvasSize * (1 - heightFactor * 0.6);
-    const size = Math.random() * 150 + 100;
-    context.beginPath();
-    context.arc(x, y, size, 0, Math.PI * 2);
-    context.fill();
-  }
-
-  // Add subtle dust storm effects in distance (occasional on Mars)
-  if (Math.random() < 0.3) { // 30% chance of dust storm
-    context.fillStyle = 'rgba(190, 150, 120, 0.2)';
-    const stormX = Math.random() * canvasSize;
-    const stormHeight = canvasSize * 0.3;
-    const stormWidth = canvasSize * 0.4;
-
-    // Create dust storm shape
-    for (let i = 0; i < 30; i++) {
-      const x = stormX + (Math.random() - 0.5) * stormWidth;
-      const y = canvasSize - Math.random() * stormHeight;
-      const size = Math.random() * 200 + 100;
-      context.beginPath();
-      context.arc(x, y, size, 0, Math.PI * 2);
-      context.fill();
-    }
-  }
-
-  // Add sun with realistic appearance
-  // The sun appears about 2/3 the size as seen from Earth
-  // and has a pale, dusty appearance due to atmospheric dust
-  const sunSize = canvasSize * 0.05; // Sun size as seen from Mars
-  const sunX = canvasSize * (0.3 + Math.random() * 0.4); // Random position in sky
-  const sunY = canvasSize * (0.2 + Math.random() * 0.3); // Higher in sky
-
-  // Create sun glow (larger on Mars due to dust scattering)
-  const sunGlow = context.createRadialGradient(
-    sunX, sunY, 0,
-    sunX, sunY, sunSize * 4
-  );
-  sunGlow.addColorStop(0, 'rgba(255, 240, 230, 0.8)');
-  sunGlow.addColorStop(0.2, 'rgba(255, 210, 180, 0.4)');
-  sunGlow.addColorStop(0.5, 'rgba(255, 200, 170, 0.2)');
-  sunGlow.addColorStop(1, 'rgba(255, 190, 160, 0)');
-
-  context.fillStyle = sunGlow;
-  context.beginPath();
-  context.arc(sunX, sunY, sunSize * 4, 0, Math.PI * 2);
-  context.fill();
-
-  // Create sun disk (pale yellow-white due to dust filtering)
-  const sunDisk = context.createRadialGradient(
-    sunX, sunY, 0,
-    sunX, sunY, sunSize
-  );
-  sunDisk.addColorStop(0, 'rgba(255, 250, 240, 1)');
-  sunDisk.addColorStop(0.7, 'rgba(255, 240, 220, 1)');
-  sunDisk.addColorStop(1, 'rgba(255, 230, 200, 0.8)');
-
-  context.fillStyle = sunDisk;
-  context.beginPath();
-  context.arc(sunX, sunY, sunSize, 0, Math.PI * 2);
-  context.fill();
-
-  // Add Phobos and Deimos (Mars' moons) occasionally
-  if (Math.random() < 0.4) { // 40% chance to see a moon
-    // Phobos (larger, closer moon)
-    const phobosSize = canvasSize * 0.005; // Very small in sky
-    const phobosX = canvasSize * Math.random();
-    const phobosY = canvasSize * (0.1 + Math.random() * 0.3);
-
-    context.fillStyle = 'rgba(180, 170, 160, 0.9)';
-    context.beginPath();
-    context.arc(phobosX, phobosY, phobosSize, 0, Math.PI * 2);
-    context.fill();
-
-    // Deimos (smaller, further moon) - even rarer
-    if (Math.random() < 0.3) {
-      const deimosSize = canvasSize * 0.003; // Extremely small in sky
-      const deimosX = canvasSize * Math.random();
-      const deimosY = canvasSize * (0.05 + Math.random() * 0.2);
-
-      context.fillStyle = 'rgba(170, 160, 150, 0.8)';
-      context.beginPath();
-      context.arc(deimosX, deimosY, deimosSize, 0, Math.PI * 2);
-      context.fill();
-    }
-  }
-
-  // Create texture from canvas
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.mapping = THREE.EquirectangularReflectionMapping;
-
-  return texture;
-}
-
-// Add UI button for toggling realistic mode
-function addRealisticModeToggle() {
-  const toggleButton = document.createElement('button');
-  toggleButton.textContent = isRealisticMode ? 'Switch to Stylized Mode' : 'Switch to Realistic Mode';
-  toggleButton.style.position = 'absolute';
-  toggleButton.style.bottom = '20px';
-  toggleButton.style.right = '180px'; // Position to the left of the day/night toggle
-  toggleButton.style.padding = '10px';
-  toggleButton.style.backgroundColor = '#444';
-  toggleButton.style.color = 'white';
-  toggleButton.style.border = 'none';
-  toggleButton.style.borderRadius = '5px';
-  toggleButton.style.cursor = 'pointer';
-  toggleButton.style.zIndex = '1000';
-
-  // Add hover effect
-  toggleButton.addEventListener('mouseover', () => {
-    toggleButton.style.backgroundColor = '#666';
-  });
-  toggleButton.addEventListener('mouseout', () => {
-    toggleButton.style.backgroundColor = '#444';
-  });
-
-  // Add click handler
-  toggleButton.addEventListener('click', () => {
-    toggleRealisticMode();
-    toggleButton.textContent = isRealisticMode ? 'Switch to Stylized Mode' : 'Switch to Realistic Mode';
-  });
-
-  document.body.appendChild(toggleButton);
-
-  // Add a Force Day Mode button
-  const forceDayButton = document.createElement('button');
-  forceDayButton.textContent = 'Force Day Mode';
-  forceDayButton.style.position = 'absolute';
-  forceDayButton.style.bottom = '60px';
-  forceDayButton.style.right = '20px';
-  forceDayButton.style.padding = '10px';
-  forceDayButton.style.backgroundColor = '#444';
-  forceDayButton.style.color = 'white';
-  forceDayButton.style.border = 'none';
-  forceDayButton.style.borderRadius = '5px';
-  forceDayButton.style.cursor = 'pointer';
-  forceDayButton.style.zIndex = '1000';
-
-  // Add hover effect
-  forceDayButton.addEventListener('mouseover', () => {
-    forceDayButton.style.backgroundColor = '#666';
-  });
-  forceDayButton.addEventListener('mouseout', () => {
-    forceDayButton.style.backgroundColor = '#444';
-  });
-
-  // Add click handler
-  forceDayButton.addEventListener('click', () => {
-    forceDayMode();
-  });
-
-  document.body.appendChild(forceDayButton);
-}
-
-// Call this function after the scene is initialized
-function initializeUI() {
-  // ... existing UI initialization code ...
-
-  // Add realistic mode toggle
-  addRealisticModeToggle();
-}
-
-// Add a more sophisticated day/night cycle with smooth transitions
-let currentTimeOfDay = 0.5; // 0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk, 1 = midnight
-let dayNightCycleSpeed = 0.00001; // Speed of day/night cycle (smaller = slower)
-let isManualTransition = false;
-let manualTransitionTarget = null;
-let manualTransitionSpeed = 0.005;
-let lastTransitionUpdate = 0;
-
-// Create a function to get the current sky state based on time of day
-function getSkyState(timeOfDay) {
-  // Convert time to a 0-1 value where 0 and 1 are midnight
-  const normalizedTime = timeOfDay % 1;
-
-  // Calculate if it's day or night
-  // Day is roughly between 0.25 (dawn) and 0.75 (dusk)
-  const isDaytime = normalizedTime > 0.25 && normalizedTime < 0.75;
-
-  // Calculate transition factors for dawn and dusk
-  // Dawn transition: 0.15 to 0.35
-  // Dusk transition: 0.65 to 0.85
-  let dawnFactor = 0;
-  let duskFactor = 0;
-
-  if (normalizedTime >= 0.15 && normalizedTime <= 0.35) {
-    // Dawn transition (0 to 1)
-    dawnFactor = (normalizedTime - 0.15) / 0.2;
-  } else if (normalizedTime >= 0.65 && normalizedTime <= 0.85) {
-    // Dusk transition (1 to 0)
-    duskFactor = 1 - ((normalizedTime - 0.65) / 0.2);
-  }
-
-  // Calculate day factor (how deep into day we are)
-  let dayFactor = 0;
-  if (normalizedTime > 0.35 && normalizedTime < 0.65) {
-    // Full day
-    dayFactor = 1;
-  } else if (normalizedTime >= 0.25 && normalizedTime <= 0.35) {
-    // Dawn to full day
-    dayFactor = (normalizedTime - 0.25) / 0.1;
-  } else if (normalizedTime >= 0.65 && normalizedTime <= 0.75) {
-    // Full day to dusk
-    dayFactor = 1 - ((normalizedTime - 0.65) / 0.1);
-  }
-
-  // Calculate night factor (how deep into night we are)
-  let nightFactor = 0;
-  if (normalizedTime < 0.15 || normalizedTime > 0.85) {
-    // Full night
-    nightFactor = 1;
-  } else if (normalizedTime >= 0.75 && normalizedTime <= 0.85) {
-    // Dusk to full night
-    nightFactor = (normalizedTime - 0.75) / 0.1;
-  } else if (normalizedTime >= 0.15 && normalizedTime <= 0.25) {
-    // Full night to dawn
-    nightFactor = 1 - ((normalizedTime - 0.15) / 0.1);
-  }
-
-  return {
-    timeOfDay: normalizedTime,
-    isDaytime,
-    dawnFactor,
-    duskFactor,
-    dayFactor,
-    nightFactor
-  };
-}
-
-// Function to update the sky appearance based on time of day
-function updateSkyForTimeOfDay(timeOfDay) {
-  const skyState = getSkyState(timeOfDay);
-
-  // Log the current state
-  console.log("Sky state:", skyState);
-
-  // Create the appropriate sky texture based on time of day
-  let skyTexture;
-
-  if (skyState.dawnFactor > 0) {
-    // Dawn transition
-    skyTexture = createDawnSkyTexture(skyState.dawnFactor);
-  } else if (skyState.duskFactor > 0) {
-    // Dusk transition
-    skyTexture = createDuskSkyTexture(skyState.duskFactor);
-  } else if (skyState.dayFactor > 0) {
-    // Day (with potential partial intensity)
-    skyTexture = createDaySkyTexture(skyState.dayFactor);
-  } else {
-    // Night (with potential partial intensity)
-    // For night, we'll use the existing skybox but adjust its opacity
-    skyTexture = null;
-  }
-
-  // Apply the sky texture if we created one
-  if (skyTexture) {
-    scene.background = skyTexture;
-
-    // Remove night skybox if it exists
-    if (typeof spaceSkybox !== 'undefined' && spaceSkybox && scene.getObjectById(spaceSkybox.id)) {
-      scene.remove(spaceSkybox);
-    }
-  } else {
-    // Add night skybox if not already in scene
-    if (typeof spaceSkybox !== 'undefined' && spaceSkybox && !scene.getObjectById(spaceSkybox.id)) {
-      scene.add(spaceSkybox);
-    }
-  }
-
-  // Update fog based on time of day
-  updateFogForTimeOfDay(skyState);
-
-  // Update lighting based on time of day
-  updateLightingForTimeOfDay(skyState);
-
-  // Update sun position and appearance
-  updateSunForTimeOfDay(skyState);
-}
-
-// Create a dawn sky texture with beautiful sunrise colors
-function createDawnSkyTexture(dawnFactor) {
-  const canvas = document.createElement('canvas');
-  const size = perfSettings.isMobile ? 1024 : 2048; // Responsive to device capabilities
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext('2d');
-
-  // Create gradient from horizon to zenith
-  const gradient = context.createLinearGradient(0, size, 0, 0);
-
-  // Dawn colors - beautiful sunrise palette
-  // Horizon: Deep orange to bright gold
-  gradient.addColorStop(0, lerpColor('#8a3a2d', '#ff7e45', dawnFactor)); // Horizon
-  gradient.addColorStop(0.2, lerpColor('#a85a3d', '#ffb06a', dawnFactor)); // Low sky
-  gradient.addColorStop(0.4, lerpColor('#b06a55', '#ffc090', dawnFactor)); // Mid-low sky
-  gradient.addColorStop(0.6, lerpColor('#9a6a7a', '#ffd0b0', dawnFactor)); // Mid-high sky
-  gradient.addColorStop(0.8, lerpColor('#7a6a8a', '#e0d0c0', dawnFactor)); // High sky
-  gradient.addColorStop(1, lerpColor('#5a5a7a', '#c0c0d0', dawnFactor)); // Zenith
-
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, size, size);
-
-  // Add atmospheric glow near horizon
-  const glowGradient = context.createRadialGradient(
-    size / 2, size, 0,
-    size / 2, size, size * 0.7
-  );
-  glowGradient.addColorStop(0, `rgba(255, 150, 50, ${0.3 * dawnFactor})`);
-  glowGradient.addColorStop(1, 'rgba(255, 150, 50, 0)');
-
-  context.fillStyle = glowGradient;
-  context.fillRect(0, 0, size, size);
-
-  // Add subtle clouds if it's more than halfway through dawn
-  if (dawnFactor > 0.5) {
-    const cloudOpacity = (dawnFactor - 0.5) * 2 * 0.15; // Max 15% opacity
-    context.fillStyle = `rgba(255, 230, 210, ${cloudOpacity})`;
-
-    for (let i = 0; i < 10; i++) {
-      const x = Math.random() * size;
-      const y = size * 0.3 + Math.random() * size * 0.3;
-      const cloudWidth = Math.random() * 300 + 200;
-      const cloudHeight = Math.random() * 100 + 50;
-
-      // Create fluffy cloud with multiple circles
-      for (let j = 0; j < 8; j++) {
-        const cloudX = x + (Math.random() - 0.5) * cloudWidth * 0.8;
-        const cloudY = y + (Math.random() - 0.5) * cloudHeight * 0.8;
-        const cloudSize = Math.random() * 100 + 50;
-
-        context.beginPath();
-        context.arc(cloudX, cloudY, cloudSize, 0, Math.PI * 2);
-        context.fill();
-      }
-    }
-  }
-
-  // Create texture from canvas
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.mapping = THREE.EquirectangularReflectionMapping;
-
-  return texture;
-}
-
-// Create a dusk sky texture with beautiful sunset colors
-function createDuskSkyTexture(duskFactor) {
-  const canvas = document.createElement('canvas');
-  const size = perfSettings.isMobile ? 1024 : 2048; // Responsive to device capabilities
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext('2d');
-
-  // Create gradient from horizon to zenith
-  const gradient = context.createLinearGradient(0, size, 0, 0);
-
-  // Dusk colors - beautiful sunset palette
-  // Horizon: Bright gold to deep red
-  gradient.addColorStop(0, lerpColor('#ff7e45', '#8a3a2d', 1 - duskFactor)); // Horizon
-  gradient.addColorStop(0.2, lerpColor('#ffb06a', '#a85a3d', 1 - duskFactor)); // Low sky
-  gradient.addColorStop(0.4, lerpColor('#ffc090', '#b06a55', 1 - duskFactor)); // Mid-low sky
-  gradient.addColorStop(0.6, lerpColor('#ffd0b0', '#9a6a7a', 1 - duskFactor)); // Mid-high sky
-  gradient.addColorStop(0.8, lerpColor('#e0d0c0', '#7a6a8a', 1 - duskFactor)); // High sky
-  gradient.addColorStop(1, lerpColor('#c0c0d0', '#5a5a7a', 1 - duskFactor)); // Zenith
-
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, size, size);
-
-  // Add atmospheric glow near horizon - stronger at dusk
-  const glowGradient = context.createRadialGradient(
-    size / 2, size, 0,
-    size / 2, size, size * 0.7
-  );
-  glowGradient.addColorStop(0, `rgba(255, 100, 50, ${0.4 * duskFactor})`);
-  glowGradient.addColorStop(1, 'rgba(255, 100, 50, 0)');
-
-  context.fillStyle = glowGradient;
-  context.fillRect(0, 0, size, size);
-
-  // Add subtle clouds if it's more than halfway through dusk
-  if (duskFactor > 0.5) {
-    const cloudOpacity = (duskFactor - 0.5) * 2 * 0.15; // Max 15% opacity
-    context.fillStyle = `rgba(255, 200, 180, ${cloudOpacity})`;
-
-    for (let i = 0; i < 10; i++) {
-      const x = Math.random() * size;
-      const y = size * 0.3 + Math.random() * size * 0.3;
-      const cloudWidth = Math.random() * 300 + 200;
-      const cloudHeight = Math.random() * 100 + 50;
-
-      // Create fluffy cloud with multiple circles
-      for (let j = 0; j < 8; j++) {
-        const cloudX = x + (Math.random() - 0.5) * cloudWidth * 0.8;
-        const cloudY = y + (Math.random() - 0.5) * cloudHeight * 0.8;
-        const cloudSize = Math.random() * 100 + 50;
-
-        context.beginPath();
-        context.arc(cloudX, cloudY, cloudSize, 0, Math.PI * 2);
-        context.fill();
-      }
-    }
-  }
-
-  // Create texture from canvas
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.mapping = THREE.EquirectangularReflectionMapping;
-
-  return texture;
-}
-
-// Create a day sky texture with intensity factor
-function createDaySkyTexture(intensityFactor) {
-  const canvas = document.createElement('canvas');
-  const size = perfSettings.isMobile ? 1024 : 2048; // Responsive to device capabilities
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext('2d');
-
-  // Create gradient from horizon to zenith
-  const gradient = context.createLinearGradient(0, size, 0, 0);
-
-  // Day colors - Mars daytime
-  gradient.addColorStop(0, lerpColor('#c27e54', '#e8b090', intensityFactor)); // Horizon
-  gradient.addColorStop(0.5, lerpColor('#d7a28b', '#f0c0a0', intensityFactor)); // Middle
-  gradient.addColorStop(1, lerpColor('#e6b499', '#f8d0b0', intensityFactor)); // Zenith
-
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, size, size);
-
-  // Add atmospheric haze/dust
-  context.fillStyle = `rgba(210, 170, 130, ${0.2 * intensityFactor})`;
-  for (let i = 0; i < 100; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size * 0.6 + size * 0.4; // More dust near horizon
-    const dustSize = Math.random() * 100 + 50;
-
-    context.beginPath();
-    context.arc(x, y, dustSize, 0, Math.PI * 2);
-    context.fill();
-  }
-
-  // Add subtle clouds
-  context.fillStyle = `rgba(230, 200, 180, ${0.15 * intensityFactor})`;
-  for (let i = 0; i < 20; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size * 0.3 + size * 0.2; // Clouds in middle of sky
-    const cloudWidth = Math.random() * 300 + 200;
-    const cloudHeight = Math.random() * 100 + 50;
-
-    // Create fluffy cloud with multiple circles
-    for (let j = 0; j < 8; j++) {
-      const cloudX = x + (Math.random() - 0.5) * cloudWidth * 0.8;
-      const cloudY = y + (Math.random() - 0.5) * cloudHeight * 0.8;
-      const cloudSize = Math.random() * 100 + 50;
-
-      context.beginPath();
-      context.arc(cloudX, cloudY, cloudSize, 0, Math.PI * 2);
-      context.fill();
-    }
-  }
-
-  // Create texture from canvas
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.mapping = THREE.EquirectangularReflectionMapping;
-
-  return texture;
-}
-
-// Update fog based on time of day
-function updateFogForTimeOfDay(skyState) {
-  // Define fog colors for different times of day
-  const nightFogColor = new THREE.Color(0x553322);
-  const dawnFogColor = new THREE.Color(0xaa6644);
-  const dayFogColor = new THREE.Color(0xd8a282);
-  const duskFogColor = new THREE.Color(0xaa5533);
-
-  // Define fog distances
-  const nightFogNear = 500;
-  const nightFogFar = 5000;
-  const dayFogNear = 200;
-  const dayFogFar = 2000;
-
-  // Calculate fog color based on time of day
-  const fogColor = new THREE.Color();
-
-  if (skyState.dawnFactor > 0) {
-    // Dawn transition
-    fogColor.lerpColors(nightFogColor, dawnFogColor, skyState.dawnFactor);
-    const fogNear = nightFogNear + (dayFogNear - nightFogNear) * skyState.dawnFactor;
-    const fogFar = nightFogFar + (dayFogFar - nightFogFar) * skyState.dawnFactor;
-    scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
-  } else if (skyState.duskFactor > 0) {
-    // Dusk transition
-    fogColor.lerpColors(duskFogColor, nightFogColor, 1 - skyState.duskFactor);
-    const fogNear = dayFogNear + (nightFogNear - dayFogNear) * (1 - skyState.duskFactor);
-    const fogFar = dayFogFar + (nightFogFar - dayFogFar) * (1 - skyState.duskFactor);
-    scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
-  } else if (skyState.dayFactor > 0) {
-    // Day
-    fogColor.lerpColors(dawnFogColor, dayFogColor, skyState.dayFactor);
-    scene.fog = new THREE.Fog(fogColor, dayFogNear, dayFogFar);
-  } else {
-    // Night
-    scene.fog = new THREE.Fog(nightFogColor, nightFogNear, nightFogFar);
-  }
-}
-
-// Update lighting based on time of day
-function updateLightingForTimeOfDay(skyState) {
-  // Define light intensities for different times of day
-  const nightSunIntensity = 0.1;
-  const dawnSunIntensity = 0.6;
-  const daySunIntensity = 1.0;
-  const duskSunIntensity = 0.6;
-
-  const nightAmbientIntensity = 0.3;
-  const dawnAmbientIntensity = 0.5;
-  const dayAmbientIntensity = 0.7;
-  const duskAmbientIntensity = 0.5;
-
-  // Define light colors
-  const nightSunColor = new THREE.Color(0xaa5522);
-  const dawnSunColor = new THREE.Color(0xff8844);
-  const daySunColor = new THREE.Color(0xffffff);
-  const duskSunColor = new THREE.Color(0xff6622);
-
-  const nightAmbientColor = new THREE.Color(0x334455);
-  const dawnAmbientColor = new THREE.Color(0x775544);
-  const dayAmbientColor = new THREE.Color(0xd8a282);
-  const duskAmbientColor = new THREE.Color(0x995533);
-
-  // Calculate light intensities and colors based on time of day
-  let sunIntensity, ambientIntensity;
-  const sunColor = new THREE.Color();
-  const ambientColor = new THREE.Color();
-
-  if (skyState.dawnFactor > 0) {
-    // Dawn transition
-    sunIntensity = nightSunIntensity + (dawnSunIntensity - nightSunIntensity) * skyState.dawnFactor;
-    ambientIntensity = nightAmbientIntensity + (dawnAmbientIntensity - nightAmbientIntensity) * skyState.dawnFactor;
-    sunColor.lerpColors(nightSunColor, dawnSunColor, skyState.dawnFactor);
-    ambientColor.lerpColors(nightAmbientColor, dawnAmbientColor, skyState.dawnFactor);
-  } else if (skyState.dayFactor > 0 && skyState.dawnFactor === 0 && skyState.duskFactor === 0) {
-    // Full day
-    sunIntensity = dawnSunIntensity + (daySunIntensity - dawnSunIntensity) * skyState.dayFactor;
-    ambientIntensity = dawnAmbientIntensity + (dayAmbientIntensity - dawnAmbientIntensity) * skyState.dayFactor;
-    sunColor.lerpColors(dawnSunColor, daySunColor, skyState.dayFactor);
-    ambientColor.lerpColors(dawnAmbientColor, dayAmbientColor, skyState.dayFactor);
-  } else if (skyState.duskFactor > 0) {
-    // Dusk transition
-    sunIntensity = duskSunIntensity - (duskSunIntensity - nightSunIntensity) * (1 - skyState.duskFactor);
-    ambientIntensity = duskAmbientIntensity - (duskAmbientIntensity - nightAmbientIntensity) * (1 - skyState.duskFactor);
-    sunColor.lerpColors(duskSunColor, nightSunColor, 1 - skyState.duskFactor);
-    ambientColor.lerpColors(duskAmbientColor, nightAmbientColor, 1 - skyState.duskFactor);
-  } else {
-    // Night
-    sunIntensity = nightSunIntensity;
-    ambientIntensity = nightAmbientIntensity;
-    sunColor.copy(nightSunColor);
-    ambientColor.copy(nightAmbientColor);
-  }
-
-  // Apply light intensities and colors
-  if (typeof sunLight !== 'undefined' && sunLight) {
-    sunLight.intensity = sunIntensity;
-    sunLight.color.copy(sunColor);
-  }
-
-  if (typeof ambientLight !== 'undefined' && ambientLight) {
-    ambientLight.intensity = ambientIntensity;
-    ambientLight.color.copy(ambientColor);
-  }
-}
-
-// Update sun position and appearance based on time of day
-function updateSunForTimeOfDay(skyState) {
-  if (typeof sunSphere === 'undefined' || !sunSphere) return;
-
-  // Calculate sun position based on time of day
-  // Full circle around the scene
-  const angle = (skyState.timeOfDay * Math.PI * 2) - Math.PI / 2;
-  const radius = 1000;
-  const height = Math.sin(angle) * 500;
-
-  const x = Math.cos(angle) * radius;
-  const y = height;
-  const z = Math.sin(angle) * radius;
-
-  sunSphere.position.set(x, y, z);
-
-  // Make sun visible during day, dawn and dusk
-  sunSphere.visible = skyState.dayFactor > 0 || skyState.dawnFactor > 0 || skyState.duskFactor > 0;
-
-  // Adjust sun appearance based on time of day
-  if (sunSphere.material) {
-    // Adjust sun color
-    if (skyState.dawnFactor > 0) {
-      // Dawn - orange-red sun
-      sunSphere.material.color.setHex(0xff7733);
-      sunSphere.material.opacity = 0.9 * skyState.dawnFactor;
-    } else if (skyState.duskFactor > 0) {
-      // Dusk - deep orange sun
-      sunSphere.material.color.setHex(0xff5522);
-      sunSphere.material.opacity = 0.9 * skyState.duskFactor;
-    } else if (skyState.dayFactor > 0) {
-      // Day - bright white-yellow sun
-      sunSphere.material.color.setHex(0xffffaa);
-      sunSphere.material.opacity = 0.9 * skyState.dayFactor;
-    }
-
-    // Adjust sun size based on height (larger near horizon)
-    const baseSunSize = 50;
-    const horizonFactor = 1 - Math.abs(height) / 500;
-    const sunScale = 1 + horizonFactor * 0.5; // Up to 50% larger at horizon
-
-    sunSphere.scale.set(sunScale, sunScale, sunScale);
-  }
-
-  // Update sun light position to match sun position
-  if (typeof sunLight !== 'undefined' && sunLight) {
-    sunLight.position.copy(sunSphere.position).normalize().multiplyScalar(10);
-  }
-}
-
-// Helper function to interpolate between two colors
-function lerpColor(color1, color2, factor) {
-  // Convert hex colors to RGB
-  const c1 = new THREE.Color(color1);
-  const c2 = new THREE.Color(color2);
-
-  // Interpolate
-  const result = new THREE.Color();
-  result.r = c1.r + (c2.r - c1.r) * factor;
-  result.g = c1.g + (c2.g - c1.g) * factor;
-  result.b = c1.b + (c2.b - c1.b) * factor;
-
-  return '#' + result.getHexString();
-}
-
-// Function to update the day/night cycle
-function updateDayNightCycle(currentTime) {
-  // Calculate time delta
-  const delta = currentTime - lastTransitionUpdate;
-  lastTransitionUpdate = currentTime;
-
-  if (isManualTransition && manualTransitionTarget !== null) {
-    // Handle manual transition to a specific time
-    const diff = manualTransitionTarget - currentTimeOfDay;
-
-    // If we're close enough to the target, end the transition
-    if (Math.abs(diff) < manualTransitionSpeed) {
-      currentTimeOfDay = manualTransitionTarget;
-      isManualTransition = false;
-      manualTransitionTarget = null;
-    } else {
-      // Move toward the target
-      const direction = diff > 0 ? 1 : -1;
-      currentTimeOfDay += direction * manualTransitionSpeed;
-
-      // Ensure we stay within 0-1 range
-      currentTimeOfDay = (currentTimeOfDay + 1) % 1;
-    }
-  } else {
-    // Normal cycle progression
-    currentTimeOfDay = (currentTimeOfDay + dayNightCycleSpeed * delta) % 1;
-  }
-
-  // Update the sky based on current time
-  updateSkyForTimeOfDay(currentTimeOfDay);
-
-  // Update UI if we have a time indicator
-  updateTimeIndicator(currentTimeOfDay);
-}
-
-// Function to update the time indicator UI
-function updateTimeIndicator(timeOfDay) {
-  const timeIndicator = document.getElementById('time-indicator');
-  if (!timeIndicator) return;
-
-  // Convert time of day to hours (0-24)
-  const hours = (timeOfDay * 24) % 24;
-  const minutes = (hours % 1) * 60;
-
-  // Format as HH:MM
-  const formattedTime = `${Math.floor(hours).toString().padStart(2, '0')}:${Math.floor(minutes).toString().padStart(2, '0')}`;
-
-  // Update the indicator
-  timeIndicator.textContent = formattedTime;
-
-  // Update the indicator color based on time of day
-  const skyState = getSkyState(timeOfDay);
-  if (skyState.dayFactor > 0.5) {
-    timeIndicator.style.color = '#ffffff';
-    timeIndicator.style.textShadow = '0 0 5px rgba(0,0,0,0.5)';
-  } else if (skyState.dawnFactor > 0.5 || skyState.duskFactor > 0.5) {
-    timeIndicator.style.color = '#ffcc99';
-    timeIndicator.style.textShadow = '0 0 5px rgba(0,0,0,0.5)';
-  } else {
-    timeIndicator.style.color = '#aaccff';
-    timeIndicator.style.textShadow = '0 0 5px rgba(0,0,0,0.7)';
-  }
-}
-
-// Function to transition to a specific time of day
-function transitionToTimeOfDay(targetTime, speed = 0.0005) {
-  isManualTransition = true;
-  manualTransitionTarget = targetTime;
-  manualTransitionSpeed = speed;
-  console.log(`Transitioning to time: ${targetTime}`);
-}
-
-// Add time controls to the UI
-function addTimeControls() {
-  // Create container
-  const container = document.createElement('div');
-  container.style.position = 'absolute';
-  container.style.bottom = '100px';
-  container.style.right = '20px';
-  container.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
-  container.style.padding = '10px';
-  container.style.borderRadius = '5px';
-  container.style.zIndex = '1000';
-  container.style.display = 'flex';
-  container.style.flexDirection = 'column';
-  container.style.gap = '10px';
-
-  // Add time indicator
-  const timeIndicator = document.createElement('div');
-  timeIndicator.id = 'time-indicator';
-  timeIndicator.style.fontFamily = 'monospace';
-  timeIndicator.style.fontSize = '24px';
-  timeIndicator.style.color = 'white';
-  timeIndicator.style.textAlign = 'center';
-  timeIndicator.textContent = '12:00';
-  container.appendChild(timeIndicator);
-
-  // Add time buttons
-  const buttonContainer = document.createElement('div');
-  buttonContainer.style.display = 'flex';
-  buttonContainer.style.justifyContent = 'space-between';
-  buttonContainer.style.gap = '5px';
-
-  // Time presets
-  const timePresets = [
-    { label: '🌙 Night', time: 0 },
-    { label: '🌅 Dawn', time: 0.25 },
-    { label: '☀️ Noon', time: 0.5 },
-    { label: '🌇 Dusk', time: 0.75 }
-  ];
-
-  timePresets.forEach(preset => {
-    const button = document.createElement('button');
-    button.textContent = preset.label;
-    button.style.flex = '1';
-    button.style.padding = '8px';
-    button.style.backgroundColor = '#444';
-    button.style.color = 'white';
-    button.style.border = 'none';
-    button.style.borderRadius = '4px';
-    button.style.cursor = 'pointer';
-
-    button.addEventListener('click', () => {
-      transitionToTimeOfDay(preset.time);
-    });
-
-    buttonContainer.appendChild(button);
-  });
-
-  container.appendChild(buttonContainer);
-
-  document.body.appendChild(container);
-}
-
-// ===== DAY/NIGHT CYCLE =====
-// Add a day/night toggle and cycle
-
-console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
-
-function startDayNightCycle() {
-  // Use a 1-minute cycle duration
-  setInterval(() => {
-    toggleDayNight();
-  }, 60000); // 30 seconds for each cycle
-
-  // Add a manual toggle button for testing
-  const toggleButton = document.createElement('button');
-  toggleButton.textContent = isDaytime ? 'Switch to Night' : 'Switch to Day';
-  toggleButton.style.position = 'absolute';
-  toggleButton.style.bottom = '20px';
-  toggleButton.style.right = '20px';
-  toggleButton.style.padding = '10px';
-  toggleButton.style.backgroundColor = '#444';
-  toggleButton.style.color = 'white';
-  toggleButton.style.border = 'none';
-  toggleButton.style.borderRadius = '5px';
-  toggleButton.style.cursor = 'pointer';
-  toggleButton.style.zIndex = '1000';
-
-  toggleButton.addEventListener('click', () => {
-    // Only toggle if not already transitioning
-    if (!isTransitioning) {
-      toggleDayNight();
-      toggleButton.textContent = isDaytime ? 'Switch to Night' : 'Switch to Day';
-    }
-  });
-
-  document.body.appendChild(toggleButton);
-}
-
-function toggleDayNight() {
-  console.log("Before toggle - isDaytime:", isDaytime);
-  isDaytime = !isDaytime;
-  console.log("After toggle - isDaytime:", isDaytime);
-  updateSkyAppearance();
-}
-
-// Add a function to force day mode
-function forceDayMode() {
-  console.log("Forcing day mode...");
-  isDaytime = true;
-  isRealisticMode = true;
-  console.log("isDaytime set to:", isDaytime);
-  console.log("isRealisticMode set to:", isRealisticMode);
-  updateSkyAppearance();
-  console.log("Day mode forced!");
-}
-
-// Expose the function globally for debugging
-window.forceDayMode = forceDayMode;
-
-// Optionally start in day; do not force override so night can appear normally
-// setTimeout(() => {
-//   console.log("Auto-forcing day mode after initialization");
-//   forceDayMode();
-// }, 2000);
-
-function updateSkyAppearance(transitionProgress = null) {
-  console.log("Updating sky appearance - isDaytime:", isDaytime);
-
-  // Define sunSphere if it is not already defined
-  if (typeof sunSphere === 'undefined') {
-    console.log('Defining sunSphere...');
-    sunSphere = new THREE.Mesh(
-      new THREE.SphereGeometry(50, 32, 32),
-      new THREE.MeshBasicMaterial({ color: 0xffffff })
-    );
-    sunSphere.position.set(500, 300, -1000);
-    scene.add(sunSphere);
-  }
-
-  // If we're not transitioning, use the current state
-  const isDay = transitionProgress === null ? isDaytime :
-    (transitionStartState === 'day' ? 1 - transitionProgress : transitionProgress);
-
-  console.log("isDay value:", isDay);
-
-  // Create or update fog based on time of day
-  // Use more realistic Mars fog colors when in realistic mode
-  const dayFog = isRealisticMode
-    ? new THREE.Fog(0xd8a282, 200, 2000) // Realistic dusty orange-tan fog based on NASA imagery
-    : new THREE.Fog(0xd09060, 200, 2000); // Original stylized fog
-
-  const nightFog = new THREE.Fog(0xb77c5a, 500, 5000);
-
-  if (transitionProgress === null) {
-    // No transition, just set the fog directly
-    scene.fog = isDaytime ? dayFog : nightFog;
-    console.log("Setting fog for:", isDaytime ? "DAY" : "NIGHT");
-  } else {
-    // Interpolate fog color and near/far values
-    const fogColor = new THREE.Color();
-    fogColor.r = dayFog.color.r * isDay + nightFog.color.r * (1 - isDay);
-    fogColor.g = dayFog.color.g * isDay + nightFog.color.g * (1 - isDay);
-    fogColor.b = dayFog.color.b * isDay + nightFog.color.b * (1 - isDay);
-
-    const fogNear = dayFog.near * isDay + nightFog.near * (1 - isDay);
-    const fogFar = dayFog.far * isDay + nightFog.far * (1 - isDay);
-
-    scene.fog = new THREE.Fog(fogColor, fogNear, fogFar);
-    console.log("Setting transitional fog - isDay:", isDay);
-  }
-
-  // Handle skybox and background
-  if (transitionProgress !== null) {
-    // During transition, create a blended sky texture
-    if (isDay > 0.01 && isDay < 0.99) {
-      // Create a blended sky texture during transition
-      console.log("Creating blended sky texture - isDay:", isDay);
-      scene.background = createBlendedSkyTexture(isDay);
-    }
-  } else {
-    // Not transitioning, use appropriate sky
-    if (isDaytime) {
-      // Use realistic or stylized sky texture based on mode
-      console.log("Setting DAY sky texture - isRealisticMode:", isRealisticMode);
-      try {
-        const skyTexture = isRealisticMode ? createRealisticMarsDaySkyTexture() : createMarsDaySkyTexture();
-        scene.background = skyTexture;
-        console.log("Day sky texture created and set successfully");
-      } catch (error) {
-        console.error("Error creating day sky texture:", error);
-      }
-
-      // Remove night skybox if it exists
-      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && scene.getObjectById(spaceSkybox.id)) {
-        console.log("Removing night skybox");
-        scene.remove(spaceSkybox);
-      }
-    } else {
-      // Add night skybox if not already in scene
-      console.log("Setting NIGHT sky");
-      if (typeof spaceSkybox !== 'undefined' && spaceSkybox && !scene.getObjectById(spaceSkybox.id)) {
-        console.log("Adding night skybox to scene");
-        scene.add(spaceSkybox);
-      }
-    }
-  }
-
-  // Adjust lighting based on time of day or transition progress
-  // Use more realistic lighting values when in realistic mode
-  const daySunIntensity = isRealisticMode ? 0.8 : 0.9; // Slightly dimmer in realistic mode (Mars is further from sun)
-  const nightSunIntensity = 0.3;
-  const dayAmbientIntensity = isRealisticMode ? 0.6 : 0.7; // Slightly dimmer ambient in realistic mode
-  const nightAmbientIntensity = 0.4;
-
-  // Interpolate light intensities
-  sunLight.intensity = daySunIntensity * isDay + nightSunIntensity * (1 - isDay);
-  ambientLight.intensity = dayAmbientIntensity * isDay + nightAmbientIntensity * (1 - isDay);
-
-  console.log("Sun light intensity set to:", sunLight.intensity);
-  console.log("Ambient light intensity set to:", ambientLight.intensity);
-
-  // Interpolate sun position
-  const daySunPosition = new THREE.Vector3(10, 100, 10);
-  const nightSunPosition = new THREE.Vector3(-10, -5, 10);
-  sunLight.position.set(
-    daySunPosition.x * isDay + nightSunPosition.x * (1 - isDay),
-    daySunPosition.y * isDay + nightSunPosition.y * (1 - isDay),
-    daySunPosition.z * isDay + nightSunPosition.z * (1 - isDay)
-  );
-
-  // Interpolate ambient light color
-  // Use more realistic Mars ambient light color in realistic mode
-  const dayAmbientColor = isRealisticMode
-    ? new THREE.Color(0xd8a282) // Realistic dusty orange ambient light
-    : new THREE.Color(0xff9966); // Original stylized ambient light
-  const nightAmbientColor = new THREE.Color(0xff8866);
-  ambientLight.color.set(
-    dayAmbientColor.r * isDay + nightAmbientColor.r * (1 - isDay),
-    dayAmbientColor.g * isDay + nightAmbientColor.g * (1 - isDay),
-    dayAmbientColor.b * isDay + nightAmbientColor.b * (1 - isDay)
-  );
-
-  // Handle sun visibility with opacity for smooth transition
-  if (typeof sunSphere !== 'undefined' && sunSphere) {
-    sunSphere.visible = true;
-    sunSphere.material.opacity = isDay * 0.9; // Fade out when transitioning to night
-
-    // Also move the sun position during transition
-    const daySunSpherePosition = new THREE.Vector3(500, 300, -1000);
-    const nightSunSpherePosition = new THREE.Vector3(500, -300, -1000);
-    sunSphere.position.set(
-      daySunSpherePosition.x * isDay + nightSunSpherePosition.x * (1 - isDay),
-      daySunSpherePosition.y * isDay + nightSunSpherePosition.y * (1 - isDay),
-      daySunSpherePosition.z * isDay + nightSunSpherePosition.z * (1 - isDay)
-    );
-
-    // Adjust sun color in realistic mode
-    if (isRealisticMode && isDay > 0.5) {
-      // More pale, dusty sun appearance as seen through Mars atmosphere
-      sunSphere.material.color.setHex(0xfff0e0);
-    } else {
-      // Original sun color
-      sunSphere.material.color.setHex(0xffffff);
-    }
-  }
-
-  // Handle night skybox opacity for smooth transition
-  if (typeof spaceSkybox !== 'undefined' && spaceSkybox) {
-    if (isDay < 0.5) {
-      // Show night skybox when transitioning to night
-      if (!scene.getObjectById(spaceSkybox.id)) {
-        scene.add(spaceSkybox);
-      }
-      // Set opacity based on transition
-      spaceSkybox.traverse(obj => {
-        if (obj.isMesh && obj.material) {
-          obj.material.transparent = true;
-          obj.material.opacity = 1 - isDay * 2; // Fade in as day transitions to night
-        }
-      });
-    } else if (isDay >= 0.5 && scene.getObjectById(spaceSkybox.id)) {
-      // Fade out night skybox when transitioning to day
-      spaceSkybox.traverse(obj => {
-        if (obj.isMesh && obj.material) {
-          obj.material.transparent = true;
-          obj.material.opacity = (1 - isDay) * 2; // Fade out as night transitions to day
-        }
-      });
-    }
-  }
-}
-
-// Start the day/night cycle
-//startDayNightCycle();
-
-// Day/night toggle is now handled in the main keydown handler to prevent duplicate listeners
-
-// ==============================================================================
-// COMPREHENSIVE ENHANCEMENT SYSTEMS
-// ==============================================================================
-
-// Advanced Mission System
-class MissionSystem {
-  constructor() {
-    this.missions = [];
-    this.activeMissions = [];
-    this.completedMissions = [];
-    this.currentObjective = null;
-    this.playerXP = 0;
-    this.playerLevel = 1;
-    this.achievements = [];
-    this.missionTypes = ['tutorial', 'science', 'exploration', 'logistics', 'survival'];
-    this.initialized = false;
-    this.missionCounter = 0;
-    
-    this.initializeMissions();
-  }
-
-  initializeMissions() {
-    // Create diverse mission types
-    this.missions = [
-      // Tutorial Missions
-      {
-        id: 'tutorial_001',
-        name: 'First Steps on Mars',
-        description: 'Drive your rover 100 meters and take your first photo',
-        type: 'tutorial',
-        objectives: [
-          { type: 'drive', target: 100, current: 0, complete: false },
-          { type: 'photo', target: 1, current: 0, complete: false }
-        ],
-        reward: { xp: 50, achievement: 'First Steps' },
-        unlocked: true
-      },
-      
-      // Science Missions
-      {
-        id: 'science_001',
-        name: 'Geological Survey',
-        description: 'Collect 5 different rock samples for analysis',
-        type: 'science',
-        objectives: [
-          { type: 'collect_samples', target: 5, current: 0, complete: false }
-        ],
-        reward: { xp: 100, achievement: 'Rock Hound' },
-        unlocked: true
-      },
-      
-      {
-        id: 'science_002',
-        name: 'Meteorite Hunter',
-        description: 'Find and collect 3 meteorite samples',
-        type: 'science',
-        objectives: [
-          { type: 'collect_meteorites', target: 3, current: 0, complete: false }
-        ],
-        reward: { xp: 150, achievement: 'Meteorite Hunter' },
-        unlocked: false
-      },
-      
-      // Exploration Missions
-      {
-        id: 'exploration_001',
-        name: 'Mars Marathon',
-        description: 'Travel 1000 meters exploring the Martian surface',
-        type: 'exploration',
-        objectives: [
-          { type: 'distance', target: 1000, current: 0, complete: false }
-        ],
-        reward: { xp: 200, achievement: 'Mars Explorer' },
-        unlocked: true
-      },
-      
-      {
-        id: 'exploration_002',
-        name: 'Colony Spotter',
-        description: 'Photograph all 6 Mars colonies',
-        type: 'exploration',
-        objectives: [
-          { type: 'photo_colonies', target: 6, current: 0, complete: false }
-        ],
-        reward: { xp: 250, achievement: 'Colony Photographer' },
-        unlocked: false
-      },
-      
-      // Logistics Missions
-      {
-        id: 'logistics_001',
-        name: 'Sample Delivery',
-        description: 'Collect 10 samples and analyze them',
-        type: 'logistics',
-        objectives: [
-          { type: 'analyze_samples', target: 10, current: 0, complete: false }
-        ],
-        reward: { xp: 180, achievement: 'Lab Technician' },
-        unlocked: false
-      },
-      
-      // Survival Missions
-      {
-        id: 'survival_001',
-        name: 'Weather the Storm',
-        description: 'Survive a dust storm and continue operations',
-        type: 'survival',
-        objectives: [
-          { type: 'survive_storm', target: 1, current: 0, complete: false }
-        ],
-        reward: { xp: 300, achievement: 'Storm Survivor' },
-        unlocked: false
-      }
-    ];
-    
-    // Start with tutorial mission
-    this.activateMission('tutorial_001');
-    this.initialized = true;
-  }
-
-  activateMission(missionId) {
-    const mission = this.missions.find(m => m.id === missionId);
-    if (mission && mission.unlocked && !this.activeMissions.includes(mission)) {
-      this.activeMissions.push(mission);
-      this.currentObjective = mission.objectives[0];
-      this.showMissionNotification(`New Mission: ${mission.name}`, mission.description);
-    }
-  }
-
-  updateMissionProgress(type, amount = 1) {
-    this.activeMissions.forEach(mission => {
-      mission.objectives.forEach(objective => {
-        if (objective.type === type && !objective.complete) {
-          objective.current += amount;
-          if (objective.current >= objective.target) {
-            objective.complete = true;
-            this.checkMissionCompletion(mission);
-          }
-        }
-      });
-    });
-  }
-
-  checkMissionCompletion(mission) {
-    const allComplete = mission.objectives.every(obj => obj.complete);
-    if (allComplete) {
-      this.completeMission(mission);
-    }
-  }
-
-  completeMission(mission) {
-    this.activeMissions = this.activeMissions.filter(m => m.id !== mission.id);
-    this.completedMissions.push(mission);
-    
-    // Award rewards
-    this.playerXP += mission.reward.xp;
-    this.checkLevelUp();
-    
-    if (mission.reward.achievement) {
-      this.unlockAchievement(mission.reward.achievement);
-    }
-    
-    // Unlock next missions
-    this.unlockNextMissions(mission.type);
-    
-    this.showMissionNotification(`Mission Complete: ${mission.name}`, `+${mission.reward.xp} XP`);
-  }
-
-  unlockAchievement(name) {
-    if (!this.achievements.includes(name)) {
-      this.achievements.push(name);
-      this.showAchievementNotification(name);
-    }
-  }
-
-  checkLevelUp() {
-    const xpForNextLevel = this.playerLevel * 500;
-    if (this.playerXP >= xpForNextLevel) {
-      this.playerLevel++;
-      this.showLevelUpNotification();
-    }
-  }
-
-  unlockNextMissions(missionType) {
-    // Unlock missions based on completed mission type
-    const typeIndex = this.missionTypes.indexOf(missionType);
-    if (typeIndex !== -1) {
-      this.missions.forEach(mission => {
-        if (!mission.unlocked && mission.type === missionType) {
-          mission.unlocked = true;
-        }
-      });
-    }
-  }
-
-  showMissionNotification(title, description) {
-    if (window.showNotification) {
-      window.showNotification(`${title}: ${description}`, 6000);
-    }
-  }
-
-  showAchievementNotification(achievement) {
-    if (window.showNotification) {
-      window.showNotification(`🏆 Achievement Unlocked: ${achievement}!`, 5000);
-    }
-  }
-
-  showLevelUpNotification() {
-    if (window.showNotification) {
-      window.showNotification(`🎉 Level Up! You are now level ${this.playerLevel}!`, 4000);
-    }
-  }
-
-  getMissionStatus() {
-    return {
-      active: this.activeMissions.length,
-      completed: this.completedMissions.length,
-      total: this.missions.length,
-      xp: this.playerXP,
-      level: this.playerLevel,
-      achievements: this.achievements.length
-    };
-  }
-}
-
-// Sample Collection System
-class SampleCollectionSystem {
-  constructor(scene) {
-    this.scene = scene;
-    this.samples = [];
-    this.collectedSamples = [];
-    this.sampleTypes = [
-      { name: 'Rock', color: 0x8B4513, rarity: 'common', analysis: 'Sedimentary rock formed from ancient water deposits' },
-      { name: 'Mineral', color: 0xFFD700, rarity: 'uncommon', analysis: 'Iron oxide minerals indicating past water activity' },
-      { name: 'Meteorite', color: 0x2F4F4F, rarity: 'rare', analysis: 'Extraterrestrial material containing rare elements' },
-      { name: 'Crystal', color: 0x9370DB, rarity: 'rare', analysis: 'Crystalline structure with unique mineral composition' },
-      { name: 'Soil', color: 0xDEB887, rarity: 'common', analysis: 'Martian regolith rich in perchlorates' },
-      { name: 'Ice', color: 0x87CEEB, rarity: 'uncommon', analysis: 'Subsurface ice deposit, potential water source' },
-      { name: 'Volcanic Glass', color: 0x000000, rarity: 'very rare', analysis: 'Obsidian-like glass from ancient volcanic activity' }
-    ];
-    this.analysisData = new Map();
-    this.lastSampleTime = 0;
-    this.sampleCooldown = 2000; // 2 seconds between samples
-    
-    this.generateSamples();
-  }
-
-  generateSamples() {
-    // Generate fewer samples for better performance
-    const perfSettings = getPerformanceSettings();
-    const sampleCount = perfSettings.detailLevel === 'high' ? 100 : 
-                       perfSettings.detailLevel === 'normal' ? 50 : 25;
-    
-    for (let i = 0; i < sampleCount; i++) {
-      const sample = this.createSample();
-      this.samples.push(sample);
-      this.scene.add(sample.mesh);
-    }
-  }
-
-  createSample() {
-    const sampleType = this.getRandomSampleType();
-    const position = this.getRandomPosition();
-    
-    // Create sample mesh
-    const geometry = new THREE.OctahedronGeometry(2, 1);
-    const material = new THREE.MeshStandardMaterial({
-      color: sampleType.color,
-      emissive: sampleType.color,
-      emissiveIntensity: 0.2,
-      roughness: 0.7,
-      metalness: 0.3
-    });
-    
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.copy(position);
-    
-    // Add glow effect
-    const glowGeometry = new THREE.SphereGeometry(3, 16, 16);
-    const glowMaterial = new THREE.MeshBasicMaterial({
-      color: sampleType.color,
-      transparent: true,
-      opacity: 0.3,
-      blending: THREE.AdditiveBlending
-    });
-    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-    mesh.add(glow);
-    
-    // Add floating animation
-    const startY = position.y;
-    mesh.userData.startY = startY;
-    mesh.userData.time = Math.random() * Math.PI * 2;
-    
-    return {
-      mesh: mesh,
-      type: sampleType,
-      position: position,
-      collected: false,
-      id: `sample_${Date.now()}_${Math.random()}`
-    };
-  }
-
-  getRandomSampleType() {
-    const rarities = { common: 0.5, uncommon: 0.3, rare: 0.15, 'very rare': 0.05 };
-    const rand = Math.random();
-    let cumulative = 0;
-    
-    for (const [rarity, chance] of Object.entries(rarities)) {
-      cumulative += chance;
-      if (rand <= cumulative) {
-        const typesOfRarity = this.sampleTypes.filter(s => s.rarity === rarity);
-        return typesOfRarity[Math.floor(Math.random() * typesOfRarity.length)];
-      }
-    }
-    
-    return this.sampleTypes[0]; // fallback
-  }
-
-  getRandomPosition() {
-    const angle = Math.random() * Math.PI * 2;
-    const distance = Math.random() * 3000;
-    const x = Math.cos(angle) * distance;
-    const z = Math.sin(angle) * distance;
-    
-    // Use raycasting to place on terrain
-    const raycaster = new THREE.Raycaster();
-    raycaster.set(new THREE.Vector3(x, 1000, z), new THREE.Vector3(0, -1, 0));
-    
-    let y = 50; // default height
-    if (this.scene && this.scene.children) {
-      const intersects = raycaster.intersectObjects(this.scene.children, true);
-      if (intersects.length > 0) {
-        y = intersects[0].point.y + 3; // slightly above ground
-      }
-    }
-    
-    return new THREE.Vector3(x, y, z);
-  }
-
-  update(roverPosition) {
-    // Update sample animations
-    this.samples.forEach(sample => {
-      if (!sample.collected && sample.mesh) {
-        sample.mesh.userData.time += 0.02;
-        sample.mesh.position.y = sample.mesh.userData.startY + Math.sin(sample.mesh.userData.time) * 1;
-        sample.mesh.rotation.y += 0.01;
-        
-        // Check if rover is close enough to collect
-        const distance = roverPosition.distanceTo(sample.position);
-        if (distance < 20) {
-          // Highlight sample
-          sample.mesh.children[0].material.opacity = 0.6;
-        } else {
-          sample.mesh.children[0].material.opacity = 0.3;
-        }
-      }
-    });
-  }
-
-  collectSample(roverPosition) {
-    const currentTime = Date.now();
-    if (currentTime - this.lastSampleTime < this.sampleCooldown) {
-      return false; // Still in cooldown
-    }
-    
-    // Find closest sample
-    let closestSample = null;
-    let closestDistance = Infinity;
-    
-    this.samples.forEach(sample => {
-      if (!sample.collected) {
-        const distance = roverPosition.distanceTo(sample.position);
-        if (distance < closestDistance && distance < 20) {
-          closestDistance = distance;
-          closestSample = sample;
-        }
-      }
-    });
-    
-    if (closestSample) {
-      closestSample.collected = true;
-      this.collectedSamples.push(closestSample);
-      
-      // Remove from scene
-      this.scene.remove(closestSample.mesh);
-      
-      // Generate analysis data
-      this.generateAnalysisData(closestSample);
-      
-      // Update missions
-      if (window.missionSystem) {
-        window.missionSystem.updateMissionProgress('collect_samples');
-        if (closestSample.type.name === 'Meteorite') {
-          window.missionSystem.updateMissionProgress('collect_meteorites');
-        }
-      }
-      
-      // Show notification
-      if (window.showNotification) {
-        window.showNotification(`Collected ${closestSample.type.name} sample (${closestSample.type.rarity})`, 3000);
-      }
-      
-      this.lastSampleTime = currentTime;
-      return true;
-    }
-    
-    return false;
-  }
-
-  generateAnalysisData(sample) {
-    const data = {
-      id: sample.id,
-      name: sample.type.name,
-      rarity: sample.type.rarity,
-      composition: this.generateComposition(sample.type),
-      age: this.generateAge(sample.type),
-      origin: this.generateOrigin(sample.type),
-      analysis: sample.type.analysis,
-      collectTime: new Date().toISOString()
-    };
-    
-    this.analysisData.set(sample.id, data);
-  }
-
-  generateComposition(type) {
-    const compositions = {
-      'Rock': ['Silicon Dioxide (45%)', 'Iron Oxide (25%)', 'Magnesium Oxide (15%)', 'Calcium Oxide (10%)', 'Other (5%)'],
-      'Mineral': ['Iron Oxide (60%)', 'Silicon Dioxide (20%)', 'Aluminum Oxide (10%)', 'Magnesium Oxide (5%)', 'Other (5%)'],
-      'Meteorite': ['Iron (70%)', 'Nickel (25%)', 'Cobalt (3%)', 'Rare Elements (2%)'],
-      'Crystal': ['Silicon Dioxide (80%)', 'Aluminum Oxide (15%)', 'Trace Elements (5%)'],
-      'Soil': ['Iron Oxide (30%)', 'Silicon Dioxide (25%)', 'Magnesium Oxide (20%)', 'Perchlorates (15%)', 'Other (10%)'],
-      'Ice': ['Water Ice (95%)', 'Carbon Dioxide (3%)', 'Salts (2%)'],
-      'Volcanic Glass': ['Silicon Dioxide (70%)', 'Aluminum Oxide (15%)', 'Iron Oxide (10%)', 'Other (5%)']
-    };
-    
-    return compositions[type.name] || ['Unknown composition'];
-  }
-
-  generateAge(type) {
-    const ages = {
-      'Rock': `${Math.floor(Math.random() * 3000) + 1000} million years`,
-      'Mineral': `${Math.floor(Math.random() * 2000) + 500} million years`,
-      'Meteorite': `${Math.floor(Math.random() * 4000) + 500} million years`,
-      'Crystal': `${Math.floor(Math.random() * 1000) + 100} million years`,
-      'Soil': `${Math.floor(Math.random() * 100) + 10} million years`,
-      'Ice': `${Math.floor(Math.random() * 10) + 1} million years`,
-      'Volcanic Glass': `${Math.floor(Math.random() * 500) + 50} million years`
-    };
-    
-    return ages[type.name] || 'Unknown age';
-  }
-
-  generateOrigin(type) {
-    const origins = {
-      'Rock': 'Formed from sedimentary deposits in ancient Martian oceans',
-      'Mineral': 'Crystallized from hydrothermal vents during Mars\' volcanic period',
-      'Meteorite': 'Originated from the asteroid belt between Mars and Jupiter',
-      'Crystal': 'Formed in underground caverns through slow crystallization',
-      'Soil': 'Weathered from surface rocks by wind and temperature cycles',
-      'Ice': 'Deposited from atmospheric condensation in polar regions',
-      'Volcanic Glass': 'Formed during explosive volcanic eruptions in Tharsis region'
-    };
-    
-    return origins[type.name] || 'Unknown origin';
-  }
-
-  analyzeSample(sampleId) {
-    const data = this.analysisData.get(sampleId);
-    if (data) {
-      // Update missions
-      if (window.missionSystem) {
-        window.missionSystem.updateMissionProgress('analyze_samples');
-      }
-      
-      return data;
-    }
-    return null;
-  }
-
-  getCollectedSamples() {
-    return this.collectedSamples;
-  }
-
-  getSampleAnalysis(sampleId) {
-    return this.analysisData.get(sampleId);
-  }
-}
-
-// Global notification system
-function showNotification(message, duration = 3000) {
-  // Remove existing notifications
-  const existingNotification = document.getElementById('notification');
-  if (existingNotification) {
-    existingNotification.remove();
-  }
-  
-  // Create notification element
-  const notification = document.createElement('div');
-  notification.id = 'notification';
-  notification.textContent = message;
-  notification.style.cssText = `
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    background: rgba(0, 0, 0, 0.8);
-    color: white;
-    padding: 15px 20px;
-    border-radius: 8px;
-    font-family: Arial, sans-serif;
-    font-size: 14px;
-    z-index: 1000;
-    max-width: 300px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    border-left: 4px solid #00ff88;
-    animation: slideIn 0.3s ease-out;
-  `;
-  
-  // Add CSS animation
-  const style = document.createElement('style');
-  style.textContent = `
-    @keyframes slideIn {
-      from { transform: translateX(100%); opacity: 0; }
-      to { transform: translateX(0); opacity: 1; }
-    }
-    @keyframes slideOut {
-      from { transform: translateX(0); opacity: 1; }
-      to { transform: translateX(100%); opacity: 0; }
-    }
-  `;
-  document.head.appendChild(style);
-  
-  document.body.appendChild(notification);
-  
-  // Auto-remove notification
-  setTimeout(() => {
-    if (notification.parentNode) {
-      notification.style.animation = 'slideOut 0.3s ease-out';
-      setTimeout(() => {
-        if (notification.parentNode) {
-          notification.remove();
-        }
-      }, 300);
-    }
-  }, duration);
-}
-
-// Initialize enhanced systems
-function initializeEnhancedSystems() {
-  const perfSettings = getPerformanceSettings();
-  
-  // On mobile, only initialize essential systems
-  if (perfSettings.isMobile) {
-    // Mobile: Essential systems for basic functionality
-    window.missionSystem = new MissionSystem(); // Keep for basic functionality
-    window.sampleSystem = new SampleCollectionSystem(scene); // Keep for mobile buttons
-    window.showNotification = showNotification;
-    window.showAnalysisDialog = showAnalysisDialog; // Keep for mobile analysis
-    window.rover = rover; // Make rover globally accessible for mobile controls
-    
-    // Initialize essential UI
-    createEnhancedHUD();
-    addEnhancedControlsInfo(); // Keep for mobile instructions
-    
-    console.log('Mobile enhanced systems initialized (essential mode)');
-  } else {
-    // Desktop: Full systems
-    window.missionSystem = new MissionSystem();
-    window.sampleSystem = new SampleCollectionSystem(scene);
-    window.showNotification = showNotification;
-    window.showAnalysisDialog = showAnalysisDialog; // Make analysis dialog globally accessible for mobile
-    window.rover = rover; // Make rover globally accessible for mobile controls
-    
-    // Initialize enhanced UI
-    createEnhancedHUD();
-    
-    // Add enhanced controls information
-    addEnhancedControlsInfo();
-    
-    console.log('Enhanced systems initialized successfully!');
-  }
-}
-
-// Enhanced HUD with new features
-function createEnhancedHUD() {
-  const existingHUD = document.getElementById('hud');
-  if (existingHUD) {
-    existingHUD.remove();
-  }
-  
-  // Detect mobile device
-  const isMobile = isMobileDevice();
-  
-  const hud = document.createElement('div');
-  hud.id = 'hud';
-  
-  // Mobile-specific styles
-  if (isMobile) {
-    const perfSettings = getPerformanceSettings();
-    const mobileTier = perfSettings.mobileTier || 'low';
-    const tierColor = mobileTier === 'high' ? '#ff6b35' : mobileTier === 'medium' ? '#ffa500' : '#00ff88';
-    
-    hud.style.cssText = `
-      position: fixed;
-      top: 10px;
-      right: 10px;
-      color: white;
-      font-family: monospace;
-      font-size: 10px;
-      z-index: 100;
-      background: rgba(0, 0, 0, 0.8);
-      padding: 8px;
-      border-radius: 6px;
-      min-width: 140px;
-      max-width: 160px;
-      max-height: 40vh;
-      overflow-y: auto;
-      border: 1px solid ${tierColor};
-      transition: all 0.3s ease;
-    `;
-    
-    // Mobile tier information
-    const tierEmoji = mobileTier === 'high' ? '🔥' : mobileTier === 'medium' ? '⚡' : '📱';
-    const tierName = mobileTier === 'high' ? 'High-End' : mobileTier === 'medium' ? 'Mid-Range' : 'Budget';
-    
-    // Samsung device detection for HUD
-    const isSamsung = perfSettings.deviceInfo && perfSettings.deviceInfo.isSamsung;
-    const deviceBrand = isSamsung ? 'Samsung' : '';
-    const optimizationIndicator = isSamsung ? '🔧' : '';
-    
-    hud.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <div style="color: #00ff88; font-weight: bold; font-size: 9px;">🚀 HUD</div>
-        <div style="display: flex; gap: 4px;">
-          <button id="help-btn" style="background: none; border: none; color: #ffaa44; cursor: pointer; font-size: 10px; padding: 0;" title="Help (H)">?</button>
-          <button id="hud-toggle" style="background: none; border: none; color: #00ff88; cursor: pointer; font-size: 10px; padding: 0;">−</button>
-        </div>
-      </div>
-      <div id="hud-content">
-        <div style="color: ${tierColor}; font-size: 8px; margin-bottom: 6px; text-align: center; border-bottom: 1px solid ${tierColor}; padding-bottom: 3px;">
-          ${tierEmoji} ${deviceBrand} ${tierName} Mobile ${optimizationIndicator}
-        </div>
-        <div id="hud-status">
-          <div>Dist: <span id="distance-traveled">0</span>m</div>
-          <div>Speed: <span id="current-speed">0</span>m/s</div>
-          <div>Cam: <span id="camera-mode">3P</span></div>
-          <div>Health: <span id="rover-health">100</span>%</div>
-          <div>Fuel: <span id="rover-fuel">1000</span></div>
-        </div>
-        <div style="margin-top: 6px; border-top: 1px solid #333; padding-top: 6px;">
-          <div style="color: #88ff88; font-weight: bold; font-size: 9px;">🎯 MISSIONS</div>
-          <div>Lvl: <span id="player-level">1</span> | XP: <span id="player-xp">0</span></div>
-          <div>Act: <span id="active-missions">0</span> | Done: <span id="completed-missions">0</span></div>
-        </div>
-        <div style="margin-top: 6px; border-top: 1px solid #333; padding-top: 6px;">
-          <div style="color: #ffaa44; font-weight: bold; font-size: 9px;">🔬 SAMPLES</div>
-          <div>Coll: <span id="samples-collected">0</span> | Ana: <span id="samples-analyzed">0</span></div>
-        </div>
-        <div style="margin-top: 6px; border-top: 1px solid #333; padding-top: 6px;">
-          <div style="color: #aa44ff; font-weight: bold; font-size: 9px;">🏆 ACH</div>
-          <div>Unlocked: <span id="achievements-count">0</span></div>
-        </div>
-        <div style="margin-top: 6px; border-top: 1px solid #333; padding-top: 6px;">
-          <button id="low-power-toggle" style="
-            background: #333; 
-            border: 1px solid #666; 
-            color: #ffaa44; 
-            cursor: pointer; 
-            font-size: 8px; 
-            padding: 4px 8px; 
-            border-radius: 3px; 
-            width: 100%;
-            transition: all 0.3s ease;
-          ">⚡ Low Power Mode</button>
-        </div>
-        <div style="margin-top: 6px; border-top: 1px solid #333; padding-top: 6px;">
-          <div style="color: #88ff88; font-weight: bold; font-size: 8px; margin-bottom: 4px;">🎨 ROVER COLOR</div>
-          <div style="display: flex; gap: 2px; justify-content: space-between;">
-            <button class="color-btn" data-color="0xff4444" style="background: #ff4444; width: 18px; height: 18px; border: 1px solid #666; cursor: pointer; border-radius: 2px;"></button>
-            <button class="color-btn" data-color="0x44ff44" style="background: #44ff44; width: 18px; height: 18px; border: 1px solid #666; cursor: pointer; border-radius: 2px;"></button>
-            <button class="color-btn" data-color="0x4444ff" style="background: #4444ff; width: 18px; height: 18px; border: 1px solid #666; cursor: pointer; border-radius: 2px;"></button>
-            <button class="color-btn" data-color="0xffaa44" style="background: #ffaa44; width: 18px; height: 18px; border: 1px solid #666; cursor: pointer; border-radius: 2px;"></button>
-            <button class="color-btn" data-color="0x888888" style="background: #888888; width: 18px; height: 18px; border: 1px solid #666; cursor: pointer; border-radius: 2px;"></button>
-            <button class="color-btn" data-color="0xffffff" style="background: #ffffff; width: 18px; height: 18px; border: 1px solid #666; cursor: pointer; border-radius: 2px;"></button>
-          </div>
-        </div>
-      </div>
-    `;
-  } else {
-    // Desktop styles (unchanged)
-    hud.style.cssText = `
-      position: fixed;
-      top: 10px;
-      left: 10px;
-      color: white;
-      font-family: monospace;
-      font-size: 14px;
-      z-index: 100;
-      background: rgba(0, 0, 0, 0.7);
-      padding: 15px;
-      border-radius: 8px;
-      min-width: 250px;
-      max-height: 80vh;
-      overflow-y: auto;
-      border: 2px solid #00ff88;
-    `;
-    
-    hud.innerHTML = `
-      <div style="color: #00ff88; font-weight: bold; margin-bottom: 10px;">🚀 MARS ROVER HUD</div>
-      <div id="hud-status">
-        <div>Status: <span id="rover-status">Operational</span></div>
-        <div>Distance: <span id="distance-traveled">0</span> m</div>
-        <div>Speed: <span id="current-speed">0</span> m/s</div>
-        <div>Camera: <span id="camera-mode">Third Person</span></div>
-        <div>Health: <span id="rover-health">100</span>%</div>
-        <div>Fuel: <span id="rover-fuel">1000</span></div>
-      </div>
-      <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
-        <div style="color: #88ff88; font-weight: bold;">🎯 MISSIONS</div>
-        <div>Level: <span id="player-level">1</span></div>
-        <div>XP: <span id="player-xp">0</span></div>
-        <div>Active: <span id="active-missions">0</span></div>
-        <div>Completed: <span id="completed-missions">0</span></div>
-      </div>
-      <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
-        <div style="color: #ffaa44; font-weight: bold;">🔬 SAMPLES</div>
-        <div>Collected: <span id="samples-collected">0</span></div>
-        <div>Analyzed: <span id="samples-analyzed">0</span></div>
-      </div>
-      <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
-        <div style="color: #aa44ff; font-weight: bold;">🏆 ACHIEVEMENTS</div>
-        <div>Unlocked: <span id="achievements-count">0</span></div>
-      </div>
-      <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
-        <button id="low-power-toggle" style="
-          background: #333; 
-          border: 1px solid #666; 
-          color: #ffaa44; 
-          cursor: pointer; 
-          font-size: 12px; 
-          padding: 8px 12px; 
-          border-radius: 4px; 
-          width: 100%;
-          transition: all 0.3s ease;
-        ">⚡ Low Power Mode</button>
-      </div>
-      <div style="margin-top: 10px; border-top: 1px solid #333; padding-top: 10px;">
-        <div style="color: #88ff88; font-weight: bold; margin-bottom: 8px;">🎨 ROVER CUSTOMIZATION</div>
-        <div style="display: flex; gap: 8px; justify-content: space-between; flex-wrap: wrap;">
-          <button class="color-btn" data-color="0xff4444" style="background: #ff4444; width: 24px; height: 24px; border: 1px solid #666; cursor: pointer; border-radius: 4px;"></button>
-          <button class="color-btn" data-color="0x44ff44" style="background: #44ff44; width: 24px; height: 24px; border: 1px solid #666; cursor: pointer; border-radius: 4px;"></button>
-          <button class="color-btn" data-color="0x4444ff" style="background: #4444ff; width: 24px; height: 24px; border: 1px solid #666; cursor: pointer; border-radius: 4px;"></button>
-          <button class="color-btn" data-color="0xffaa44" style="background: #ffaa44; width: 24px; height: 24px; border: 1px solid #666; cursor: pointer; border-radius: 4px;"></button>
-          <button class="color-btn" data-color="0x888888" style="background: #888888; width: 24px; height: 24px; border: 1px solid #666; cursor: pointer; border-radius: 4px;"></button>
-          <button class="color-btn" data-color="0xffffff" style="background: #ffffff; width: 24px; height: 24px; border: 1px solid #666; cursor: pointer; border-radius: 4px;"></button>
-        </div>
-      </div>
-    `;
-  }
-  
-  document.body.appendChild(hud);
-  
-  // Add toggle functionality for mobile
-  if (isMobile) {
-    const toggleBtn = document.getElementById('hud-toggle');
-    const hudContent = document.getElementById('hud-content');
-    let isCollapsed = false;
-    
-    toggleBtn.addEventListener('click', () => {
-      if (isCollapsed) {
-        hudContent.style.display = 'block';
-        toggleBtn.textContent = '−';
-              isCollapsed = false;
-    } else {
-      hudContent.style.display = 'none';
-      toggleBtn.textContent = '+';
-      isCollapsed = true;
-    }
-  });
-  
-  // Add help button functionality
-  const helpBtn = document.getElementById('help-btn');
-  if (helpBtn) {
-    helpBtn.addEventListener('click', toggleHelpSystem);
-  }
-}
-  
-  // Add low-power toggle functionality for both mobile and desktop
-  const lowPowerToggle = document.getElementById('low-power-toggle');
-  let isLowPowerMode = false;
-  
-  if (lowPowerToggle) {
-    lowPowerToggle.addEventListener('click', () => {
-      isLowPowerMode = !isLowPowerMode;
-      
-      if (isLowPowerMode) {
-        // Enable low power mode
-        renderer.setPixelRatio(0.5); // Reduce pixel ratio for instant FPS boost
-        if (renderer.shadowMap) {
-          renderer.shadowMap.enabled = false; // Disable shadows
-        }
-        renderer.antialias = false; // Disable antialiasing
-        
-        // Update button appearance
-        lowPowerToggle.style.background = '#ff6b35';
-        lowPowerToggle.style.color = '#fff';
-        lowPowerToggle.textContent = '🔋 Low Power: ON';
-        
-        console.log('Low power mode enabled - FPS boost activated');
-      } else {
-        // Disable low power mode
-        const perfSettings = getPerformanceSettings();
-        const pixelRatio = perfSettings.isMobile ? 
-                          (perfSettings.mobileTier === 'high' ? Math.min(window.devicePixelRatio, 1.5) : 1) :
-                          Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1);
-        renderer.setPixelRatio(pixelRatio); // Restore original pixel ratio
-        
-        if (renderer.shadowMap && perfSettings.shadowQuality !== 'none') {
-          renderer.shadowMap.enabled = true; // Re-enable shadows if supported
-        }
-        renderer.antialias = perfSettings.antialiasing; // Restore antialiasing
-        
-        // Update button appearance
-        lowPowerToggle.style.background = '#333';
-        lowPowerToggle.style.color = '#ffaa44';
-        lowPowerToggle.textContent = '⚡ Low Power Mode';
-        
-        console.log('Low power mode disabled - restored original settings');
-      }
-    });
-  }
-  
-  // Add rover customization listeners
-  const colorButtons = document.querySelectorAll('.color-btn');
-  colorButtons.forEach(button => {
-    button.addEventListener('click', () => {
-      const colorHex = button.getAttribute('data-color');
-      changeRoverColor(colorHex);
-    });
-  });
-}
-
-// Change rover color
-function changeRoverColor(colorHex) {
-  const perfSettings = getPerformanceSettings();
-  if (!perfSettings.enableCustomization || !rover) return;
-  
-  const color = parseInt(colorHex);
-  let colorChanged = false;
-  
-  // Find rover body material and change color
-  rover.traverse((child) => {
-    if (child.isMesh && child.material) {
-      // Look for the main body material (marked with userData.isBody)
-      if (child.material.userData && child.material.userData.isBody) {
-        child.material.color.setHex(color);
-        // Maintain mobile emissive properties
-        if (perfSettings.isMobile) {
-          const emissiveColor = new THREE.Color(color).multiplyScalar(0.2);
-          child.material.emissive = emissiveColor;
-        }
-        colorChanged = true;
-      }
-    }
-  });
-  
-  // If no tagged material found, change the main body (largest non-wheel component)
-  if (!colorChanged) {
-    rover.traverse((child) => {
-      if (child.isMesh && child.material && child.material.color && !colorChanged) {
-        // Skip wheel materials (typically darker) and small components
-        const color = child.material.color;
-        if (color.r > 0.3 && color.g > 0.3 && color.b > 0.3) { // Likely the main body
-          child.material.color.setHex(parseInt(colorHex));
-          // Maintain mobile emissive properties
-          if (perfSettings.isMobile) {
-            const emissiveColor = new THREE.Color(parseInt(colorHex)).multiplyScalar(0.2);
-            child.material.emissive = emissiveColor;
-          }
-          colorChanged = true;
-        }
-      }
-    });
-  }
-  
-  if (colorChanged) {
-    showNotification("🎨 Rover color changed!", 1500);
-  } else {
-    showNotification("🎨 Could not change rover color", 1500);
-  }
-}
-
-// Enhanced controls information
-function addEnhancedControlsInfo() {
-  const existingControls = document.getElementById('controls');
-  if (existingControls) {
-    existingControls.remove();
-  }
-  
-  // Detect mobile device
-  const isMobile = isMobileDevice();
-  
-  // Skip creating controls panel on mobile devices
-  if (isMobile) {
-    return; // Don't create controls panel on mobile
-  }
-  
-  const controls = document.createElement('div');
-  controls.id = 'controls';
-  
-  // Desktop: Keep original layout
-  controls.style.cssText = `
-    position: fixed;
-    bottom: 10px;
-    right: 10px;
-    color: white;
-    font-family: monospace;
-    font-size: 12px;
-    z-index: 100;
-    background: rgba(0, 0, 0, 0.7);
-    padding: 15px;
-    border-radius: 8px;
-    border: 2px solid #00ff88;
-    max-width: 300px;
-  `;
-  
-  controls.innerHTML = `
-    <div style="color: #00ff88; font-weight: bold; margin-bottom: 10px;">🎮 ENHANCED CONTROLS</div>
-    <div><strong>Movement:</strong> WASD</div>
-    <div><strong>Camera:</strong> C to cycle modes</div>
-    <div><strong>Day/Night:</strong> L to toggle</div>
-    <div><strong>Samples:</strong> E to collect</div>
-    <div><strong>Analysis:</strong> Q to analyze</div>
-                <div><strong>Rockets:</strong> SpaceX starships on display</div>
-    <div style="margin-top: 10px; font-size: 10px; color: #aaa;">
-      Look for glowing objects to collect samples!<br>
-      Watch for meteor showers at night!<br>
-              SpaceX starships on display for exploration!<br>
-      Explore to find Mars colonies!
-    </div>
-  `;
-  
-  document.body.appendChild(controls);
-}
-
-// Enhanced update function for all systems
-function updateEnhancedSystems(deltaTime, roverPosition) {
-  // Update sample system
-  if (window.sampleSystem) {
-    window.sampleSystem.update(roverPosition);
-  }
-  
-  // Update HUD
-  updateEnhancedHUD();
-  
-  // Handle sample collection
-  if (keys['e']) {
-    if (window.sampleSystem) {
-      window.sampleSystem.collectSample(roverPosition);
-    }
-  }
-  
-  // Handle sample analysis
-  if (keys['q']) {
-    if (window.sampleSystem) {
-      const samples = window.sampleSystem.getCollectedSamples();
-      if (samples.length > 0) {
-        const lastSample = samples[samples.length - 1];
-        const analysis = window.sampleSystem.analyzeSample(lastSample.id);
-        if (analysis) {
-          showAnalysisDialog(analysis);
-        }
-      }
-    }
-  }
-  
-  // Manual rocket launch disabled - starships stay on ground
-  // if (keys['r']) {
-  //   if (window.marsSceneManager && window.marsSceneManager.rocketLaunchActive) {
-  //     // Prevent spamming - only allow one manual launch per 3 seconds
-  //     if (!window.lastManualRocketLaunch || Date.now() - window.lastManualRocketLaunch > 3000) {
-  //       window.lastManualRocketLaunch = Date.now();
-  //       window.marsSceneManager.triggerManualLaunch();
-  //     }
-  //   }
-  // }
-}
-
-// Update HUD with enhanced information
-function updateEnhancedHUD() {
-  // Update mission status
-  if (window.missionSystem) {
-    const status = window.missionSystem.getMissionStatus();
-    const levelEl = document.getElementById('player-level');
-    const xpEl = document.getElementById('player-xp');
-    const activeMissionsEl = document.getElementById('active-missions');
-    const completedMissionsEl = document.getElementById('completed-missions');
-    const achievementsEl = document.getElementById('achievements-count');
-    
-    if (levelEl) levelEl.textContent = status.level;
-    if (xpEl) xpEl.textContent = status.xp;
-    if (activeMissionsEl) activeMissionsEl.textContent = status.active;
-    if (completedMissionsEl) completedMissionsEl.textContent = status.completed;
-    if (achievementsEl) achievementsEl.textContent = status.achievements;
-  }
-  
-  // Update sample status
-  if (window.sampleSystem) {
-    const samples = window.sampleSystem.getCollectedSamples();
-    const analyzedCount = samples.filter(s => window.sampleSystem.getSampleAnalysis(s.id)).length;
-    const collectedEl = document.getElementById('samples-collected');
-    const analyzedEl = document.getElementById('samples-analyzed');
-    
-    if (collectedEl) collectedEl.textContent = samples.length;
-    if (analyzedEl) analyzedEl.textContent = analyzedCount;
-  }
-  
-  // Update other status
-  const distanceEl = document.getElementById('distance-traveled');
-  const speedEl = document.getElementById('current-speed');
-  
-  if (distanceEl) distanceEl.textContent = Math.round(distanceTraveled);
-  if (speedEl) speedEl.textContent = currentSpeed.toFixed(1);
-  
-  // Update camera mode with compact text for mobile
-  const isMobile = isMobileDevice();
-  const cameraElement = document.getElementById('camera-mode');
-  if (cameraElement) {
-    if (isMobile) {
-      // Compact camera mode names for mobile
-      const compactMode = cameraMode === 'Third Person' ? '3P' : 
-                         cameraMode === 'First Person' ? '1P' : 
-                         cameraMode === 'Orbit' ? 'Orbit' : 
-                         cameraMode === 'Top Down' ? 'Top' : cameraMode;
-      cameraElement.textContent = compactMode;
-    } else {
-      cameraElement.textContent = cameraMode;
-    }
-  }
-}
-
-// Show sample analysis dialog
-function showAnalysisDialog(analysis) {
-  // Remove existing dialog
-  const existingDialog = document.getElementById('analysis-dialog');
-  if (existingDialog) {
-    existingDialog.remove();
-  }
-  
-  const dialog = document.createElement('div');
-  dialog.id = 'analysis-dialog';
-  dialog.style.cssText = `
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: rgba(0, 0, 0, 0.95);
-    color: white;
-    padding: 30px;
-    border-radius: 12px;
-    font-family: monospace;
-    font-size: 14px;
-    z-index: 1500;
-    max-width: 600px;
-    border: 3px solid #00ff88;
-    box-shadow: 0 0 30px rgba(0, 255, 136, 0.3);
-  `;
-  
-  dialog.innerHTML = `
-    <div style="color: #00ff88; font-weight: bold; font-size: 18px; margin-bottom: 15px;">
-      🔬 SAMPLE ANALYSIS COMPLETE
-    </div>
-    <div style="margin-bottom: 15px;">
-      <strong>Sample:</strong> ${analysis.name} (${analysis.rarity})<br>
-      <strong>Age:</strong> ${analysis.age}<br>
-      <strong>Collection Time:</strong> ${new Date(analysis.collectTime).toLocaleString()}
-    </div>
-    <div style="margin-bottom: 15px;">
-      <strong>Composition:</strong><br>
-      ${analysis.composition.map(comp => `• ${comp}`).join('<br>')}
-    </div>
-    <div style="margin-bottom: 15px;">
-      <strong>Origin:</strong><br>
-      ${analysis.origin}
-    </div>
-    <div style="margin-bottom: 15px;">
-      <strong>Scientific Analysis:</strong><br>
-      ${analysis.analysis}
-    </div>
-    <div style="text-align: center; margin-top: 20px;">
-      <button onclick="document.getElementById('analysis-dialog').remove()" 
-              style="background: #00ff88; color: black; border: none; padding: 10px 20px; 
-                     border-radius: 5px; font-weight: bold; cursor: pointer;">
-        Close Analysis
-      </button>
-    </div>
-  `;
-  
-  document.body.appendChild(dialog);
-  
-  // Auto-close after 10 seconds
-  setTimeout(() => {
-    if (dialog.parentNode) {
-      dialog.remove();
-    }
-  }, 10000);
-}
-
-// Mobile Controls System
-class MobileControlsSystem {
-  constructor() {
-    this.joystick = {
-      element: null,
-      knob: null,
-      active: false,
-      startX: 0,
-      startY: 0,
-      currentX: 0,
-      currentY: 0,
-      maxDistance: 40
-    };
-    
-    this.camera = {
-      element: null,
-      startX: 0,
-      startY: 0,
-      sensitivity: 0.003
-    };
-    
-    this.virtualKeys = {
-      w: false,
-      a: false,
-      s: false,
-      d: false
-    };
-    
-    this.isMobile = isMobileDevice();
-    
-    if (this.isMobile) {
-      this.initializeMobileControls();
-    }
-  }
-  
-  initializeMobileControls() {
-    const mobileControls = document.getElementById('mobile-controls');
-    if (!mobileControls) return;
-    
-    mobileControls.classList.add('show');
-    
-    // Prevent page scrolling on mobile
-    document.body.style.overflow = 'hidden';
-    document.body.style.position = 'fixed';
-    document.body.style.width = '100%';
-    document.body.style.height = '100%';
-    
-    // Prevent pull-to-refresh on mobile
-    document.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-    }, { passive: false });
-    
-    this.initializeJoystick();
-    this.initializeTouchCamera();
-    this.initializeMobileButtons();
-  }
-  
-  initializeJoystick() {
-    this.joystick.element = document.getElementById('virtual-joystick');
-    this.joystick.knob = document.getElementById('joystick-knob');
-    
-    if (!this.joystick.element || !this.joystick.knob) return;
-    
-    // Touch start
-    this.joystick.element.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      const touch = e.touches[0];
-      const rect = this.joystick.element.getBoundingClientRect();
-      
-      this.joystick.active = true;
-      this.joystick.startX = rect.left + rect.width / 2;
-      this.joystick.startY = rect.top + rect.height / 2;
-      
-      // Add haptic feedback if available
-      if (navigator.vibrate) {
-        navigator.vibrate(50);
-      }
-      
-      // Visual feedback
-      this.joystick.element.style.background = 'rgba(255, 107, 53, 0.3)';
-      
-      this.updateJoystick(touch.clientX, touch.clientY);
-    });
-    
-    // Touch move
-    this.joystick.element.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-      if (!this.joystick.active) return;
-      
-      const touch = e.touches[0];
-      this.updateJoystick(touch.clientX, touch.clientY);
-    });
-    
-    // Touch end
-    const endTouch = () => {
-      this.joystick.active = false;
-      this.joystick.knob.style.transform = 'translate(-50%, -50%)';
-      
-      // Reset visual feedback
-      this.joystick.element.style.background = 'rgba(0, 0, 0, 0.4)';
-      
-      this.resetVirtualKeys();
-    };
-    
-    this.joystick.element.addEventListener('touchend', endTouch);
-    this.joystick.element.addEventListener('touchcancel', endTouch);
-  }
-  
-  updateJoystick(clientX, clientY) {
-    const deltaX = clientX - this.joystick.startX;
-    const deltaY = clientY - this.joystick.startY;
-    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-    
-    if (distance <= this.joystick.maxDistance) {
-      this.joystick.currentX = deltaX;
-      this.joystick.currentY = deltaY;
-    } else {
-      const angle = Math.atan2(deltaY, deltaX);
-      this.joystick.currentX = Math.cos(angle) * this.joystick.maxDistance;
-      this.joystick.currentY = Math.sin(angle) * this.joystick.maxDistance;
-    }
-    
-    // Update knob position
-    this.joystick.knob.style.transform = 
-      `translate(${-50 + this.joystick.currentX}%, ${-50 + this.joystick.currentY}%)`;
-    
-    // Update virtual keys based on joystick position
-    this.updateVirtualKeys();
-  }
-  
-  updateVirtualKeys() {
-    const threshold = 15;
-    
-    this.virtualKeys.w = this.joystick.currentY < -threshold;
-    this.virtualKeys.s = this.joystick.currentY > threshold;
-    this.virtualKeys.a = this.joystick.currentX < -threshold;
-    this.virtualKeys.d = this.joystick.currentX > threshold;
-    
-    // Update the global keys object if it exists
-    if (typeof window.keys !== 'undefined') {
-      Object.assign(window.keys, this.virtualKeys);
-    }
-    
-    // Dispatch key events for compatibility
-    this.dispatchKeyEvents();
-  }
-  
-  dispatchKeyEvents() {
-    Object.keys(this.virtualKeys).forEach(key => {
-      if (this.virtualKeys[key] !== this.lastKeys?.[key]) {
-        const event = new KeyboardEvent(
-          this.virtualKeys[key] ? 'keydown' : 'keyup',
-          { key: key, bubbles: true }
-        );
-        document.dispatchEvent(event);
-      }
-    });
-    
-    this.lastKeys = { ...this.virtualKeys };
-  }
-  
-  resetVirtualKeys() {
-    Object.keys(this.virtualKeys).forEach(key => {
-      this.virtualKeys[key] = false;
-    });
-    
-    if (typeof window.keys !== 'undefined') {
-      Object.assign(window.keys, this.virtualKeys);
-    }
-    
-    this.dispatchKeyEvents();
-  }
-  
-  initializeTouchCamera() {
-    this.camera.element = document.getElementById('touch-camera-area');
-    if (!this.camera.element) return;
-    
-    let lastTouchX = 0;
-    let lastTouchY = 0;
-    
-    this.camera.element.addEventListener('touchstart', (e) => {
-      if (e.touches.length === 1) {
-        lastTouchX = e.touches[0].clientX;
-        lastTouchY = e.touches[0].clientY;
-      }
-    });
-    
-    this.camera.element.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-      
-      if (e.touches.length === 1) {
-        const touch = e.touches[0];
-        const deltaX = touch.clientX - lastTouchX;
-        const deltaY = touch.clientY - lastTouchY;
-        
-        // Simulate mouse movement for camera controls
-        if (window.cameraMode === 'orbit' && window.controls) {
-          // For orbit controls
-          window.controls.object.rotation.y -= deltaX * this.camera.sensitivity;
-          window.controls.object.rotation.x -= deltaY * this.camera.sensitivity;
-        } else {
-          // For other camera modes, update rover rotation
-          if (typeof window.roverYaw !== 'undefined') {
-            window.roverYaw -= deltaX * this.camera.sensitivity;
-          }
-        }
-        
-        lastTouchX = touch.clientX;
-        lastTouchY = touch.clientY;
-      }
-    });
-  }
-  
-  initializeMobileButtons() {
-    const sampleBtn = document.getElementById('mobile-sample-btn');
-    const analyzeBtn = document.getElementById('mobile-analyze-btn');
-    const rocketBtn = document.getElementById('mobile-rocket-btn');
-    const cameraBtn = document.getElementById('mobile-camera-btn');
-    
-    // Enhanced button handler with debouncing
-    const createButtonHandler = (button, action, cooldown = 500) => {
-      let lastPress = 0;
-      let isPressed = false;
-      
-      const handlePress = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        
-        const now = Date.now();
-        if (now - lastPress < cooldown || isPressed) {
-          return;
-        }
-        
-        isPressed = true;
-        lastPress = now;
-        
-        // Visual feedback
-        button.style.transform = 'scale(0.85)';
-        button.style.background = 'rgba(255, 107, 53, 0.9)';
-        button.style.borderColor = 'rgba(255, 107, 53, 1)';
-        
-        // Haptic feedback
-        if (navigator.vibrate) {
-          navigator.vibrate(80);
-        }
-        
-        // Execute action
-        setTimeout(() => {
-          action();
-          
-          // Reset visual feedback
-          setTimeout(() => {
-            button.style.transform = 'scale(1)';
-            button.style.background = 'rgba(0, 0, 0, 0.6)';
-            button.style.borderColor = 'rgba(255, 107, 53, 0.5)';
-            isPressed = false;
-          }, 100);
-        }, 50);
-      };
-      
-      // Use touchend for better control
-      button.addEventListener('touchend', handlePress);
-      
-      // Prevent context menu and other touch interference
-      button.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      });
-      
-      button.addEventListener('touchmove', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      });
-      
-      button.addEventListener('touchcancel', (e) => {
-        e.preventDefault();
-        button.style.transform = 'scale(1)';
-        button.style.background = 'rgba(0, 0, 0, 0.6)';
-        button.style.borderColor = 'rgba(255, 107, 53, 0.5)';
-        isPressed = false;
-      });
-    };
-    
-    // Sample Collection Button (E key equivalent)
-    if (sampleBtn) {
-      createButtonHandler(sampleBtn, () => {
-        if (window.keys && window.sampleSystem && window.rover) {
-          const collected = window.sampleSystem.collectSample(window.rover.position);
-          if (collected) {
-            this.showMobileNotification('💎 Sample Collected!', '#00ff88');
-          } else {
-            this.showMobileNotification('No samples nearby', '#ffaa44');
-          }
-        }
-      }, 600);
-    }
-    
-    // Sample Analysis Button (Q key equivalent)
-    if (analyzeBtn) {
-      createButtonHandler(analyzeBtn, () => {
-        if (window.sampleSystem) {
-          const samples = window.sampleSystem.getCollectedSamples();
-          if (samples.length > 0) {
-            const lastSample = samples[samples.length - 1];
-            const analysis = window.sampleSystem.analyzeSample(lastSample.id);
-            if (analysis && window.showAnalysisDialog) {
-              window.showAnalysisDialog(analysis);
-              this.showMobileNotification('🔬 Analysis Ready!', '#00ff88');
-            }
-          } else {
-            this.showMobileNotification('No samples to analyze', '#ffaa44');
-          }
-        }
-      }, 800);
-    }
-    
-    // Rocket Launch Button (R key equivalent)
-    if (rocketBtn) {
-      createButtonHandler(rocketBtn, () => {
-        if (window.marsSceneManager && window.marsSceneManager.rocketLaunchActive) {
-          if (!window.lastManualRocketLaunch || Date.now() - window.lastManualRocketLaunch > 3000) {
-            window.lastManualRocketLaunch = Date.now();
-            window.marsSceneManager.triggerManualLaunch();
-            this.showMobileNotification('🚀 Rocket Launch!', '#00ff88');
-          } else {
-            this.showMobileNotification('Rocket cooldown...', '#ffaa44');
-          }
-        } else {
-          this.showMobileNotification('Rockets optimized for mobile!', '#00ff88');
-        }
-      }, 1000);
-    }
-    
-    // Camera Toggle Button (C key equivalent)
-    if (cameraBtn) {
-      createButtonHandler(cameraBtn, () => {
-        if (typeof window.toggleCameraMode === 'function') {
-          window.toggleCameraMode();
-          this.showCameraModeIndicator();
-        }
-      }, 400);
-    }
-  }
-  
-  showCameraModeIndicator() {
-    const cameraMode = window.cameraMode || 'thirdPerson';
-    const modeNames = {
-      'orbit': '🌍 Orbit View',
-      'thirdPerson': '🚗 Third Person',
-      'firstPerson': '👁️ First Person'
-    };
-    
-    this.showMobileNotification(modeNames[cameraMode] || '📷 Camera Mode', '#00ff88');
-  }
-  
-  showMobileNotification(message, color = '#00ff88') {
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-      position: fixed;
-      top: 20px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.9);
-      color: white;
-      padding: 12px 24px;
-      border-radius: 25px;
-      z-index: 10003;
-      font-size: 16px;
-      font-weight: bold;
-      transition: all 0.3s ease;
-      border: 2px solid ${color};
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-      backdrop-filter: blur(10px);
-    `;
-    
-    notification.textContent = message;
-    document.body.appendChild(notification);
-    
-    // Fade out and remove
-    setTimeout(() => {
-      notification.style.opacity = '0';
-      notification.style.transform = 'translateX(-50%) translateY(-20px)';
-      setTimeout(() => {
-        if (notification.parentNode) {
-          notification.parentNode.removeChild(notification);
-        }
-      }, 300);
-    }, 2000);
-  }
-}
-
-// Initialize enhanced systems after a short delay
-setTimeout(() => {
-  initializeEnhancedSystems();
-  
-  // Initialize mobile controls if on mobile device
-  if (isMobileDevice()) {
-    window.mobileControls = new MobileControlsSystem();
-  }
-  
-  // Show welcome message with device-specific information
-  setTimeout(() => {
-    if (window.showNotification) {
-      const perfSettings = getPerformanceSettings();
-      if (perfSettings.isMobile) {
-        console.log('Mobile mode initialized with settings:', perfSettings);
-        const mobileTier = perfSettings.mobileTier || 'low';
-        const tierEmoji = mobileTier === 'high' ? '🔥' : mobileTier === 'medium' ? '⚡' : '📱';
-        const tierMessage = mobileTier === 'high' ? 'High-End Mobile' : 
-                           mobileTier === 'medium' ? 'Mid-Range Mobile' : 'Mobile Optimized';
-        
-        // Add emergency performance messaging for mobile
-        const performanceStatus = ' Emergency performance mode active for stability!';
-        const deviceMessage = perfSettings.samsungOptimized ? 
-          `${tierEmoji} Samsung ${tierMessage}! Emergency optimizations applied for maximum performance!${performanceStatus}` :
-          `${tierEmoji} ${tierMessage}! Emergency performance mode enabled. Graphics reduced for stability.${performanceStatus}`;
-        
-        window.showNotification(deviceMessage, 5000);
-      } else {
-        window.showNotification('🚀 Mars Rover Ready! WASD to move, C for camera, R for rockets!', 5000);
-      }
-    }
-  }, 2000);
-  
-  // Set up global controls for easy access (only after mars scene manager is ready)
-  setTimeout(() => {
-    const perfSettings = getPerformanceSettings();
-    
-    if (window.marsSceneManager) {
-      // Global rocket launch controls
-      window.rocketLaunchControls = {
-        enableLaunches: () => window.marsSceneManager.enableRocketLaunches(),
-        disableLaunches: () => window.marsSceneManager.disableRocketLaunches(),
-        manualLaunch: (pattern) => window.marsSceneManager.triggerManualLaunch(pattern || 'single'),
-        setInterval: (ms) => window.marsSceneManager.setRocketLaunchInterval(ms)
-      };
-      
-      // Rocket system ready notification removed - starships stay on ground
-      // if (window.showNotification && !perfSettings.isMobile) {
-      //   window.showNotification('🚀 Rocket System Ready! Press R for manual launch!', 4000);
-      // }
-    } else if (perfSettings.isMobile) {
-      // Mobile-specific performance notification with feature details
-      if (window.showNotification) {
-        const mobileTier = perfSettings.mobileTier || 'low';
-        let featureMessage = '';
-        
-        if (mobileTier === 'high') {
-          featureMessage = '🔥 High-End Mobile: Enhanced terrain, rockets enabled, atmospheric effects active!';
-        } else if (mobileTier === 'medium') {
-          featureMessage = '⚡ Mid-Range Mobile: Improved terrain, rockets enabled with enhanced visibility!';
-        } else {
-          featureMessage = '📱 Mobile Optimized: Essential features enabled for best performance!';
-        }
-        
-        window.showNotification(featureMessage, 4000);
-      }
-    }
-    
-    // Add performance mode toggle
-    window.performanceMode = {
-      enable: () => {
-        if (window.marsSceneManager) window.marsSceneManager.disableRocketLaunches();
-        if (window.showNotification) window.showNotification('Performance Mode ENABLED - Heavy effects disabled', 3000);
-      },
-      disable: () => {
-        if (window.marsSceneManager) window.marsSceneManager.enableRocketLaunches();
-        if (window.showNotification) window.showNotification('Performance Mode DISABLED - All effects enabled', 3000);
-      }
-         };
-   }, 8000);
-}, 1000);
