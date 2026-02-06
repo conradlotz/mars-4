@@ -1878,35 +1878,111 @@ class MarsSceneManager {
     }
 
     // Background elements removed - keeping only terrain and sky
+
+    // Lightweight colony + rocket traffic system
+    this.rockets = [];
+    this.rocketTrafficEnabled = true;
+    this.rocketSystemStartTime = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now()
+      : Date.now();
+    this.rocketCycleDuration = 60000; // one full launch+arrival cycle per minute
+
+    console.log('🏗️ MARS SCENE MANAGER: About to create colony infrastructure');
+    this.createColonyInfrastructure();
+    console.log('🏗️ MARS SCENE MANAGER: About to initialize rocket launch system');
+    this.initializeRocketLaunchSystem();
+
+    console.log('✅ ✅ ✅ MarsSceneManager constructed with terrainSize=', terrainSize);
+    console.log('Colony and rockets should now be visible in the scene!');
   }
 
   initializeRocketLaunchSystem() {
-    // Rocket launch system removed - keeping only terrain and sky
+    if (this.rockets && this.rockets.length > 0) return;
+
+    // Position rocket pads near the futuristic colony
+    const padPositions = [
+      new THREE.Vector3(-540, 0, -480),
+      new THREE.Vector3(-440, 0, -520),
+      new THREE.Vector3(-340, 0, -520),
+      new THREE.Vector3(-240, 0, -480),
+      new THREE.Vector3(-390, 0, -570)
+    ];
+
+    this.rockets = [];
+
+    padPositions.forEach((padPos, index) => {
+      // For reliability, keep pads near nominal ground level; terrain is centered at y≈0
+      const groundY = 0;
+
+      // Simple hex pad
+      const padGeometry = new THREE.CylinderGeometry(22, 22, 3, 6);
+      const padMaterial = new THREE.MeshStandardMaterial({
+        color: 0x555555,
+        roughness: 0.9,
+        metalness: 0.2
+      });
+      const pad = new THREE.Mesh(padGeometry, padMaterial);
+      pad.position.set(padPos.x, groundY + 1.5, padPos.z);
+      pad.receiveShadow = true;
+      this.scene.add(pad);
+
+      // Create rocket on the pad
+      const rocket = this.createSimpleRocket();
+      rocket.position.set(padPos.x, groundY, padPos.z);
+      this.addRocketEffects(rocket, 'launch');
+      this.scene.add(rocket);
+
+      // Phase offset so rockets are staggered in the cycle
+      const phaseOffset = index / padPositions.length;
+
+      this.rockets.push({
+        mesh: rocket,
+        padY: groundY,
+        phaseOffset,
+        maxHeight: 650 + Math.random() * 150
+      });
+    });
+
+    if (typeof console !== 'undefined') {
+      console.log('MarsSceneManager: created rocket pads and rockets:', this.rockets.length);
+    }
   }
 
   // Control methods for rocket launch system
   setRocketLaunchInterval(milliseconds) {
-    // Rocket launch system removed - keeping only terrain and sky
+    // Kept for API compatibility; rocket system uses fixed 60s cycle
+    this.rocketCycleDuration = Math.max(15000, milliseconds || this.rocketCycleDuration);
   }
 
   enableRocketLaunches() {
-    // Rocket launch system removed - keeping only terrain and sky
+    this.rocketTrafficEnabled = true;
   }
 
   disableRocketLaunches() {
-    // Rocket launch system removed - keeping only terrain and sky
+    this.rocketTrafficEnabled = false;
+    if (this.rockets) {
+      this.rockets.forEach(r => {
+        if (r && r.mesh) {
+          r.mesh.visible = false;
+        }
+      });
+    }
   }
 
   triggerManualLaunch(patternType = 'random') {
-    // Rocket launch system removed - keeping only terrain and sky
+    // Optional hook for future manual launch patterns
+    this.rocketSystemStartTime = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now()
+      : Date.now();
   }
 
   startRocketLaunchCycle() {
-    // Rocket launch system removed - keeping only terrain and sky
+    this.enableRocketLaunches();
+    this.triggerManualLaunch('reset');
   }
 
   triggerRocketLaunchSequence() {
-    // Rocket launch system removed - keeping only terrain and sky
+    this.startRocketLaunchCycle();
   }
 
   // --- UPDATE animated objects ---
@@ -1921,6 +1997,320 @@ class MarsSceneManager {
         anim.mesh.rotation.y += anim.speed;
       }
     }
+  }
+
+  // Create a high-definition futuristic colony
+  createColonyInfrastructure() {
+    const structures = [];
+    
+    // Position colony further away and to the side for better view
+    const colonyOffsetX = -400;
+    const colonyOffsetZ = -600;
+    const groundY = 0;
+    
+    // === MAIN BIODOME - Large central structure ===
+    const mainDomeRadius = 80;
+    const mainDomeGeometry = new THREE.SphereGeometry(mainDomeRadius, 64, 32);
+    const mainDomeMaterial = new THREE.MeshStandardMaterial({
+      color: 0xccddff,
+      roughness: 0.1,
+      metalness: 0.3,
+      transparent: true,
+      opacity: 0.7,
+      side: THREE.DoubleSide,
+      envMapIntensity: 1.5
+    });
+    const mainDome = new THREE.Mesh(mainDomeGeometry, mainDomeMaterial);
+    mainDome.position.set(colonyOffsetX, groundY + mainDomeRadius * 0.6, colonyOffsetZ);
+    mainDome.scale.y = 0.6; // Flattened dome
+    mainDome.castShadow = true;
+    mainDome.receiveShadow = true;
+    this.scene.add(mainDome);
+    structures.push(mainDome);
+    
+    // Glass panels on main dome
+    const panelCount = 12;
+    for (let i = 0; i < panelCount; i++) {
+      const angle = (i / panelCount) * Math.PI * 2;
+      const panelGeometry = new THREE.BoxGeometry(15, 50, 2);
+      const panelMaterial = new THREE.MeshStandardMaterial({
+        color: 0x88aaff,
+        roughness: 0.05,
+        metalness: 0.9,
+        transparent: true,
+        opacity: 0.6
+      });
+      const panel = new THREE.Mesh(panelGeometry, panelMaterial);
+      const radius = mainDomeRadius * 0.95;
+      panel.position.set(
+        Math.cos(angle) * radius,
+        25,
+        Math.sin(angle) * radius
+      );
+      panel.rotation.y = angle;
+      panel.castShadow = true;
+      mainDome.add(panel);
+    }
+    
+    // === HABITAT TOWERS - Sleek cylindrical towers ===
+    const towerPositions = [
+      { x: -120, z: -80 },
+      { x: -80, z: -120 },
+      { x: 80, z: -80 },
+      { x: 120, z: -120 }
+    ];
+    
+    towerPositions.forEach((pos, index) => {
+      const towerHeight = 100 + Math.random() * 40;
+      
+      // Main tower body
+      const towerGeometry = new THREE.CylinderGeometry(18, 20, towerHeight, 32);
+      const towerMaterial = new THREE.MeshStandardMaterial({
+        color: 0xd0d8e0,
+        roughness: 0.3,
+        metalness: 0.8
+      });
+      const tower = new THREE.Mesh(towerGeometry, towerMaterial);
+      tower.position.set(
+        colonyOffsetX + pos.x,
+        groundY + towerHeight / 2,
+        colonyOffsetZ + pos.z
+      );
+      tower.castShadow = true;
+      tower.receiveShadow = true;
+      this.scene.add(tower);
+      structures.push(tower);
+      
+      // Tower rings (futuristic detail)
+      for (let i = 0; i < 5; i++) {
+        const ringGeometry = new THREE.TorusGeometry(22, 1.5, 16, 32);
+        const ringMaterial = new THREE.MeshStandardMaterial({
+          color: 0x4488ff,
+          roughness: 0.2,
+          metalness: 0.9,
+          emissive: 0x2244aa,
+          emissiveIntensity: 0.3
+        });
+        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+        ring.position.y = -towerHeight / 2 + (i + 1) * (towerHeight / 6);
+        ring.rotation.x = Math.PI / 2;
+        tower.add(ring);
+      }
+      
+      // Top dome/observation deck
+      const topDomeGeometry = new THREE.SphereGeometry(24, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+      const topDomeMaterial = new THREE.MeshStandardMaterial({
+        color: 0x88ccff,
+        roughness: 0.1,
+        metalness: 0.5,
+        transparent: true,
+        opacity: 0.8
+      });
+      const topDome = new THREE.Mesh(topDomeGeometry, topDomeMaterial);
+      topDome.position.y = towerHeight / 2;
+      tower.add(topDome);
+      
+      // Communication antenna
+      const antennaGeometry = new THREE.CylinderGeometry(0.5, 0.5, 30, 8);
+      const antennaMaterial = new THREE.MeshStandardMaterial({
+        color: 0x888888,
+        roughness: 0.4,
+        metalness: 0.9
+      });
+      const antenna = new THREE.Mesh(antennaGeometry, antennaMaterial);
+      antenna.position.y = towerHeight / 2 + 35;
+      tower.add(antenna);
+      
+      // Antenna light
+      const antennaLight = new THREE.PointLight(0xff4444, 0.8, 100);
+      antennaLight.position.y = towerHeight / 2 + 50;
+      tower.add(antennaLight);
+      
+      // Blinking animation
+      this.animatedObjects.push({
+        mesh: antennaLight,
+        type: 'blink',
+        phase: index * Math.PI / 2
+      });
+    });
+    
+    // === SOLAR FARM - Array of solar panels ===
+    const solarPanelRows = 8;
+    const solarPanelCols = 12;
+    for (let row = 0; row < solarPanelRows; row++) {
+      for (let col = 0; col < solarPanelCols; col++) {
+        const panelGeometry = new THREE.BoxGeometry(8, 0.3, 12);
+        const panelMaterial = new THREE.MeshStandardMaterial({
+          color: 0x1a3366,
+          roughness: 0.2,
+          metalness: 0.8,
+          emissive: 0x0a1a44,
+          emissiveIntensity: 0.2
+        });
+        const panel = new THREE.Mesh(panelGeometry, panelMaterial);
+        
+        const x = colonyOffsetX + 150 + col * 10;
+        const z = colonyOffsetZ - 100 + row * 14;
+        
+        panel.position.set(x, groundY + 3, z);
+        panel.rotation.x = -Math.PI / 6; // Tilted for sun
+        panel.castShadow = true;
+        panel.receiveShadow = true;
+        this.scene.add(panel);
+        structures.push(panel);
+        
+        // Support pole
+        const poleGeometry = new THREE.CylinderGeometry(0.4, 0.4, 6, 8);
+        const poleMaterial = new THREE.MeshStandardMaterial({
+          color: 0x666666,
+          roughness: 0.6,
+          metalness: 0.7
+        });
+        const pole = new THREE.Mesh(poleGeometry, poleMaterial);
+        pole.position.set(x, groundY + 1.5, z + 3);
+        this.scene.add(pole);
+      }
+    }
+    
+    // === CONNECTING TUNNELS - Transparent walkways ===
+    const tunnelPositions = [
+      { start: { x: -100, z: -80 }, end: { x: 0, z: -100 } },
+      { start: { x: 100, z: -80 }, end: { x: 0, z: -100 } },
+      { start: { x: -100, z: -120 }, end: { x: -100, z: -80 } },
+      { start: { x: 100, z: -120 }, end: { x: 100, z: -80 } }
+    ];
+    
+    tunnelPositions.forEach(tunnel => {
+      const tunnelLength = Math.sqrt(
+        Math.pow(tunnel.end.x - tunnel.start.x, 2) +
+        Math.pow(tunnel.end.z - tunnel.start.z, 2)
+      );
+      
+      const tunnelGeometry = new THREE.CylinderGeometry(6, 6, tunnelLength, 16);
+      const tunnelMaterial = new THREE.MeshStandardMaterial({
+        color: 0xaaccff,
+        roughness: 0.1,
+        metalness: 0.3,
+        transparent: true,
+        opacity: 0.4
+      });
+      const tunnelMesh = new THREE.Mesh(tunnelGeometry, tunnelMaterial);
+      
+      const midX = (tunnel.start.x + tunnel.end.x) / 2;
+      const midZ = (tunnel.start.z + tunnel.end.z) / 2;
+      
+      tunnelMesh.position.set(
+        colonyOffsetX + midX,
+        groundY + 8,
+        colonyOffsetZ + midZ
+      );
+      
+      const angle = Math.atan2(
+        tunnel.end.z - tunnel.start.z,
+        tunnel.end.x - tunnel.start.x
+      );
+      tunnelMesh.rotation.z = Math.PI / 2;
+      tunnelMesh.rotation.y = angle;
+      
+      tunnelMesh.castShadow = true;
+      tunnelMesh.receiveShadow = true;
+      this.scene.add(tunnelMesh);
+      structures.push(tunnelMesh);
+    });
+    
+    // === RADAR DISH - Rotating satellite dish ===
+    const dishBaseGeometry = new THREE.CylinderGeometry(4, 6, 12, 16);
+    const dishBaseMaterial = new THREE.MeshStandardMaterial({
+      color: 0x999999,
+      roughness: 0.5,
+      metalness: 0.7
+    });
+    const dishBase = new THREE.Mesh(dishBaseGeometry, dishBaseMaterial);
+    dishBase.position.set(colonyOffsetX - 150, groundY + 6, colonyOffsetZ + 50);
+    this.scene.add(dishBase);
+    structures.push(dishBase);
+    
+    const dishGeometry = new THREE.CylinderGeometry(25, 25, 3, 32);
+    const dishMaterial = new THREE.MeshStandardMaterial({
+      color: 0xcccccc,
+      roughness: 0.3,
+      metalness: 0.8
+    });
+    const dish = new THREE.Mesh(dishGeometry, dishMaterial);
+    dish.position.y = 18;
+    dish.rotation.x = Math.PI / 3;
+    dishBase.add(dish);
+    
+    // Rotate the dish
+    this.animatedObjects.push({
+      mesh: dishBase,
+      type: 'rotate',
+      speed: 0.002
+    });
+    
+    // === ATMOSPHERIC LIGHTING ===
+    // Main colony ambient light
+    const colonyAmbient = new THREE.PointLight(0xffffff, 1.2, 300);
+    colonyAmbient.position.set(colonyOffsetX, groundY + 80, colonyOffsetZ);
+    this.scene.add(colonyAmbient);
+    
+    // Accent lights around structures
+    const accentLightPositions = [
+      { x: colonyOffsetX - 120, z: colonyOffsetZ - 80 },
+      { x: colonyOffsetX + 120, z: colonyOffsetZ - 80 },
+      { x: colonyOffsetX, z: colonyOffsetZ - 150 },
+      { x: colonyOffsetX - 80, z: colonyOffsetZ - 120 },
+      { x: colonyOffsetX + 80, z: colonyOffsetZ - 120 }
+    ];
+    
+    accentLightPositions.forEach((pos, index) => {
+      const light = new THREE.PointLight(0x88ccff, 0.8, 120);
+      light.position.set(pos.x, groundY + 15, pos.z);
+      this.scene.add(light);
+      
+      // Add light glow sphere
+      const glowGeometry = new THREE.SphereGeometry(3, 16, 16);
+      const glowMaterial = new THREE.MeshBasicMaterial({
+        color: 0x88ccff,
+        transparent: true,
+        opacity: 0.6
+      });
+      const glowSphere = new THREE.Mesh(glowGeometry, glowMaterial);
+      glowSphere.position.copy(light.position);
+      this.scene.add(glowSphere);
+      
+      this.animatedObjects.push({
+        mesh: glowSphere,
+        type: 'blink',
+        phase: index * Math.PI / 3
+      });
+    });
+    
+    // Perimeter lights
+    const perimeterRadius = 200;
+    const perimeterLights = 16;
+    for (let i = 0; i < perimeterLights; i++) {
+      const angle = (i / perimeterLights) * Math.PI * 2;
+      const x = colonyOffsetX + Math.cos(angle) * perimeterRadius;
+      const z = colonyOffsetZ + Math.sin(angle) * perimeterRadius;
+      
+      const perimeterLight = new THREE.PointLight(0xff8844, 0.4, 80);
+      perimeterLight.position.set(x, groundY + 5, z);
+      this.scene.add(perimeterLight);
+      
+      // Small light post
+      const postGeometry = new THREE.CylinderGeometry(0.5, 0.8, 8, 8);
+      const postMaterial = new THREE.MeshStandardMaterial({
+        color: 0x555555,
+        roughness: 0.7,
+        metalness: 0.6
+      });
+      const post = new THREE.Mesh(postGeometry, postMaterial);
+      post.position.set(x, groundY + 4, z);
+      this.scene.add(post);
+    }
+    
+    console.log('✅ High-definition futuristic colony created:', structures.length, 'main structures');
   }
 
   createLaunchSites() {
@@ -2044,9 +2434,131 @@ class MarsSceneManager {
 
     // Update animated objects and vehicle convoys
     this.updateAnimations(performance.now());
-    
-    // Rocket events removed - keeping only terrain and sky
-    // this.updateActiveEvents();
+
+    // Continuous rocket traffic around the colony
+    this.updateRocketTraffic((typeof performance !== 'undefined' && performance.now)
+      ? performance.now()
+      : Date.now());
+  }
+
+  // Simple time-based rocket launch/arrival cycles using the pre-created rockets
+  updateRocketTraffic(currentTime) {
+    if (!this.rocketTrafficEnabled || !this.rockets || this.rockets.length === 0) return;
+
+    const cycle = this.rocketCycleDuration || 60000;
+    const baseTime = (currentTime - this.rocketSystemStartTime) % cycle;
+    const tGlobal = baseTime / cycle; // 0..1 over one minute
+
+    this.rockets.forEach(rocketInfo => {
+      const { mesh, padY, phaseOffset, maxHeight } = rocketInfo;
+      if (!mesh) return;
+
+      // Each rocket runs through a full launch + cruise + landing every cycle,
+      // staggered by phaseOffset so there's always traffic.
+      let t = (tGlobal + phaseOffset) % 1;
+
+      // Timeline with 10-second pauses:
+      // 0.0 - 0.17: Grounded before launch (10s pause at 60s cycle)
+      // 0.17 - 0.35: Launch (ascending)
+      // 0.35 - 0.65: Cruise (coasting high)
+      // 0.65 - 0.83: Landing (descending)
+      // 0.83 - 1.0: Grounded after landing (10s pause)
+      
+      let height;
+      let isLaunching = false;
+      let isLanding = false;
+      
+      if (t < 0.17) {
+        // Grounded before launch - 10 second pause
+        height = 0;
+      } else if (t < 0.35) {
+        // Launch phase
+        isLaunching = true;
+        const local = (t - 0.17) / 0.18;
+        // Ease out for powerful start, then gradual acceleration
+        const eased = local < 0.5 ? 2 * local * local : 1 - Math.pow(-2 * local + 2, 2) / 2;
+        height = maxHeight * eased;
+      } else if (t < 0.65) {
+        // Cruise phase
+        height = maxHeight;
+      } else if (t < 0.83) {
+        // Landing phase
+        isLanding = true;
+        const local = (t - 0.65) / 0.18;
+        // Ease in for controlled descent
+        const eased = local < 0.5 ? 2 * local * local : 1 - Math.pow(-2 * local + 2, 2) / 2;
+        height = maxHeight * (1 - eased);
+      } else {
+        // Grounded after landing - 10 second pause
+        height = 0;
+      }
+
+      mesh.visible = true;
+      mesh.position.y = padY + height;
+
+      // Gentle roll during flight
+      if (height > 20) {
+        mesh.rotation.z = Math.sin(t * Math.PI * 4) * 0.06;
+      } else {
+        mesh.rotation.z = 0;
+      }
+
+      // Animate exhaust particles with BIGGER effect during launch/landing
+      if (mesh.userData && typeof mesh.userData.animateParticles === 'function') {
+        if (isLaunching || isLanding || height < 50) {
+          mesh.userData.animateParticles();
+          // Intensify effects during initial blast-off
+          if (isLaunching && height < maxHeight * 0.3) {
+            mesh.userData.animateParticles(); // Call twice for double intensity
+          }
+        }
+      }
+      
+      // Control exhaust visibility and intensity
+      if (mesh.userData.exhaustCone) {
+        if (isLaunching && height < maxHeight * 0.4) {
+          // BIG blast-off effect
+          mesh.userData.exhaustCone.visible = true;
+          mesh.userData.exhaustCone.scale.set(2.5, 2.5, 2.5);
+          if (mesh.userData.exhaustGlow) {
+            mesh.userData.exhaustGlow.visible = true;
+            mesh.userData.exhaustGlow.scale.set(2.5, 2.5, 2.5);
+          }
+          if (mesh.userData.engineLight) {
+            mesh.userData.engineLight.intensity = 4;
+          }
+        } else if (isLanding && height < maxHeight * 0.3) {
+          // Landing burn
+          mesh.userData.exhaustCone.visible = true;
+          mesh.userData.exhaustCone.scale.set(1.5, 1.5, 1.5);
+          if (mesh.userData.exhaustGlow) {
+            mesh.userData.exhaustGlow.visible = true;
+            mesh.userData.exhaustGlow.scale.set(1.5, 1.5, 1.5);
+          }
+          if (mesh.userData.engineLight) {
+            mesh.userData.engineLight.intensity = 2;
+          }
+        } else if (height > 50) {
+          // In flight - minimal exhaust
+          mesh.userData.exhaustCone.visible = false;
+          if (mesh.userData.exhaustGlow) {
+            mesh.userData.exhaustGlow.visible = false;
+          }
+          if (mesh.userData.engineLight) {
+            mesh.userData.engineLight.intensity = 0.5;
+          }
+        } else {
+          // Grounded - no exhaust
+          mesh.userData.exhaustCone.visible = false;
+          if (mesh.userData.exhaustGlow) {
+            mesh.userData.exhaustGlow.visible = false;
+          }
+          if (mesh.userData.engineLight) {
+            mesh.userData.engineLight.intensity = 0;
+          }
+        }
+      }
+    });
   }
 
   updateActiveEvents() {
@@ -2187,35 +2699,40 @@ class MarsSceneManager {
   // }
 
   addRocketEffects(rocket, type) {
-    // Create engine exhaust
-    const exhaustGeometry = new THREE.ConeGeometry(3, 20, 16);
+    // Create BIG engine exhaust cone
+    const exhaustGeometry = new THREE.ConeGeometry(8, 35, 16);
     const exhaustMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff3300,
+      color: 0xff4400,
       transparent: true,
-      opacity: 0.7
+      opacity: 0.8,
+      blending: THREE.AdditiveBlending
     });
 
     const exhaust = new THREE.Mesh(exhaustGeometry, exhaustMaterial);
     exhaust.position.y = -50;
     exhaust.rotation.x = Math.PI;
     rocket.add(exhaust);
+    rocket.userData.exhaustCone = exhaust; // Store reference for dynamic control
 
-    // Add engine glow
-    const glowGeometry = new THREE.SphereGeometry(8, 16, 16);
+    // Add BIGGER engine glow sphere
+    const glowGeometry = new THREE.SphereGeometry(15, 16, 16);
     const glowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff5500,
+      color: 0xff6600,
       transparent: true,
-      opacity: 0.5
+      opacity: 0.6,
+      blending: THREE.AdditiveBlending
     });
 
     const glow = new THREE.Mesh(glowGeometry, glowMaterial);
     glow.position.y = -45;
     rocket.add(glow);
+    rocket.userData.exhaustGlow = glow; // Store reference
 
-    // Add point light for engine
-    const engineLight = new THREE.PointLight(0xff3300, 2, 100);
+    // Add BRIGHTER point light for engine
+    const engineLight = new THREE.PointLight(0xff4400, 4, 150);
     engineLight.position.y = -45;
     rocket.add(engineLight);
+    rocket.userData.engineLight = engineLight; // Store reference
 
     // Add particle system for smoke
     const particleCount = 100;
@@ -2261,6 +2778,54 @@ class MarsSceneManager {
 
     // Store animation function for later use
     rocket.userData.animateParticles = animateParticles;
+  }
+
+  // Create a lightweight Starship-like rocket for colony traffic
+  createSimpleRocket() {
+    const rocketGroup = new THREE.Group();
+
+    // Main body
+    const bodyGeometry = new THREE.CylinderGeometry(4, 4, 40, 20);
+    const bodyMaterial = new THREE.MeshStandardMaterial({
+      color: 0xe6e6e6,
+      metalness: 0.8,
+      roughness: 0.2
+    });
+    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+    body.position.y = 20; // base at y=0
+    body.castShadow = true;
+    body.receiveShadow = true;
+
+    // Nose
+    const noseGeometry = new THREE.ConeGeometry(4, 10, 20);
+    const nose = new THREE.Mesh(noseGeometry, bodyMaterial);
+    nose.position.y = 45;
+    nose.castShadow = true;
+
+    // Simple fins
+    const finGeometry = new THREE.BoxGeometry(2, 6, 6);
+    const finMaterial = new THREE.MeshStandardMaterial({
+      color: 0xd0d0d0,
+      metalness: 0.7,
+      roughness: 0.25
+    });
+    const finOffsets = [
+      new THREE.Vector3(0, 8, 5.5),
+      new THREE.Vector3(0, 8, -5.5),
+      new THREE.Vector3(5.5, 8, 0),
+      new THREE.Vector3(-5.5, 8, 0)
+    ];
+    finOffsets.forEach(offset => {
+      const fin = new THREE.Mesh(finGeometry, finMaterial);
+      fin.position.copy(offset);
+      fin.castShadow = true;
+      rocketGroup.add(fin);
+    });
+
+    rocketGroup.add(body, nose);
+    rocketGroup.castShadow = true;
+
+    return rocketGroup;
   }
 
 
@@ -3633,7 +4198,7 @@ function createSpaceSkybox() {
 function createTwinklingStars() {
   const perfSettings = getPerformanceSettings();
   // Higher star count for denser field, still performance-aware
-  const starCount = perfSettings.isMobile ? 4000 : 12000;
+  const starCount = perfSettings.isMobile ? 6500 : 20000;
   const skyRadius = 5500;
 
   const positions = new Float32Array(starCount * 3);
@@ -4052,11 +4617,11 @@ function createSphericalSkyTexture(size = null) {
 
 // Add much brighter background stars
 function addBrighterBackgroundStars(context, size) {
-  // Reduced star density for faster texture generation (3D particles handle most stars)
+  // Slightly increased background density so the sky feels richer
   const perfSettings = getPerformanceSettings();
-  const densityMultiplier = perfSettings.detailLevel === 'high' ? 0.3 : 
-                            perfSettings.detailLevel === 'normal' ? 0.2 : 0.1;
-  const starCount = Math.min(Math.floor(size * size / 800 * densityMultiplier), 5000); // Reduced from 50000
+  const densityMultiplier = perfSettings.detailLevel === 'high' ? 0.55 : 
+                            perfSettings.detailLevel === 'normal' ? 0.4 : 0.22;
+  const starCount = Math.min(Math.floor(size * size / 800 * densityMultiplier), 14000);
 
   for (let i = 0; i < starCount; i++) {
     // Create cluster-like distribution
@@ -4119,11 +4684,11 @@ function addBrighterBackgroundStars(context, size) {
 // Add brighter foreground stars (small, crisp, and sparse — no big spikes)
 function addBrighterForegroundStars(context, size) {
   const perfSettings = getPerformanceSettings();
-  const densityMultiplier = perfSettings.detailLevel === 'high' ? 1.0 :
-                            perfSettings.detailLevel === 'normal' ? 0.7 : 0.4;
+  const densityMultiplier = perfSettings.detailLevel === 'high' ? 1.6 :
+                            perfSettings.detailLevel === 'normal' ? 1.1 : 0.65;
 
-  // Fewer, smaller foreground stars so the Milky Way band stays the focus
-  const brightStarCount = Math.floor(size * size / 8000 * densityMultiplier);
+  // Slightly more foreground stars while keeping the Milky Way as the focus
+  const brightStarCount = Math.floor(size * size / 9000 * densityMultiplier);
 
   for (let i = 0; i < brightStarCount; i++) {
     const x = Math.random() * size;
@@ -4597,7 +5162,9 @@ const lazyLoader = new LazyLoader();
 
 // Initialize scene elements with lazy loading
 function initializeScene() {
-  console.log("Initializing core scene elements...");
+  console.log("🚀 MARS SCENE: initializeScene() called");
+  console.log("Scene exists:", typeof scene !== 'undefined');
+  console.log("Renderer exists:", typeof renderer !== 'undefined');
 
   // Load essential components immediately
   loadCoreComponents();
@@ -4609,9 +5176,15 @@ function initializeScene() {
 }
 
 function loadCoreComponents() {
-  // Create the HUD
-  createHUD();
-  console.log("HUD created");
+  console.log("🔧 MARS SCENE: loadCoreComponents() called");
+  
+  // Create the HUD (may not exist as a function, skip if undefined)
+  if (typeof createHUD === 'function') {
+    createHUD();
+    console.log("HUD created");
+  } else {
+    console.log("createHUD not defined, skipping");
+  }
 
   // Simple background only for mobile to prevent WebGL context issues
   const perfSettings = getPerformanceSettings();
@@ -4639,9 +5212,28 @@ function loadCoreComponents() {
   scene.add(sunSphere);
   console.log("Sun sphere added to scene");
 
-  // Initialize basic UI elements
-  initializeUI();
-  console.log("UI elements initialized");
+  // Eagerly create MarsSceneManager on desktop so colony and rockets
+  // are always available even if lazy loading is delayed.
+  console.log("🏗️ MARS SCENE: About to create MarsSceneManager, isMobile=", perfSettings.isMobile);
+  if (!perfSettings.isMobile) {
+    try {
+      console.log("🏗️ MARS SCENE: Creating MarsSceneManager now...");
+      sceneManager = new MarsSceneManager(scene, 5000);
+      window.marsSceneManager = sceneManager;
+      console.log('✅ MarsSceneManager eagerly created for desktop');
+    } catch (e) {
+      console.error('❌ Failed to create MarsSceneManager eagerly:', e);
+      console.error('Error stack:', e.stack);
+    }
+  }
+
+  // Initialize basic UI elements (may not exist as a function, skip if undefined)
+  if (typeof initializeUI === 'function') {
+    initializeUI();
+    console.log("UI elements initialized");
+  } else {
+    console.log("initializeUI not defined, skipping");
+  }
 }
 
 function loadNonEssentialComponents() {
@@ -4679,7 +5271,11 @@ function loadNonEssentialComponents() {
   // Load Mars scene manager after initial render settles
   setTimeout(() => {
     lazyLoader.loadInBackground('marsSceneManager', () => {
-      window.marsSceneManager = new MarsSceneManager(scene, 5000);
+      // Avoid creating a second scene manager if one was already
+      // created eagerly in loadCoreComponents (desktop path).
+      if (!window.marsSceneManager) {
+        window.marsSceneManager = new MarsSceneManager(scene, 5000);
+      }
       return Promise.resolve();
     });
   }, 500);
@@ -4723,4 +5319,26 @@ function loadNonEssentialComponents() {
 // Add a day/night toggle and cycle
 let isDaytime = true; // Ensure this is true by default
 console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
+
+// Automatically initialize core scene elements once the game script
+// has finished loading. This ensures MarsSceneManager (and the
+// colony/rocket traffic it controls) is constructed on desktop,
+// and HUD/UI are set up, even though initializeScene wasn't being
+// called from index.html.
+console.log('🎮 MARS SCRIPT: End of mars.js reached, about to call initializeScene()');
+console.log('🎮 initializeScene exists:', typeof initializeScene);
+console.log('🎮 scene exists:', typeof scene);
+console.log('🎮 renderer exists:', typeof renderer);
+try {
+  if (typeof initializeScene === 'function') {
+    console.log('🎮 CALLING initializeScene() NOW...');
+    initializeScene();
+    console.log('🎮 initializeScene() completed');
+  } else {
+    console.warn('❌ initializeScene is not defined; core components not initialized');
+  }
+} catch (e) {
+  console.error('❌ Error during initializeScene:', e);
+  console.error('Error stack:', e.stack);
+}
 
