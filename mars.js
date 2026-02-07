@@ -1893,6 +1893,7 @@ class MarsSceneManager {
     this.aiVehicles = []; // Ground traffic vehicles (mining trucks, cybertrucks, etc.)
     this.aiRoutes = [];   // Reusable world-space routes for AI traffic
     this.lastTrafficUpdateTime = null;
+    this.bulletTrains = []; // High-speed trains on elevated tracks
 
     // Get reference to the terrain mesh for proper ground placement
     // The terrain is the largest PlaneGeometry in the scene (3000-5000 units wide)
@@ -2811,6 +2812,24 @@ class MarsSceneManager {
 
         // Build elevated rail and bullet train between the two colonies
         this.createBulletTrainSystem();
+
+        // Queue creation of the third futuristic city node in the background
+        try {
+          if (typeof lazyLoader !== 'undefined') {
+            const perfSettings = getPerformanceSettings();
+            if (perfSettings.detailLevel === 'high') {
+              lazyLoader.loadInBackground('thirdCityNode', () => {
+                this.createThirdCityNode();
+                return Promise.resolve();
+              });
+            }
+          } else {
+            // Fallback: delayed creation so it doesn't block initial load
+            setTimeout(() => this.createThirdCityNode(), 4000);
+          }
+        } catch (e) {
+          console.warn('Failed to schedule third city node for lazy loading:', e);
+        }
       }
     } catch (e) {
       console.warn('Failed to create secondary colony or bullet train system:', e);
@@ -2912,6 +2931,282 @@ class MarsSceneManager {
     // Fallback: return 0 if terrain not found (will log warning)
     console.warn(`Could not find terrain at (${x}, ${z}), using y=0. Terrain mesh:`, this.terrainMesh ? 'found' : 'NOT FOUND');
     return 0;
+  }
+
+  // Create a third futuristic city node as part of a loose square network
+  createThirdCityNode() {
+    try {
+      const perfSettings = getPerformanceSettings();
+      if (perfSettings.isMobile) return;
+      if (!this.colonyCenter || !this.secondaryColonyCenter) return;
+      if (this.futureCityCenter) return; // already built
+
+      const c1 = this.colonyCenter.clone();
+      const c2 = this.secondaryColonyCenter.clone();
+      const baseVec = new THREE.Vector3().subVectors(c2, c1);
+      const baseLen = baseVec.length();
+      if (baseLen < 10) return;
+
+      baseVec.normalize();
+      // Perpendicular in XZ plane to form the third node of a square-like layout
+      const perp = new THREE.Vector3(-baseVec.z, 0, baseVec.x).normalize();
+
+      const mid = new THREE.Vector3().addVectors(c1, c2).multiplyScalar(0.5);
+      const offsetDistance = baseLen * 0.7; // push city out far enough to feel distinct
+      const roughPos = mid.clone().add(perp.multiplyScalar(offsetDistance));
+
+      const groundY = this.getTerrainHeight(roughPos.x, roughPos.z);
+      const center = new THREE.Vector3(roughPos.x, groundY, roughPos.z);
+      this.futureCityCenter = center;
+
+      console.log('🏙️ Creating third futuristic city node at', center.x, center.z);
+
+      this.createFuturisticCity(center);
+      this.createCityBulletTrainSystem(center);
+    } catch (e) {
+      console.warn('Failed to create third city node or its train system:', e);
+    }
+  }
+
+  // Build a large futuristic city with ~100 varied skyscrapers and one record-setting tower
+  createFuturisticCity(center) {
+    const structures = [];
+
+    const perfSettings = typeof getPerformanceSettings === 'function'
+      ? getPerformanceSettings()
+      : { detailLevel: 'high' };
+
+    const baseRadius = perfSettings.detailLevel === 'low' ? 300 : 420;
+    const innerRadius = 80;
+
+    // Approximate the tallest existing colony tower height and create a new icon 5x taller
+    const colonyTallTowerHeight = 170; // based on residential towers near the main colony
+    const flagshipHeight = colonyTallTowerHeight * 5; // ultra-tall centerpiece
+
+    // Dense ring of skyscrapers around the flagship core
+    let skyscraperCount = 100;
+    if (perfSettings.detailLevel === 'normal') {
+      skyscraperCount = 70;
+    } else if (perfSettings.detailLevel === 'low') {
+      skyscraperCount = 40;
+    }
+    for (let i = 0; i < skyscraperCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radiusLerp = Math.random();
+      const radius = innerRadius + (baseRadius - innerRadius) * Math.pow(radiusLerp, 0.7);
+
+      const x = center.x + Math.cos(angle) * radius;
+      const z = center.z + Math.sin(angle) * radius;
+      const groundY = this.getTerrainHeight(x, z);
+
+      // Height distribution: taller near the core, smaller at the fringes
+      const coreFactor = 1 - (radius - innerRadius) / (baseRadius - innerRadius + 1e-5);
+      const baseHeight = 60 + coreFactor * 180 + Math.random() * 40;
+
+      const width = 10 + Math.random() * 16;
+      const depth = 10 + Math.random() * 16;
+
+      const towerGeom = new THREE.BoxGeometry(width, baseHeight, depth);
+      const towerMat = new THREE.MeshStandardMaterial({
+        color: 0xcfd8ff,
+        metalness: 0.9,
+        roughness: 0.2,
+        emissive: 0x111633,
+        emissiveIntensity: 0.35
+      });
+      const tower = new THREE.Mesh(towerGeom, towerMat);
+      tower.position.set(x, groundY + baseHeight / 2, z);
+      tower.castShadow = true;
+      tower.receiveShadow = true;
+      this.scene.add(tower);
+      structures.push(tower);
+
+      // Vertical neon edge strips for a more futuristic silhouette
+      const edgeGeom = new THREE.BoxGeometry(0.7, baseHeight * 1.02, 0.7);
+      const edgeMat = new THREE.MeshBasicMaterial({
+        color: 0x66ddff,
+        transparent: true,
+        opacity: 0.8
+      });
+      const edgeOffsets = [
+        { x: width / 2 + 0.4, z: depth / 2 + 0.4 },
+        { x: -width / 2 - 0.4, z: depth / 2 + 0.4 },
+        { x: width / 2 + 0.4, z: -depth / 2 - 0.4 },
+        { x: -width / 2 - 0.4, z: -depth / 2 - 0.4 }
+      ];
+      edgeOffsets.forEach(offset => {
+        if (Math.random() < 0.6) {
+          const edge = new THREE.Mesh(edgeGeom, edgeMat);
+          edge.position.set(offset.x, 0, offset.z);
+          tower.add(edge);
+        }
+      });
+
+      // Roof beacon lights to make the skyline sparkle
+      const beaconGeom = new THREE.SphereGeometry(2.2, 12, 12);
+      const beaconMat = new THREE.MeshBasicMaterial({ color: 0xff66cc });
+      const beacon = new THREE.Mesh(beaconGeom, beaconMat);
+      beacon.position.set(0, baseHeight / 2 + 3, 0);
+      tower.add(beacon);
+
+      const beaconLight = new THREE.PointLight(0xff66cc, 0.9, 120);
+      beaconLight.position.copy(beacon.position);
+      tower.add(beaconLight);
+
+      this.animatedObjects.push({
+        mesh: beaconLight,
+        type: 'blink',
+        phase: Math.random() * Math.PI * 2
+      });
+    }
+
+    // Flagship mega-tower in the exact city center
+    const flagshipWidth = 40;
+    const flagshipDepth = 40;
+    const flagshipGeom = new THREE.BoxGeometry(flagshipWidth, flagshipHeight, flagshipDepth);
+    const flagshipMat = new THREE.MeshStandardMaterial({
+      color: 0xf5f7ff,
+      metalness: 1.0,
+      roughness: 0.08,
+      emissive: 0x223366,
+      emissiveIntensity: 0.55
+    });
+    const flagship = new THREE.Mesh(flagshipGeom, flagshipMat);
+    flagship.position.set(center.x, center.y + flagshipHeight / 2, center.z);
+    flagship.castShadow = true;
+    flagship.receiveShadow = true;
+    this.scene.add(flagship);
+    structures.push(flagship);
+
+    // Holographic crown ring near the top of the mega-tower
+    const crownRingGeom = new THREE.TorusGeometry(flagshipWidth * 0.9, 1.8, 16, 64);
+    const crownRingMat = new THREE.MeshStandardMaterial({
+      color: 0x66ffff,
+      metalness: 0.9,
+      roughness: 0.1,
+      emissive: 0x33bbff,
+      emissiveIntensity: 0.9
+    });
+    const crownRing = new THREE.Mesh(crownRingGeom, crownRingMat);
+    crownRing.position.y = flagshipHeight / 2 - 40;
+    crownRing.rotation.x = Math.PI / 2;
+    flagship.add(crownRing);
+
+    this.animatedObjects.push({
+      mesh: crownRing,
+      type: 'rotate',
+      speed: 0.02
+    });
+
+    // Triple spotlight cluster beaming into the sky from the top
+    for (let i = 0; i < 3; i++) {
+      const spot = new THREE.SpotLight(0x99ddff, 2.2, 1200, Math.PI / 8, 0.6, 2);
+      spot.position.set(
+        center.x + Math.cos((i / 3) * Math.PI * 2) * 10,
+        center.y + flagshipHeight + 10,
+        center.z + Math.sin((i / 3) * Math.PI * 2) * 10
+      );
+      spot.target.position.set(center.x, center.y + flagshipHeight / 2, center.z);
+      this.scene.add(spot);
+      this.scene.add(spot.target);
+    }
+
+    // Soft city-wide ambient glow
+    const cityLight = new THREE.PointLight(0x88aaff, 3.5, 2000);
+    cityLight.position.set(center.x, center.y + 260, center.z);
+    this.scene.add(cityLight);
+
+    console.log('✅ Futuristic third-city skyline created with', structures.length, 'skyscraper structures');
+  }
+
+  // Elevated rail and bullet train between the secondary colony and the new city
+  createCityBulletTrainSystem(cityCenter) {
+    try {
+      const perfSettings = getPerformanceSettings();
+      if (perfSettings.isMobile) return;
+      if (!this.secondaryColonyCenter || !cityCenter) return;
+
+      const start = this.secondaryColonyCenter.clone();
+      const end = cityCenter.clone();
+
+      const startY = this.getTerrainHeight(start.x, start.z) + 45;
+      const endY = this.getTerrainHeight(end.x, end.z) + 45;
+      start.y = startY;
+      end.y = endY;
+
+      let segmentCount = 22;
+      if (perfSettings.detailLevel === 'normal') {
+        segmentCount = 16;
+      } else if (perfSettings.detailLevel === 'low') {
+        segmentCount = 10;
+      }
+      const pylonGeometry = new THREE.CylinderGeometry(2.2, 3.2, 1, 10);
+      const pylonMaterial = new THREE.MeshStandardMaterial({
+        color: 0x555577,
+        roughness: 0.35,
+        metalness: 0.9
+      });
+
+      for (let i = 0; i <= segmentCount; i++) {
+        const t = i / segmentCount;
+        const pos = new THREE.Vector3().lerpVectors(start, end, t);
+        const groundY = this.getTerrainHeight(pos.x, pos.z);
+        const height = Math.max(24, pos.y - groundY);
+
+        const pylon = new THREE.Mesh(pylonGeometry, pylonMaterial);
+        pylon.scale.y = height / 1; // base height is 1
+        pylon.position.set(pos.x, groundY + height / 2, pos.z);
+        this.scene.add(pylon);
+      }
+
+      const direction = new THREE.Vector3().subVectors(end, start);
+      const length = direction.length();
+      direction.normalize();
+
+      const deckGeometry = new THREE.BoxGeometry(9, 1.4, length);
+      const deckMaterial = new THREE.MeshStandardMaterial({
+        color: 0xdde3ff,
+        roughness: 0.18,
+        metalness: 0.92
+      });
+      const deck = new THREE.Mesh(deckGeometry, deckMaterial);
+
+      const deckGroup = new THREE.Group();
+      deckGroup.add(deck);
+
+      const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+      deckGroup.position.copy(mid);
+
+      const yaw = Math.atan2(end.x - start.x, end.z - start.z);
+      deckGroup.rotation.y = yaw;
+
+      this.scene.add(deckGroup);
+
+      const train = this.createBulletTrainMesh();
+
+      const initialPos = start.clone();
+      train.position.copy(initialPos);
+      train.rotation.y = yaw;
+      this.scene.add(train);
+
+      if (!this.bulletTrains) {
+        this.bulletTrains = [];
+      }
+      this.bulletTrains.push({
+        mesh: train,
+        start,
+        end,
+        yaw,
+        t: 0,
+        direction: 1,
+        speed: perfSettings.detailLevel === 'high' ? 0.07 : 0.06,
+        lastTime: null
+      });
+
+      console.log('🚄 City bullet train system created between secondary colony and third city');
+    } catch (e) {
+      console.warn('Failed to create city bullet train system:', e);
+    }
   }
 
   positionOnTerrain(group, x, z) {
@@ -3191,100 +3486,7 @@ class MarsSceneManager {
 
       this.scene.add(deckGroup);
 
-      // Bullet train model: 4-car high-speed train carrying Optimus robots
-      const train = new THREE.Group();
-
-      const carCount = 4;
-      const carLength = 12;
-      const carWidth = 3.4;
-      const carHeight = 3;
-      const carGap = 0.9;
-
-      const bodyMat = new THREE.MeshStandardMaterial({
-        color: 0xeeeeff,
-        metalness: 0.7,
-        roughness: 0.25
-      });
-      const noseGeom = new THREE.ConeGeometry(2.2, 5, 16);
-      const noseMat = new THREE.MeshStandardMaterial({
-        color: 0xddddff,
-        metalness: 0.8,
-        roughness: 0.2
-      });
-      const windowGeom = new THREE.BoxGeometry(0.25, 1.1, carLength * 0.78);
-      const windowMat = new THREE.MeshStandardMaterial({
-        color: 0x66aaff,
-        emissive: 0x3388ff,
-        emissiveIntensity: 0.85,
-        transparent: true,
-        opacity: 0.9
-      });
-      const lightStripGeom = new THREE.BoxGeometry(0.3, 0.3, 3.5);
-      const lightStripMat = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        emissive: 0xffffff,
-        emissiveIntensity: 1.35
-      });
-      const robotPodGeom = new THREE.BoxGeometry(0.35, 1.4, 0.6);
-      const robotPodMat = new THREE.MeshStandardMaterial({
-        color: 0x88ccff,
-        emissive: 0x66bbff,
-        emissiveIntensity: 0.9,
-        metalness: 0.4,
-        roughness: 0.35
-      });
-
-      const totalTrainLength = carCount * carLength + (carCount - 1) * carGap;
-      const trainOriginOffset = -totalTrainLength / 2 + carLength / 2;
-
-      for (let i = 0; i < carCount; i++) {
-        const isEngine = i === 0;
-        const car = new THREE.Group();
-
-        const bodyGeom = new THREE.BoxGeometry(carWidth, carHeight, carLength);
-        const body = new THREE.Mesh(bodyGeom, bodyMat);
-        body.position.y = 2;
-        car.add(body);
-
-        // Side windows on both sides so you glimpse interior robots
-        const windowsFrontSide = new THREE.Mesh(windowGeom, windowMat);
-        windowsFrontSide.position.set((carWidth / 2) - 0.45, 2.6, 0);
-        car.add(windowsFrontSide);
-
-        const windowsBackSide = windowsFrontSide.clone();
-        windowsBackSide.position.x = -windowsFrontSide.position.x;
-        car.add(windowsBackSide);
-
-        // Interior "Optimus" robot pods as glowing silhouettes
-        const podsPerCar = 3;
-        for (let j = 0; j < podsPerCar; j++) {
-          const pod = new THREE.Mesh(robotPodGeom, robotPodMat);
-          const zSpan = carLength * 0.6;
-          const localZ = -zSpan / 2 + (zSpan / (podsPerCar - 1 || 1)) * j;
-          pod.position.set(0, 2.0, localZ);
-          car.add(pod);
-        }
-
-        if (isEngine) {
-          // Streamlined nose and headlights on the leading car
-          const nose = new THREE.Mesh(noseGeom, noseMat);
-          nose.rotation.x = Math.PI / 2;
-          nose.position.set(0, 2.0, -carLength / 2 - 2.3);
-          car.add(nose);
-
-          const frontStrip = new THREE.Mesh(lightStripGeom, lightStripMat);
-          frontStrip.position.set(0, 2.4, -carLength / 2 - 1.6);
-          car.add(frontStrip);
-
-          const headLight = new THREE.PointLight(0xffffff, 1.7, 140);
-          headLight.position.set(0, 2.4, -carLength / 2 - 1.9);
-          car.add(headLight);
-        }
-
-        const offsetZ = trainOriginOffset + i * (carLength + carGap);
-        car.position.z = offsetZ;
-        train.add(car);
-      }
+      const train = this.createBulletTrainMesh();
 
       // Initial placement at the primary colony side of the track
       const initialPos = start.clone();
@@ -3292,58 +3494,163 @@ class MarsSceneManager {
       train.rotation.y = yaw;
       this.scene.add(train);
 
-      this.bulletTrain = {
+      if (!this.bulletTrains) {
+        this.bulletTrains = [];
+      }
+      this.bulletTrains.push({
         mesh: train,
         start,
         end,
         yaw,
         t: 0,
         direction: 1,
-        speed: 0.06 // fraction of the route per second
-      };
+        speed: 0.06, // fraction of the route per second
+        lastTime: null
+      });
 
-      this.lastBulletTrainTime = null;
       console.log('🚄 Bullet train system created between colonies');
     } catch (e) {
       console.warn('Failed to create bullet train system:', e);
     }
   }
 
+  // Build a 4-car high-speed train that carries glowing Optimus-style robot pods
+  createBulletTrainMesh() {
+    const train = new THREE.Group();
+
+    const carCount = 4;
+    const carLength = 12;
+    const carWidth = 3.4;
+    const carHeight = 3;
+    const carGap = 0.9;
+
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0xeeeeff,
+      metalness: 0.7,
+      roughness: 0.25
+    });
+    const noseGeom = new THREE.ConeGeometry(2.2, 5, 16);
+    const noseMat = new THREE.MeshStandardMaterial({
+      color: 0xddddff,
+      metalness: 0.8,
+      roughness: 0.2
+    });
+    const windowGeom = new THREE.BoxGeometry(0.25, 1.1, carLength * 0.78);
+    const windowMat = new THREE.MeshStandardMaterial({
+      color: 0x66aaff,
+      emissive: 0x3388ff,
+      emissiveIntensity: 0.85,
+      transparent: true,
+      opacity: 0.9
+    });
+    const lightStripGeom = new THREE.BoxGeometry(0.3, 0.3, 3.5);
+    const lightStripMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0xffffff,
+      emissiveIntensity: 1.35
+    });
+    const robotPodGeom = new THREE.BoxGeometry(0.35, 1.4, 0.6);
+    const robotPodMat = new THREE.MeshStandardMaterial({
+      color: 0x88ccff,
+      emissive: 0x66bbff,
+      emissiveIntensity: 0.9,
+      metalness: 0.4,
+      roughness: 0.35
+    });
+
+    const totalTrainLength = carCount * carLength + (carCount - 1) * carGap;
+    const trainOriginOffset = -totalTrainLength / 2 + carLength / 2;
+
+    for (let i = 0; i < carCount; i++) {
+      const isEngine = i === 0;
+      const car = new THREE.Group();
+
+      const bodyGeom = new THREE.BoxGeometry(carWidth, carHeight, carLength);
+      const body = new THREE.Mesh(bodyGeom, bodyMat);
+      body.position.y = 2;
+      car.add(body);
+
+      // Side windows on both sides so you glimpse interior robots
+      const windowsFrontSide = new THREE.Mesh(windowGeom, windowMat);
+      windowsFrontSide.position.set((carWidth / 2) - 0.45, 2.6, 0);
+      car.add(windowsFrontSide);
+
+      const windowsBackSide = windowsFrontSide.clone();
+      windowsBackSide.position.x = -windowsFrontSide.position.x;
+      car.add(windowsBackSide);
+
+      // Interior "Optimus" robot pods as glowing silhouettes
+      const podsPerCar = 3;
+      for (let j = 0; j < podsPerCar; j++) {
+        const pod = new THREE.Mesh(robotPodGeom, robotPodMat);
+        const zSpan = carLength * 0.6;
+        const localZ = -zSpan / 2 + (zSpan / (podsPerCar - 1 || 1)) * j;
+        pod.position.set(0, 2.0, localZ);
+        car.add(pod);
+      }
+
+      if (isEngine) {
+        // Streamlined nose and headlights on the leading car
+        const nose = new THREE.Mesh(noseGeom, noseMat);
+        nose.rotation.x = Math.PI / 2;
+        nose.position.set(0, 2.0, -carLength / 2 - 2.3);
+        car.add(nose);
+
+        const frontStrip = new THREE.Mesh(lightStripGeom, lightStripMat);
+        frontStrip.position.set(0, 2.4, -carLength / 2 - 1.6);
+        car.add(frontStrip);
+
+        const headLight = new THREE.PointLight(0xffffff, 1.7, 140);
+        headLight.position.set(0, 2.4, -carLength / 2 - 1.9);
+        car.add(headLight);
+      }
+
+      const offsetZ = trainOriginOffset + i * (carLength + carGap);
+      car.position.z = offsetZ;
+      train.add(car);
+    }
+
+    return train;
+  }
+
   // Animate bullet train along its elevated track
   updateBulletTrain(currentTime) {
-    if (!this.bulletTrain || !this.bulletTrain.mesh) return;
+    if (!this.bulletTrains || this.bulletTrains.length === 0) return;
 
-    if (this.lastBulletTrainTime == null) {
-      this.lastBulletTrainTime = currentTime;
-      return;
-    }
+    this.bulletTrains.forEach(train => {
+      if (!train.mesh) return;
 
-    const deltaMs = currentTime - this.lastBulletTrainTime;
-    if (deltaMs <= 5) return;
+      if (train.lastTime == null) {
+        train.lastTime = currentTime;
+        return;
+      }
 
-    this.lastBulletTrainTime = currentTime;
-    const dt = Math.min(deltaMs, 120) / 1000; // clamp
+      const deltaMs = currentTime - train.lastTime;
+      if (deltaMs <= 5) return;
 
-    const train = this.bulletTrain;
-    let t = train.t + train.speed * dt * train.direction;
+      train.lastTime = currentTime;
+      const dt = Math.min(deltaMs, 120) / 1000; // clamp
 
-    // Ping-pong between colonies
-    if (t > 1) {
-      t = 1 - (t - 1);
-      train.direction = -1;
-    } else if (t < 0) {
-      t = -t;
-      train.direction = 1;
-    }
+      let t = train.t + train.speed * dt * train.direction;
 
-    train.t = t;
+      // Ping-pong between endpoints
+      if (t > 1) {
+        t = 1 - (t - 1);
+        train.direction = -1;
+      } else if (t < 0) {
+        t = -t;
+        train.direction = 1;
+      }
 
-    const pos = new THREE.Vector3().lerpVectors(train.start, train.end, t);
-    train.mesh.position.copy(pos);
+      train.t = t;
 
-    // Flip heading when changing direction so the nose always points forward
-    const baseYaw = train.yaw;
-    train.mesh.rotation.y = baseYaw + (train.direction < 0 ? Math.PI : 0);
+      const pos = new THREE.Vector3().lerpVectors(train.start, train.end, t);
+      train.mesh.position.copy(pos);
+
+      // Flip heading when changing direction so the nose always points forward
+      const baseYaw = train.yaw;
+      train.mesh.rotation.y = baseYaw + (train.direction < 0 ? Math.PI : 0);
+    });
   }
 
   // Simple time-based rocket launch/arrival cycles using the pre-created rockets
