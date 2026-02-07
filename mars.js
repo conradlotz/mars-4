@@ -334,7 +334,8 @@ function ensureSpaceSkybox() {
 setTimeout(ensureSpaceSkybox, 100);
 
 // Adaptive fog based on performance settings with Samsung adjustments
-const fogColor = perfSettings.samsungOptimized ? 0xd4a574 : 0xb77c5a;  // Lighter fog for Samsung
+// Match fog to the deep blue night sky instead of a brownish tone
+const fogColor = perfSettings.samsungOptimized ? 0x151b33 : 0x151b33;
 const fogDensity = perfSettings.samsungOptimized ? perfSettings.fogDensityReduction : 1.0;
 scene.fog = new THREE.Fog(fogColor, perfSettings.fogDistance * 0.2 * fogDensity, perfSettings.renderDistance);
 
@@ -6027,44 +6028,31 @@ function addAtmosphericGlow(context, size) {
   // Create a subtle atmospheric glow at the bottom of the sky
   context.save();
 
-  // Bottom atmospheric glow (Mars-like reddish) - using lighter blend to prevent shadows
-  const bottomGradient = context.createLinearGradient(0, size * 0.85, 0, size);
-  bottomGradient.addColorStop(0, 'rgba(120, 50, 30, 0)');
-  bottomGradient.addColorStop(0.5, 'rgba(150, 70, 40, 0.12)');
-  bottomGradient.addColorStop(1, 'rgba(180, 90, 50, 0.25)');
+  // Bottom atmospheric glow (cool blue) with very low contrast to avoid banding
+  const bottomGradient = context.createLinearGradient(0, size * 0.82, 0, size);
+  bottomGradient.addColorStop(0, 'rgba(40, 60, 140, 0.0)');
+  bottomGradient.addColorStop(0.6, 'rgba(60, 90, 190, 0.08)');
+  bottomGradient.addColorStop(1, 'rgba(35, 55, 130, 0.14)');
 
-  context.globalCompositeOperation = 'lighter';
+  context.globalCompositeOperation = 'screen';
   context.fillStyle = bottomGradient;
-  context.fillRect(0, size * 0.8, size, size * 0.2);
+  context.fillRect(0, size * 0.8, size, size * 0.22);
 
-  // Add some atmospheric haze particles
-  context.globalCompositeOperation = 'lighter';
-  for (let i = 0; i < 200; i++) {
+  // Very light atmospheric haze, greatly reduced to avoid visible layers
+  context.globalCompositeOperation = 'screen';
+  for (let i = 0; i < 80; i++) {
     const x = Math.random() * size;
-    const y = size * 0.85 + Math.random() * (size * 0.15);
-    const radius = Math.random() * 2 + 1;
-    const opacity = Math.random() * 0.12;
+    const y = size * 0.84 + Math.random() * (size * 0.16);
+    const radius = Math.random() * 1.8 + 0.8;
+    const opacity = Math.random() * 0.06;
 
     context.beginPath();
     context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fillStyle = `rgba(200, 150, 120, ${opacity})`;
+    context.fillStyle = `rgba(170, 190, 255, ${opacity})`;
     context.fill();
   }
 
-  // Add subtle light rays from the horizon
-  for (let i = 0; i < 15; i++) {
-    const x = Math.random() * size;
-    const width = Math.random() * size * 0.1 + size * 0.05;
-    const height = Math.random() * size * 0.3 + size * 0.1;
-    const opacity = Math.random() * 0.1 + 0.05;
-
-    const rayGradient = context.createLinearGradient(x, size, x, size - height);
-    rayGradient.addColorStop(0, `rgba(255, 200, 150, ${opacity})`);
-    rayGradient.addColorStop(1, 'rgba(255, 200, 150, 0)');
-
-    context.fillStyle = rayGradient;
-    context.fillRect(x - width / 2, size - height, width, height);
-  }
+  // Removed strong light rays to keep the horizon smooth and shadow-free
 
   // Reset blend mode
   context.globalCompositeOperation = 'source-over';
@@ -6110,14 +6098,14 @@ function addPlanetToCanvas(context, x, y, radius, color, hasRings = false) {
 function addMoonToCanvas(context, x, y, radius) {
   context.save();
 
-  // Base moon body with stronger contrast
+  // Base moon body with softer contrast to avoid harsh glare
   const bodyGradient = context.createRadialGradient(
     x - radius * 0.35, y - radius * 0.35, 0,
     x, y, radius
   );
-  bodyGradient.addColorStop(0, 'rgba(230, 230, 230, 1)');
-  bodyGradient.addColorStop(0.5, 'rgba(190, 190, 190, 1)');
-  bodyGradient.addColorStop(1, 'rgba(90, 90, 90, 1)');
+  bodyGradient.addColorStop(0, 'rgba(235, 235, 235, 0.9)');
+  bodyGradient.addColorStop(0.5, 'rgba(200, 200, 200, 0.9)');
+  bodyGradient.addColorStop(1, 'rgba(120, 120, 120, 0.9)');
 
   context.fillStyle = bodyGradient;
   context.beginPath();
@@ -6131,8 +6119,8 @@ function addMoonToCanvas(context, x, y, radius) {
     x + radius * 0.4, y + radius * 0.2, radius * 1.3
   );
   terminatorGradient.addColorStop(0, 'rgba(0, 0, 0, 0.0)');
-  terminatorGradient.addColorStop(0.4, 'rgba(0, 0, 0, 0.15)');
-  terminatorGradient.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+  terminatorGradient.addColorStop(0.4, 'rgba(0, 0, 0, 0.08)');
+  terminatorGradient.addColorStop(1, 'rgba(0, 0, 0, 0.22)');
 
   context.globalCompositeOperation = 'multiply';
   context.fillStyle = terminatorGradient;
@@ -6144,7 +6132,7 @@ function addMoonToCanvas(context, x, y, radius) {
   context.globalCompositeOperation = 'source-over';
 
   // Add a few small craters for surface detail
-  const craterCount = 5;
+  const craterCount = 4;
   for (let i = 0; i < craterCount; i++) {
     const angle = (Math.PI * 2 * i) / craterCount + Math.random() * 0.4;
     const dist = radius * (0.25 + Math.random() * 0.4);
@@ -6156,8 +6144,8 @@ function addMoonToCanvas(context, x, y, radius) {
       cx - cr * 0.3, cy - cr * 0.3, 0,
       cx, cy, cr
     );
-    craterGradient.addColorStop(0, 'rgba(230, 230, 230, 0.9)');
-    craterGradient.addColorStop(0.5, 'rgba(140, 140, 140, 0.9)');
+    craterGradient.addColorStop(0, 'rgba(230, 230, 230, 0.7)');
+    craterGradient.addColorStop(0.5, 'rgba(150, 150, 150, 0.7)');
     craterGradient.addColorStop(1, 'rgba(60, 60, 60, 0.0)');
 
     context.fillStyle = craterGradient;
@@ -6174,19 +6162,19 @@ function addLargePlanetToCanvas(context, size) {
   // Position the planet near the central upper sky so it's easy to see
   const x = size * 0.5;
   const y = size * 0.4;
-  const radius = size * 0.038;
+  const radius = size * 0.034;
 
   context.save();
 
   // Base planet body (Jupiter-like, warm with subtle depth)
-  const baseColor = '#b3783f';
+  const baseColor = '#a46c38';
   const planetGradient = context.createRadialGradient(
     x - radius * 0.35, y - radius * 0.4, 0,
     x, y, radius * 1.1
   );
-  planetGradient.addColorStop(0, lightenColor(baseColor, 28));
+  planetGradient.addColorStop(0, lightenColor(baseColor, 16));
   planetGradient.addColorStop(0.5, baseColor);
-  planetGradient.addColorStop(1, darkenColor(baseColor, 24));
+  planetGradient.addColorStop(1, darkenColor(baseColor, 18));
 
   context.fillStyle = planetGradient;
   context.beginPath();
@@ -6229,7 +6217,7 @@ function addLargePlanetToCanvas(context, size) {
   }
 
   // Subtle surface mottling for texture
-  const patchCount = 28;
+  const patchCount = 20;
   for (let i = 0; i < patchCount; i++) {
     const angle = Math.random() * Math.PI * 2;
     const dist = radius * (0.0 + Math.random() * 0.85);
@@ -6248,7 +6236,7 @@ function addLargePlanetToCanvas(context, size) {
     patchGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
     // Convert tone hex to rgba-ish by blending via globalAlpha
-    context.globalAlpha = 0.1;
+    context.globalAlpha = 0.07;
     context.fillStyle = patchGrad;
     context.beginPath();
     context.arc(px, py, pr, 0, Math.PI * 2);
@@ -6281,16 +6269,16 @@ function addLargePlanetToCanvas(context, size) {
   // Atmospheric rim glow
   context.globalCompositeOperation = 'screen';
   const atmGradient = context.createRadialGradient(
-    x, y, radius * 0.9,
-    x, y, radius * 1.25
+    x, y, radius * 0.95,
+    x, y, radius * 1.18
   );
   atmGradient.addColorStop(0, 'rgba(160, 200, 255, 0.0)');
-  atmGradient.addColorStop(0.45, 'rgba(160, 210, 255, 0.23)');
+  atmGradient.addColorStop(0.5, 'rgba(160, 210, 255, 0.14)');
   atmGradient.addColorStop(1, 'rgba(120, 180, 255, 0.0)');
 
   context.fillStyle = atmGradient;
   context.beginPath();
-  context.arc(x, y, radius * 1.28, 0, Math.PI * 2);
+  context.arc(x, y, radius * 1.2, 0, Math.PI * 2);
   context.fill();
 
   context.restore();
