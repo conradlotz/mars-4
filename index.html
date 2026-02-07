@@ -660,19 +660,11 @@
   <div class="controls">
    
   </div>
-  <button id="load-youtube" class="youtube-button">Load YouTube Audio</button>
+  <!-- YouTube button and UI removed; audio now auto-loads silently in background -->
   
-  <!-- YouTube Audio Container -->
-  <div id="youtube-audio-container">
+  <!-- YouTube Audio Container (hidden background player only) -->
+  <div id="youtube-audio-container" style="display: none;">
     <div id="youtube-player-wrapper"></div>
-    <div id="youtube-controls">
-      <button id="youtube-play-pause">Play</button>
-      <div>
-        <label for="youtube-volume">Volume:</label>
-        <input type="range" id="youtube-volume" min="0" max="100" value="30" style="width: 100px;">
-      </div>
-      <div id="youtube-title">YouTube Audio</div>
-    </div>
   </div>
   
   <script>
@@ -1098,14 +1090,8 @@
             loop: true,
             volume: 25
           });
-          
-          // Show audio container
-          document.getElementById('youtube-audio-container').style.display = 'block';
-          
-          // Show click-to-play notification since autoplay might be blocked
-          this.showClickToPlayNotification();
-          
-        }, 3000); // Wait 3 seconds after game loads - don't compete with rendering
+        
+        }, 500); // Start soon after game loads so audio begins immediately when allowed
       }
       
       // Show click-to-play notification
@@ -1426,9 +1412,6 @@
       loadVideo: function(videoId, options = {}) {
         this.videoId = videoId;
         
-        // Show the container
-        document.getElementById('youtube-audio-container').style.display = 'block';
-        
         // Create wrapper for the player if it doesn't exist
         const wrapper = document.getElementById('youtube-player-wrapper');
         
@@ -1466,16 +1449,6 @@
           this._initPlayer(options);
         }
         
-        // Set up event listeners
-        document.getElementById('youtube-play-pause').addEventListener('click', () => {
-          this.togglePlayback();
-        });
-        
-        document.getElementById('youtube-volume').addEventListener('input', (e) => {
-          if (this.player && typeof this.player.setVolume === 'function') {
-            this.player.setVolume(parseInt(e.target.value));
-          }
-        });
       },
       
       _initPlayer: function(options) {
@@ -1505,10 +1478,10 @@
             events: {
               'onReady': (event) => {
                 console.log('YouTube player ready');
-                // Set initial volume
-                const volumeSlider = document.getElementById('youtube-volume');
-                if (volumeSlider && typeof event.target.setVolume === 'function') {
-                  event.target.setVolume(parseInt(volumeSlider.value));
+                // Set initial volume (use options.volume if provided, else default)
+                if (typeof event.target.setVolume === 'function') {
+                  const defaultVolume = (options && typeof options.volume === 'number') ? options.volume : 25;
+                  event.target.setVolume(defaultVolume);
                 }
                 
                 // Try to auto-play if specified
@@ -1520,7 +1493,6 @@
                     try {
                       event.target.playVideo();
                       this.isPlaying = true;
-                      document.getElementById('youtube-play-pause').textContent = 'Pause';
                       console.log('Autoplay successful');
                     } catch (error) {
                       console.log('Autoplay blocked by browser policy:', error);
@@ -1533,7 +1505,6 @@
                       try {
                         event.target.playVideo();
                         this.isPlaying = true;
-                        document.getElementById('youtube-play-pause').textContent = 'Pause';
                         console.log('Delayed autoplay successful');
                       } catch (error) {
                         console.log('Delayed autoplay also blocked');
@@ -1553,23 +1524,17 @@
               },
               'onStateChange': (event) => {
                 console.log('YouTube player state changed:', event.data);
-                // Update play/pause button based on player state
+                // Track state for internal logic only
                 if (event.data === YT.PlayerState.PLAYING) {
                   this.isPlaying = true;
-                  document.getElementById('youtube-play-pause').textContent = 'Pause';
                   console.log('YouTube audio is now playing');
-                  
-                  // Hide any click-to-play notifications when audio starts
-                  this.hideClickToPlayNotifications();
                 } else if (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) {
                   this.isPlaying = false;
-                  document.getElementById('youtube-play-pause').textContent = 'Play';
                   console.log('YouTube audio paused/ended');
                 }
               },
               'onError': (event) => {
                 const code = event && typeof event.data !== 'undefined' ? event.data : 'unknown';
-                console.error('YouTube player error:', code);
 
                 // Known YouTube iframe error codes:
                 // 2   - Invalid parameter
@@ -1578,25 +1543,11 @@
                 if (code === 101 || code === 150 || code === 153) {
                   // Gracefully handle restricted/unavailable audio: stop tracking as playing
                   this.isPlaying = false;
+                  this.disabled = true;
 
-                  // Update UI to indicate audio is unavailable instead of leaving broken controls
-                  const titleElement = document.getElementById('youtube-title');
-                  if (titleElement) {
-                    titleElement.textContent = 'Audio unavailable in this region/embed';
-                  }
-
-                  const playPauseBtn = document.getElementById('youtube-play-pause');
-                  if (playPauseBtn) {
-                    playPauseBtn.textContent = 'Unavailable';
-                    playPauseBtn.disabled = true;
-                  }
-
-                  const volumeSlider = document.getElementById('youtube-volume');
-                  if (volumeSlider) {
-                    volumeSlider.disabled = true;
-                  }
-
-                  console.warn('YouTube audio cannot be played here (error', code, '). UI disabled gracefully.');
+                  console.warn('YouTube audio cannot be embedded or played here (error code', code, '). Continuing without background music.');
+                } else {
+                  console.error('YouTube player error:', code);
                 }
               }
             }
@@ -1679,20 +1630,7 @@
       }
     };
     
-    // YouTube button is now hidden as audio auto-loads
-    // Event listener removed to clean up the interface
-    
-    // Add click listener to YouTube controls for easier access
-    setTimeout(() => {
-      const playPauseButton = document.getElementById('youtube-play-pause');
-      if (playPauseButton) {
-        playPauseButton.addEventListener('click', () => {
-          if (youtubePlayer && youtubePlayer.player) {
-            youtubePlayer.togglePlayback();
-          }
-        });
-      }
-    }, 3000);
+    // YouTube audio now auto-loads silently in the background with no visible controls
   </script>
 </body>
 </html>

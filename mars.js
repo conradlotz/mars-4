@@ -334,7 +334,8 @@ function ensureSpaceSkybox() {
 setTimeout(ensureSpaceSkybox, 100);
 
 // Adaptive fog based on performance settings with Samsung adjustments
-const fogColor = perfSettings.samsungOptimized ? 0xd4a574 : 0xb77c5a;  // Lighter fog for Samsung
+// Match fog to the deep blue night sky instead of a brownish tone
+const fogColor = perfSettings.samsungOptimized ? 0x151b33 : 0x151b33;
 const fogDensity = perfSettings.samsungOptimized ? perfSettings.fogDensityReduction : 1.0;
 scene.fog = new THREE.Fog(fogColor, perfSettings.fogDistance * 0.2 * fogDensity, perfSettings.renderDistance);
 
@@ -1893,6 +1894,7 @@ class MarsSceneManager {
     this.aiVehicles = []; // Ground traffic vehicles (mining trucks, cybertrucks, etc.)
     this.aiRoutes = [];   // Reusable world-space routes for AI traffic
     this.lastTrafficUpdateTime = null;
+    this.bulletTrains = []; // High-speed trains on elevated tracks
 
     // Get reference to the terrain mesh for proper ground placement
     // The terrain is the largest PlaneGeometry in the scene (3000-5000 units wide)
@@ -2010,12 +2012,8 @@ class MarsSceneManager {
         const route = this.aiRoutes[routeIndex];
         if (!route || route.waypoints.length < 2) continue;
 
-        // Alternate vehicle types for visual variety
-        const typeRoll = i % 3;
-        let vehicleMesh;
-        if (typeRoll === 0) vehicleMesh = this.createMiningTruck();
-        else if (typeRoll === 1) vehicleMesh = this.createColonyRover();
-        else vehicleMesh = this.createCybertruckVehicle();
+        // Use a cybertruck-style vehicle for all AI traffic
+        const vehicleMesh = this.createCybertruckVehicle();
 
         // Stagger starting positions along the route
         const startT = (i / maxVehicles) * (route.waypoints.length - 1);
@@ -2218,42 +2216,74 @@ class MarsSceneManager {
   // Low-poly cybertruck-inspired vehicle
   createCybertruckVehicle() {
     const group = new THREE.Group();
-
-    const bodyGeom = new THREE.BoxGeometry(9, 2.5, 4.5);
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xc0c0c0, metalness: 0.9, roughness: 0.15 });
+    // Main stainless body
+    const bodyGeom = new THREE.BoxGeometry(10.5, 2.6, 4.5);
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0xd0d0d0,
+      metalness: 0.95,
+      roughness: 0.2
+    });
     const body = new THREE.Mesh(bodyGeom, bodyMat);
-    body.position.y = 2.2;
+    body.position.y = 2.3;
     group.add(body);
 
-    const roofGeom = new THREE.CylinderGeometry(0, 4.5, 3, 4, 1, false);
-    const roofMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0, metalness: 0.8, roughness: 0.2 });
+    // Wedge roof / cabin
+    const roofGeom = new THREE.CylinderGeometry(0, 4.8, 3.0, 4, 1, false);
+    const roofMat = new THREE.MeshStandardMaterial({
+      color: 0x20232a,
+      metalness: 0.8,
+      roughness: 0.15,
+      opacity: 0.9,
+      transparent: true
+    });
     const roof = new THREE.Mesh(roofGeom, roofMat);
     roof.rotation.z = Math.PI / 2;
-    roof.position.set(-0.5, 4.0, 0);
+    roof.position.set(-0.4, 4.0, 0);
     group.add(roof);
 
-    const stripGeom = new THREE.BoxGeometry(4.5, 0.3, 0.4);
-    const stripMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 1.2 });
+    // Front light bar
+    const stripGeom = new THREE.BoxGeometry(0.3, 0.4, 3.8);
+    const stripMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0xffffff,
+      emissiveIntensity: 1.4
+    });
     const lightStrip = new THREE.Mesh(stripGeom, stripMat);
-    lightStrip.position.set(4.8, 2.6, 0);
+    lightStrip.position.set(5.4, 2.4, 0);
     group.add(lightStrip);
 
-    const frontLight = new THREE.PointLight(0xffffff, 1.2, 70);
-    frontLight.position.set(5.0, 2.8, 0);
+    const frontLight = new THREE.PointLight(0xffffff, 1.4, 90);
+    frontLight.position.set(5.6, 2.5, 0);
     group.add(frontLight);
 
-    const wheelGeom = new THREE.CylinderGeometry(1.1, 1.1, 0.9, 14);
-    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.4, roughness: 0.8 });
+    // Dark lower fascia
+    const bumperGeom = new THREE.BoxGeometry(10.6, 1.0, 4.6);
+    const bumperMat = new THREE.MeshStandardMaterial({
+      color: 0x111111,
+      metalness: 0.4,
+      roughness: 0.8
+    });
+    const bumper = new THREE.Mesh(bumperGeom, bumperMat);
+    bumper.position.y = 1.2;
+    group.add(bumper);
+
+    // Wheels
+    const wheelGeom = new THREE.CylinderGeometry(1.25, 1.25, 0.9, 18);
+    const wheelMat = new THREE.MeshStandardMaterial({
+      color: 0x111111,
+      metalness: 0.4,
+      roughness: 0.8
+    });
     const wheelOffsets = [
-      [3.4, 0, 2.0],
-      [-3.4, 0, 2.0],
-      [3.4, 0, -2.0],
-      [-3.4, 0, -2.0]
+      [3.9, 0, 2.1],
+      [-3.9, 0, 2.1],
+      [3.9, 0, -2.1],
+      [-3.9, 0, -2.1]
     ];
     wheelOffsets.forEach(([x, y, z]) => {
       const wheel = new THREE.Mesh(wheelGeom, wheelMat);
       wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(x, 1.1, z);
+      wheel.position.set(x, 1.2, z);
       group.add(wheel);
     });
 
@@ -2319,6 +2349,9 @@ class MarsSceneManager {
     const colonyOffsetX = -400;
     const colonyOffsetZ = -600;
     const groundY = 0;
+
+    // Store primary colony center for use by traffic and rail systems
+    this.colonyCenter = new THREE.Vector3(colonyOffsetX, groundY, colonyOffsetZ);
     
     // === MAIN COMMAND CENTER - Ultra-modern multi-level structure ===
     const commandCenterLevels = 3;
@@ -2468,9 +2501,7 @@ class MarsSceneManager {
         // LED strips on each segment
         const stripGeometry = new THREE.BoxGeometry(1, segHeight, 1);
         const stripMaterial = new THREE.MeshBasicMaterial({
-          color: 0x00ffff,
-          emissive: 0x00ffff,
-          emissiveIntensity: 0.8
+          color: 0x00ffff
         });
         for (let i = 0; i < 4; i++) {
           const angle = (i / 4) * Math.PI * 2;
@@ -2744,9 +2775,7 @@ class MarsSceneManager {
       // Light head
       const headGeometry = new THREE.SphereGeometry(2.5, 16, 16);
       const headMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffaa44,
-        emissive: 0xffaa44,
-        emissiveIntensity: 1
+        color: 0xffaa44
       });
       const head = new THREE.Mesh(headGeometry, headMaterial);
       head.position.y = 7;
@@ -2764,6 +2793,48 @@ class MarsSceneManager {
     }
     
     console.log('✅ Ultra high-definition futuristic colony created:', structures.length, 'main structures');
+
+    // Create an exact replica colony a few miles away
+    try {
+      const perfSettings = getPerformanceSettings();
+      if (!perfSettings.isMobile) {
+        const replicaOffset = new THREE.Vector3(2600, 0, 0); // ~a few km away on desktop
+        this.secondaryColonyCenter = this.colonyCenter.clone().add(replicaOffset);
+
+        structures.forEach(original => {
+          if (!original) return;
+          const clone = original.clone(true);
+          clone.position.x += replicaOffset.x;
+          clone.position.z += replicaOffset.z;
+          this.scene.add(clone);
+        });
+
+        console.log('✅ Secondary colony replica created at', this.secondaryColonyCenter.x, this.secondaryColonyCenter.z);
+
+        // Build elevated rail and bullet train between the two colonies
+        this.createBulletTrainSystem();
+
+        // Queue creation of the third futuristic city node in the background
+        try {
+          if (typeof lazyLoader !== 'undefined') {
+            const perfSettings = getPerformanceSettings();
+            if (perfSettings.detailLevel === 'high') {
+              lazyLoader.loadInBackground('thirdCityNode', () => {
+                this.createThirdCityNode();
+                return Promise.resolve();
+              });
+            }
+          } else {
+            // Fallback: delayed creation so it doesn't block initial load
+            setTimeout(() => this.createThirdCityNode(), 4000);
+          }
+        } catch (e) {
+          console.warn('Failed to schedule third city node for lazy loading:', e);
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to create secondary colony or bullet train system:', e);
+    }
   }
 
   createLaunchSites() {
@@ -2861,6 +2932,282 @@ class MarsSceneManager {
     // Fallback: return 0 if terrain not found (will log warning)
     console.warn(`Could not find terrain at (${x}, ${z}), using y=0. Terrain mesh:`, this.terrainMesh ? 'found' : 'NOT FOUND');
     return 0;
+  }
+
+  // Create a third futuristic city node as part of a loose square network
+  createThirdCityNode() {
+    try {
+      const perfSettings = getPerformanceSettings();
+      if (perfSettings.isMobile) return;
+      if (!this.colonyCenter || !this.secondaryColonyCenter) return;
+      if (this.futureCityCenter) return; // already built
+
+      const c1 = this.colonyCenter.clone();
+      const c2 = this.secondaryColonyCenter.clone();
+      const baseVec = new THREE.Vector3().subVectors(c2, c1);
+      const baseLen = baseVec.length();
+      if (baseLen < 10) return;
+
+      baseVec.normalize();
+      // Perpendicular in XZ plane to form the third node of a square-like layout
+      const perp = new THREE.Vector3(-baseVec.z, 0, baseVec.x).normalize();
+
+      const mid = new THREE.Vector3().addVectors(c1, c2).multiplyScalar(0.5);
+      const offsetDistance = baseLen * 0.7; // push city out far enough to feel distinct
+      const roughPos = mid.clone().add(perp.multiplyScalar(offsetDistance));
+
+      const groundY = this.getTerrainHeight(roughPos.x, roughPos.z);
+      const center = new THREE.Vector3(roughPos.x, groundY, roughPos.z);
+      this.futureCityCenter = center;
+
+      console.log('🏙️ Creating third futuristic city node at', center.x, center.z);
+
+      this.createFuturisticCity(center);
+      this.createCityBulletTrainSystem(center);
+    } catch (e) {
+      console.warn('Failed to create third city node or its train system:', e);
+    }
+  }
+
+  // Build a large futuristic city with ~100 varied skyscrapers and one record-setting tower
+  createFuturisticCity(center) {
+    const structures = [];
+
+    const perfSettings = typeof getPerformanceSettings === 'function'
+      ? getPerformanceSettings()
+      : { detailLevel: 'high' };
+
+    const baseRadius = perfSettings.detailLevel === 'low' ? 300 : 420;
+    const innerRadius = 80;
+
+    // Approximate the tallest existing colony tower height and create a new icon 5x taller
+    const colonyTallTowerHeight = 170; // based on residential towers near the main colony
+    const flagshipHeight = colonyTallTowerHeight * 5; // ultra-tall centerpiece
+
+    // Dense ring of skyscrapers around the flagship core
+    let skyscraperCount = 100;
+    if (perfSettings.detailLevel === 'normal') {
+      skyscraperCount = 70;
+    } else if (perfSettings.detailLevel === 'low') {
+      skyscraperCount = 40;
+    }
+    for (let i = 0; i < skyscraperCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radiusLerp = Math.random();
+      const radius = innerRadius + (baseRadius - innerRadius) * Math.pow(radiusLerp, 0.7);
+
+      const x = center.x + Math.cos(angle) * radius;
+      const z = center.z + Math.sin(angle) * radius;
+      const groundY = this.getTerrainHeight(x, z);
+
+      // Height distribution: taller near the core, smaller at the fringes
+      const coreFactor = 1 - (radius - innerRadius) / (baseRadius - innerRadius + 1e-5);
+      const baseHeight = 60 + coreFactor * 180 + Math.random() * 40;
+
+      const width = 10 + Math.random() * 16;
+      const depth = 10 + Math.random() * 16;
+
+      const towerGeom = new THREE.BoxGeometry(width, baseHeight, depth);
+      const towerMat = new THREE.MeshStandardMaterial({
+        color: 0xcfd8ff,
+        metalness: 0.9,
+        roughness: 0.2,
+        emissive: 0x111633,
+        emissiveIntensity: 0.35
+      });
+      const tower = new THREE.Mesh(towerGeom, towerMat);
+      tower.position.set(x, groundY + baseHeight / 2, z);
+      tower.castShadow = true;
+      tower.receiveShadow = true;
+      this.scene.add(tower);
+      structures.push(tower);
+
+      // Vertical neon edge strips for a more futuristic silhouette
+      const edgeGeom = new THREE.BoxGeometry(0.7, baseHeight * 1.02, 0.7);
+      const edgeMat = new THREE.MeshBasicMaterial({
+        color: 0x66ddff,
+        transparent: true,
+        opacity: 0.8
+      });
+      const edgeOffsets = [
+        { x: width / 2 + 0.4, z: depth / 2 + 0.4 },
+        { x: -width / 2 - 0.4, z: depth / 2 + 0.4 },
+        { x: width / 2 + 0.4, z: -depth / 2 - 0.4 },
+        { x: -width / 2 - 0.4, z: -depth / 2 - 0.4 }
+      ];
+      edgeOffsets.forEach(offset => {
+        if (Math.random() < 0.6) {
+          const edge = new THREE.Mesh(edgeGeom, edgeMat);
+          edge.position.set(offset.x, 0, offset.z);
+          tower.add(edge);
+        }
+      });
+
+      // Roof beacon lights to make the skyline sparkle
+      const beaconGeom = new THREE.SphereGeometry(2.2, 12, 12);
+      const beaconMat = new THREE.MeshBasicMaterial({ color: 0xff66cc });
+      const beacon = new THREE.Mesh(beaconGeom, beaconMat);
+      beacon.position.set(0, baseHeight / 2 + 3, 0);
+      tower.add(beacon);
+
+      const beaconLight = new THREE.PointLight(0xff66cc, 0.9, 120);
+      beaconLight.position.copy(beacon.position);
+      tower.add(beaconLight);
+
+      this.animatedObjects.push({
+        mesh: beaconLight,
+        type: 'blink',
+        phase: Math.random() * Math.PI * 2
+      });
+    }
+
+    // Flagship mega-tower in the exact city center
+    const flagshipWidth = 40;
+    const flagshipDepth = 40;
+    const flagshipGeom = new THREE.BoxGeometry(flagshipWidth, flagshipHeight, flagshipDepth);
+    const flagshipMat = new THREE.MeshStandardMaterial({
+      color: 0xf5f7ff,
+      metalness: 1.0,
+      roughness: 0.08,
+      emissive: 0x223366,
+      emissiveIntensity: 0.55
+    });
+    const flagship = new THREE.Mesh(flagshipGeom, flagshipMat);
+    flagship.position.set(center.x, center.y + flagshipHeight / 2, center.z);
+    flagship.castShadow = true;
+    flagship.receiveShadow = true;
+    this.scene.add(flagship);
+    structures.push(flagship);
+
+    // Holographic crown ring near the top of the mega-tower
+    const crownRingGeom = new THREE.TorusGeometry(flagshipWidth * 0.9, 1.8, 16, 64);
+    const crownRingMat = new THREE.MeshStandardMaterial({
+      color: 0x66ffff,
+      metalness: 0.9,
+      roughness: 0.1,
+      emissive: 0x33bbff,
+      emissiveIntensity: 0.9
+    });
+    const crownRing = new THREE.Mesh(crownRingGeom, crownRingMat);
+    crownRing.position.y = flagshipHeight / 2 - 40;
+    crownRing.rotation.x = Math.PI / 2;
+    flagship.add(crownRing);
+
+    this.animatedObjects.push({
+      mesh: crownRing,
+      type: 'rotate',
+      speed: 0.02
+    });
+
+    // Triple spotlight cluster beaming into the sky from the top
+    for (let i = 0; i < 3; i++) {
+      const spot = new THREE.SpotLight(0x99ddff, 2.2, 1200, Math.PI / 8, 0.6, 2);
+      spot.position.set(
+        center.x + Math.cos((i / 3) * Math.PI * 2) * 10,
+        center.y + flagshipHeight + 10,
+        center.z + Math.sin((i / 3) * Math.PI * 2) * 10
+      );
+      spot.target.position.set(center.x, center.y + flagshipHeight / 2, center.z);
+      this.scene.add(spot);
+      this.scene.add(spot.target);
+    }
+
+    // Soft city-wide ambient glow
+    const cityLight = new THREE.PointLight(0x88aaff, 3.5, 2000);
+    cityLight.position.set(center.x, center.y + 260, center.z);
+    this.scene.add(cityLight);
+
+    console.log('✅ Futuristic third-city skyline created with', structures.length, 'skyscraper structures');
+  }
+
+  // Elevated rail and bullet train between the secondary colony and the new city
+  createCityBulletTrainSystem(cityCenter) {
+    try {
+      const perfSettings = getPerformanceSettings();
+      if (perfSettings.isMobile) return;
+      if (!this.secondaryColonyCenter || !cityCenter) return;
+
+      const start = this.secondaryColonyCenter.clone();
+      const end = cityCenter.clone();
+
+      const startY = this.getTerrainHeight(start.x, start.z) + 45;
+      const endY = this.getTerrainHeight(end.x, end.z) + 45;
+      start.y = startY;
+      end.y = endY;
+
+      let segmentCount = 22;
+      if (perfSettings.detailLevel === 'normal') {
+        segmentCount = 16;
+      } else if (perfSettings.detailLevel === 'low') {
+        segmentCount = 10;
+      }
+      const pylonGeometry = new THREE.CylinderGeometry(2.2, 3.2, 1, 10);
+      const pylonMaterial = new THREE.MeshStandardMaterial({
+        color: 0x555577,
+        roughness: 0.35,
+        metalness: 0.9
+      });
+
+      for (let i = 0; i <= segmentCount; i++) {
+        const t = i / segmentCount;
+        const pos = new THREE.Vector3().lerpVectors(start, end, t);
+        const groundY = this.getTerrainHeight(pos.x, pos.z);
+        const height = Math.max(24, pos.y - groundY);
+
+        const pylon = new THREE.Mesh(pylonGeometry, pylonMaterial);
+        pylon.scale.y = height / 1; // base height is 1
+        pylon.position.set(pos.x, groundY + height / 2, pos.z);
+        this.scene.add(pylon);
+      }
+
+      const direction = new THREE.Vector3().subVectors(end, start);
+      const length = direction.length();
+      direction.normalize();
+
+      const deckGeometry = new THREE.BoxGeometry(9, 1.4, length);
+      const deckMaterial = new THREE.MeshStandardMaterial({
+        color: 0xdde3ff,
+        roughness: 0.18,
+        metalness: 0.92
+      });
+      const deck = new THREE.Mesh(deckGeometry, deckMaterial);
+
+      const deckGroup = new THREE.Group();
+      deckGroup.add(deck);
+
+      const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+      deckGroup.position.copy(mid);
+
+      const yaw = Math.atan2(end.x - start.x, end.z - start.z);
+      deckGroup.rotation.y = yaw;
+
+      this.scene.add(deckGroup);
+
+      const train = this.createBulletTrainMesh();
+
+      const initialPos = start.clone();
+      train.position.copy(initialPos);
+      train.rotation.y = yaw;
+      this.scene.add(train);
+
+      if (!this.bulletTrains) {
+        this.bulletTrains = [];
+      }
+      this.bulletTrains.push({
+        mesh: train,
+        start,
+        end,
+        yaw,
+        t: 0,
+        direction: 1,
+        speed: perfSettings.detailLevel === 'high' ? 0.07 : 0.06,
+        lastTime: null
+      });
+
+      console.log('🚄 City bullet train system created between secondary colony and third city');
+    } catch (e) {
+      console.warn('Failed to create city bullet train system:', e);
+    }
   }
 
   positionOnTerrain(group, x, z) {
@@ -2965,6 +3312,9 @@ class MarsSceneManager {
 
     // Ground traffic (AI mining convoys / colony vehicles)
     this.updateTraffic(now);
+
+    // High-speed bullet train between the two colonies
+    this.updateBulletTrain(now);
   }
 
   // Check if the player has reached the next guided-route waypoint
@@ -3074,6 +3424,234 @@ class MarsSceneManager {
         }
       }
     }
+  }
+
+  // Create elevated rail and a bullet train between the primary and secondary colonies
+  createBulletTrainSystem() {
+    try {
+      const perfSettings = getPerformanceSettings();
+      if (perfSettings.isMobile) return;
+      if (!this.colonyCenter || !this.secondaryColonyCenter) return;
+
+      const start = this.colonyCenter.clone();
+      const end = this.secondaryColonyCenter.clone();
+
+      // Elevate the track above the terrain
+      const startY = this.getTerrainHeight(start.x, start.z) + 45;
+      const endY = this.getTerrainHeight(end.x, end.z) + 45;
+      start.y = startY;
+      end.y = endY;
+
+      // Build elevated pylons along the route
+      const segmentCount = 24;
+      const pylonGeometry = new THREE.CylinderGeometry(2, 3, 1, 10);
+      const pylonMaterial = new THREE.MeshStandardMaterial({
+        color: 0x666666,
+        roughness: 0.4,
+        metalness: 0.8
+      });
+
+      for (let i = 0; i <= segmentCount; i++) {
+        const t = i / segmentCount;
+        const pos = new THREE.Vector3().lerpVectors(start, end, t);
+        const groundY = this.getTerrainHeight(pos.x, pos.z);
+        const height = Math.max(20, pos.y - groundY);
+
+        const pylon = new THREE.Mesh(pylonGeometry, pylonMaterial);
+        pylon.scale.y = height / 1; // base height is 1
+        pylon.position.set(pos.x, groundY + height / 2, pos.z);
+        this.scene.add(pylon);
+      }
+
+      // Create the elevated rail deck as a long, sleek beam
+      const direction = new THREE.Vector3().subVectors(end, start);
+      const length = direction.length();
+      direction.normalize();
+
+      const deckGeometry = new THREE.BoxGeometry(8, 1.2, length);
+      const deckMaterial = new THREE.MeshStandardMaterial({
+        color: 0xccccdd,
+        roughness: 0.2,
+        metalness: 0.9
+      });
+      const deck = new THREE.Mesh(deckGeometry, deckMaterial);
+
+      const deckGroup = new THREE.Group();
+      deckGroup.add(deck);
+
+      const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+      deckGroup.position.copy(mid);
+
+      const yaw = Math.atan2(end.x - start.x, end.z - start.z);
+      deckGroup.rotation.y = yaw;
+
+      this.scene.add(deckGroup);
+
+      const train = this.createBulletTrainMesh();
+
+      // Initial placement at the primary colony side of the track
+      const initialPos = start.clone();
+      train.position.copy(initialPos);
+      train.rotation.y = yaw;
+      this.scene.add(train);
+
+      if (!this.bulletTrains) {
+        this.bulletTrains = [];
+      }
+      this.bulletTrains.push({
+        mesh: train,
+        start,
+        end,
+        yaw,
+        t: 0,
+        direction: 1,
+        speed: 0.06, // fraction of the route per second
+        lastTime: null
+      });
+
+      console.log('🚄 Bullet train system created between colonies');
+    } catch (e) {
+      console.warn('Failed to create bullet train system:', e);
+    }
+  }
+
+  // Build a 4-car high-speed train that carries glowing Optimus-style robot pods
+  createBulletTrainMesh() {
+    const train = new THREE.Group();
+
+    const carCount = 4;
+    const carLength = 12;
+    const carWidth = 3.4;
+    const carHeight = 3;
+    const carGap = 0.9;
+
+    const bodyMat = new THREE.MeshStandardMaterial({
+      color: 0xeeeeff,
+      metalness: 0.7,
+      roughness: 0.25
+    });
+    const noseGeom = new THREE.ConeGeometry(2.2, 5, 16);
+    const noseMat = new THREE.MeshStandardMaterial({
+      color: 0xddddff,
+      metalness: 0.8,
+      roughness: 0.2
+    });
+    const windowGeom = new THREE.BoxGeometry(0.25, 1.1, carLength * 0.78);
+    const windowMat = new THREE.MeshStandardMaterial({
+      color: 0x66aaff,
+      emissive: 0x3388ff,
+      emissiveIntensity: 0.85,
+      transparent: true,
+      opacity: 0.9
+    });
+    const lightStripGeom = new THREE.BoxGeometry(0.3, 0.3, 3.5);
+    const lightStripMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0xffffff,
+      emissiveIntensity: 1.35
+    });
+    const robotPodGeom = new THREE.BoxGeometry(0.35, 1.4, 0.6);
+    const robotPodMat = new THREE.MeshStandardMaterial({
+      color: 0x88ccff,
+      emissive: 0x66bbff,
+      emissiveIntensity: 0.9,
+      metalness: 0.4,
+      roughness: 0.35
+    });
+
+    const totalTrainLength = carCount * carLength + (carCount - 1) * carGap;
+    const trainOriginOffset = -totalTrainLength / 2 + carLength / 2;
+
+    for (let i = 0; i < carCount; i++) {
+      const isEngine = i === 0;
+      const car = new THREE.Group();
+
+      const bodyGeom = new THREE.BoxGeometry(carWidth, carHeight, carLength);
+      const body = new THREE.Mesh(bodyGeom, bodyMat);
+      body.position.y = 2;
+      car.add(body);
+
+      // Side windows on both sides so you glimpse interior robots
+      const windowsFrontSide = new THREE.Mesh(windowGeom, windowMat);
+      windowsFrontSide.position.set((carWidth / 2) - 0.45, 2.6, 0);
+      car.add(windowsFrontSide);
+
+      const windowsBackSide = windowsFrontSide.clone();
+      windowsBackSide.position.x = -windowsFrontSide.position.x;
+      car.add(windowsBackSide);
+
+      // Interior "Optimus" robot pods as glowing silhouettes
+      const podsPerCar = 3;
+      for (let j = 0; j < podsPerCar; j++) {
+        const pod = new THREE.Mesh(robotPodGeom, robotPodMat);
+        const zSpan = carLength * 0.6;
+        const localZ = -zSpan / 2 + (zSpan / (podsPerCar - 1 || 1)) * j;
+        pod.position.set(0, 2.0, localZ);
+        car.add(pod);
+      }
+
+      if (isEngine) {
+        // Streamlined nose and headlights on the leading car
+        const nose = new THREE.Mesh(noseGeom, noseMat);
+        nose.rotation.x = Math.PI / 2;
+        nose.position.set(0, 2.0, -carLength / 2 - 2.3);
+        car.add(nose);
+
+        const frontStrip = new THREE.Mesh(lightStripGeom, lightStripMat);
+        frontStrip.position.set(0, 2.4, -carLength / 2 - 1.6);
+        car.add(frontStrip);
+
+        const headLight = new THREE.PointLight(0xffffff, 1.7, 140);
+        headLight.position.set(0, 2.4, -carLength / 2 - 1.9);
+        car.add(headLight);
+      }
+
+      const offsetZ = trainOriginOffset + i * (carLength + carGap);
+      car.position.z = offsetZ;
+      train.add(car);
+    }
+
+    return train;
+  }
+
+  // Animate bullet train along its elevated track
+  updateBulletTrain(currentTime) {
+    if (!this.bulletTrains || this.bulletTrains.length === 0) return;
+
+    this.bulletTrains.forEach(train => {
+      if (!train.mesh) return;
+
+      if (train.lastTime == null) {
+        train.lastTime = currentTime;
+        return;
+      }
+
+      const deltaMs = currentTime - train.lastTime;
+      if (deltaMs <= 5) return;
+
+      train.lastTime = currentTime;
+      const dt = Math.min(deltaMs, 120) / 1000; // clamp
+
+      let t = train.t + train.speed * dt * train.direction;
+
+      // Ping-pong between endpoints
+      if (t > 1) {
+        t = 1 - (t - 1);
+        train.direction = -1;
+      } else if (t < 0) {
+        t = -t;
+        train.direction = 1;
+      }
+
+      train.t = t;
+
+      const pos = new THREE.Vector3().lerpVectors(train.start, train.end, t);
+      train.mesh.position.copy(pos);
+
+      // Flip heading when changing direction so the nose always points forward
+      const baseYaw = train.yaw;
+      train.mesh.rotation.y = baseYaw + (train.direction < 0 ? Math.PI : 0);
+    });
   }
 
   // Simple time-based rocket launch/arrival cycles using the pre-created rockets
@@ -5450,44 +6028,31 @@ function addAtmosphericGlow(context, size) {
   // Create a subtle atmospheric glow at the bottom of the sky
   context.save();
 
-  // Bottom atmospheric glow (Mars-like reddish) - using lighter blend to prevent shadows
-  const bottomGradient = context.createLinearGradient(0, size * 0.85, 0, size);
-  bottomGradient.addColorStop(0, 'rgba(120, 50, 30, 0)');
-  bottomGradient.addColorStop(0.5, 'rgba(150, 70, 40, 0.12)');
-  bottomGradient.addColorStop(1, 'rgba(180, 90, 50, 0.25)');
+  // Bottom atmospheric glow (cool blue) with very low contrast to avoid banding
+  const bottomGradient = context.createLinearGradient(0, size * 0.82, 0, size);
+  bottomGradient.addColorStop(0, 'rgba(40, 60, 140, 0.0)');
+  bottomGradient.addColorStop(0.6, 'rgba(60, 90, 190, 0.08)');
+  bottomGradient.addColorStop(1, 'rgba(35, 55, 130, 0.14)');
 
-  context.globalCompositeOperation = 'lighter';
+  context.globalCompositeOperation = 'screen';
   context.fillStyle = bottomGradient;
-  context.fillRect(0, size * 0.8, size, size * 0.2);
+  context.fillRect(0, size * 0.8, size, size * 0.22);
 
-  // Add some atmospheric haze particles
-  context.globalCompositeOperation = 'lighter';
-  for (let i = 0; i < 200; i++) {
+  // Very light atmospheric haze, greatly reduced to avoid visible layers
+  context.globalCompositeOperation = 'screen';
+  for (let i = 0; i < 80; i++) {
     const x = Math.random() * size;
-    const y = size * 0.85 + Math.random() * (size * 0.15);
-    const radius = Math.random() * 2 + 1;
-    const opacity = Math.random() * 0.12;
+    const y = size * 0.84 + Math.random() * (size * 0.16);
+    const radius = Math.random() * 1.8 + 0.8;
+    const opacity = Math.random() * 0.06;
 
     context.beginPath();
     context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fillStyle = `rgba(200, 150, 120, ${opacity})`;
+    context.fillStyle = `rgba(170, 190, 255, ${opacity})`;
     context.fill();
   }
 
-  // Add subtle light rays from the horizon
-  for (let i = 0; i < 15; i++) {
-    const x = Math.random() * size;
-    const width = Math.random() * size * 0.1 + size * 0.05;
-    const height = Math.random() * size * 0.3 + size * 0.1;
-    const opacity = Math.random() * 0.1 + 0.05;
-
-    const rayGradient = context.createLinearGradient(x, size, x, size - height);
-    rayGradient.addColorStop(0, `rgba(255, 200, 150, ${opacity})`);
-    rayGradient.addColorStop(1, 'rgba(255, 200, 150, 0)');
-
-    context.fillStyle = rayGradient;
-    context.fillRect(x - width / 2, size - height, width, height);
-  }
+  // Removed strong light rays to keep the horizon smooth and shadow-free
 
   // Reset blend mode
   context.globalCompositeOperation = 'source-over';
@@ -5533,14 +6098,14 @@ function addPlanetToCanvas(context, x, y, radius, color, hasRings = false) {
 function addMoonToCanvas(context, x, y, radius) {
   context.save();
 
-  // Base moon body with stronger contrast
+  // Base moon body with softer contrast to avoid harsh glare
   const bodyGradient = context.createRadialGradient(
     x - radius * 0.35, y - radius * 0.35, 0,
     x, y, radius
   );
-  bodyGradient.addColorStop(0, 'rgba(230, 230, 230, 1)');
-  bodyGradient.addColorStop(0.5, 'rgba(190, 190, 190, 1)');
-  bodyGradient.addColorStop(1, 'rgba(90, 90, 90, 1)');
+  bodyGradient.addColorStop(0, 'rgba(235, 235, 235, 0.9)');
+  bodyGradient.addColorStop(0.5, 'rgba(200, 200, 200, 0.9)');
+  bodyGradient.addColorStop(1, 'rgba(120, 120, 120, 0.9)');
 
   context.fillStyle = bodyGradient;
   context.beginPath();
@@ -5554,8 +6119,8 @@ function addMoonToCanvas(context, x, y, radius) {
     x + radius * 0.4, y + radius * 0.2, radius * 1.3
   );
   terminatorGradient.addColorStop(0, 'rgba(0, 0, 0, 0.0)');
-  terminatorGradient.addColorStop(0.4, 'rgba(0, 0, 0, 0.15)');
-  terminatorGradient.addColorStop(1, 'rgba(0, 0, 0, 0.4)');
+  terminatorGradient.addColorStop(0.4, 'rgba(0, 0, 0, 0.08)');
+  terminatorGradient.addColorStop(1, 'rgba(0, 0, 0, 0.22)');
 
   context.globalCompositeOperation = 'multiply';
   context.fillStyle = terminatorGradient;
@@ -5567,7 +6132,7 @@ function addMoonToCanvas(context, x, y, radius) {
   context.globalCompositeOperation = 'source-over';
 
   // Add a few small craters for surface detail
-  const craterCount = 5;
+  const craterCount = 4;
   for (let i = 0; i < craterCount; i++) {
     const angle = (Math.PI * 2 * i) / craterCount + Math.random() * 0.4;
     const dist = radius * (0.25 + Math.random() * 0.4);
@@ -5579,8 +6144,8 @@ function addMoonToCanvas(context, x, y, radius) {
       cx - cr * 0.3, cy - cr * 0.3, 0,
       cx, cy, cr
     );
-    craterGradient.addColorStop(0, 'rgba(230, 230, 230, 0.9)');
-    craterGradient.addColorStop(0.5, 'rgba(140, 140, 140, 0.9)');
+    craterGradient.addColorStop(0, 'rgba(230, 230, 230, 0.7)');
+    craterGradient.addColorStop(0.5, 'rgba(150, 150, 150, 0.7)');
     craterGradient.addColorStop(1, 'rgba(60, 60, 60, 0.0)');
 
     context.fillStyle = craterGradient;
@@ -5597,19 +6162,19 @@ function addLargePlanetToCanvas(context, size) {
   // Position the planet near the central upper sky so it's easy to see
   const x = size * 0.5;
   const y = size * 0.4;
-  const radius = size * 0.04;
+  const radius = size * 0.034;
 
   context.save();
 
   // Base planet body (Jupiter-like, warm with subtle depth)
-  const baseColor = '#c58a4a';
+  const baseColor = '#a46c38';
   const planetGradient = context.createRadialGradient(
     x - radius * 0.35, y - radius * 0.4, 0,
     x, y, radius * 1.1
   );
-  planetGradient.addColorStop(0, lightenColor(baseColor, 45));
+  planetGradient.addColorStop(0, lightenColor(baseColor, 16));
   planetGradient.addColorStop(0.5, baseColor);
-  planetGradient.addColorStop(1, darkenColor(baseColor, 35));
+  planetGradient.addColorStop(1, darkenColor(baseColor, 18));
 
   context.fillStyle = planetGradient;
   context.beginPath();
@@ -5636,8 +6201,8 @@ function addLargePlanetToCanvas(context, size) {
       sx - srX * 0.4, sy - srY * 0.4, 0,
       sx, sy, srX
     );
-    stormGradient.addColorStop(0, 'rgba(255, 230, 210, 0.9)');
-    stormGradient.addColorStop(0.4, 'rgba(230, 180, 150, 0.85)');
+    stormGradient.addColorStop(0, 'rgba(255, 230, 210, 0.65)');
+    stormGradient.addColorStop(0.4, 'rgba(230, 180, 150, 0.55)');
     stormGradient.addColorStop(1, 'rgba(40, 20, 10, 0.0)');
 
     context.save();
@@ -5652,7 +6217,7 @@ function addLargePlanetToCanvas(context, size) {
   }
 
   // Subtle surface mottling for texture
-  const patchCount = 28;
+  const patchCount = 20;
   for (let i = 0; i < patchCount; i++) {
     const angle = Math.random() * Math.PI * 2;
     const dist = radius * (0.0 + Math.random() * 0.85);
@@ -5671,7 +6236,7 @@ function addLargePlanetToCanvas(context, size) {
     patchGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
 
     // Convert tone hex to rgba-ish by blending via globalAlpha
-    context.globalAlpha = 0.16;
+    context.globalAlpha = 0.07;
     context.fillStyle = patchGrad;
     context.beginPath();
     context.arc(px, py, pr, 0, Math.PI * 2);
@@ -5704,16 +6269,16 @@ function addLargePlanetToCanvas(context, size) {
   // Atmospheric rim glow
   context.globalCompositeOperation = 'screen';
   const atmGradient = context.createRadialGradient(
-    x, y, radius * 0.85,
-    x, y, radius * 1.35
+    x, y, radius * 0.95,
+    x, y, radius * 1.18
   );
   atmGradient.addColorStop(0, 'rgba(160, 200, 255, 0.0)');
-  atmGradient.addColorStop(0.4, 'rgba(160, 210, 255, 0.45)');
+  atmGradient.addColorStop(0.5, 'rgba(160, 210, 255, 0.14)');
   atmGradient.addColorStop(1, 'rgba(120, 180, 255, 0.0)');
 
   context.fillStyle = atmGradient;
   context.beginPath();
-  context.arc(x, y, radius * 1.4, 0, Math.PI * 2);
+  context.arc(x, y, radius * 1.2, 0, Math.PI * 2);
   context.fill();
 
   context.restore();
