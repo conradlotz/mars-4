@@ -559,7 +559,14 @@
       display: none !important;
     }
   </style>
-  <!-- Load Three.js libraries as regular scripts -->
+  <!-- Preload Three.js for faster discovery -->
+  <link rel="preload" href="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js" as="script" crossorigin>
+  <link rel="preload" href="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/GLTFLoader.js" as="script" crossorigin>
+  <link rel="preload" href="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js" as="script" crossorigin>
+  <!-- Also preload the game script so browser starts fetching it early -->
+  <!-- preload removed to prevent caching issues -->
+  <!-- <link rel="preload" href="mars.js" as="script"> -->
+  <!-- Load Three.js libraries (must load in order) -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/GLTFLoader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
@@ -975,15 +982,14 @@
           renderDistance: this.deviceSpecs.performanceLevel
         };
         
-        // Simulate loading steps with actual progress
+        // Show loading steps quickly without artificial delays
         for (let i = 0; i < this.loadingSteps.length; i++) {
           loadingText.textContent = this.loadingSteps[i];
-          
-          // Simulate processing time
-          await new Promise(resolve => setTimeout(resolve, 200 + Math.random() * 400));
-          
-          this.loadingProgress = ((i + 1) / this.loadingSteps.length) * 100;
+          this.loadingProgress = ((i + 1) / this.loadingSteps.length) * 80; // Reserve last 20% for actual script load
           loadingBar.style.width = this.loadingProgress + '%';
+          
+          // Yield to browser briefly to update UI (1 frame), not artificial delay
+          await new Promise(resolve => requestAnimationFrame(resolve));
         }
         
         // Load the main game script
@@ -993,18 +999,16 @@
           // Load and start ambient music after game loads
           this.loadAmbientMusic();
           
-          // Hide preloader with fade out
+          // Hide preloader with fade out - minimal delay
+          const preloader = document.getElementById('preloader');
+          preloader.style.opacity = '0';
+          preloader.style.transition = 'opacity 0.4s ease';
           setTimeout(() => {
-            const preloader = document.getElementById('preloader');
-            preloader.style.opacity = '0';
-            preloader.style.transition = 'opacity 0.5s ease';
-            setTimeout(() => {
-              preloader.style.display = 'none';
-              
-              // Clean up UI elements after loading
-              this.cleanupUI();
-            }, 500);
-          }, 500);
+            preloader.style.display = 'none';
+            
+            // Clean up UI elements after loading
+            this.cleanupUI();
+          }, 400);
         } catch (error) {
           console.error('Failed to load game:', error);
           document.getElementById('loading-text').textContent = 'Failed to load game. Please refresh the page.';
@@ -1012,11 +1016,19 @@
       }
       
       async loadGameScript() {
+        const loadingBar = document.getElementById('loading-bar');
+        const loadingText = document.getElementById('loading-text');
+        
         return new Promise((resolve, reject) => {
+          if (loadingText) loadingText.textContent = 'Loading game engine...';
+          if (loadingBar) loadingBar.style.width = '85%';
+          
           const script = document.createElement('script');
-          script.src = 'mars.js';
+          script.src = 'mars.js?v=' + Date.now();
           script.onload = () => {
             console.log('Game script loaded successfully');
+            if (loadingText) loadingText.textContent = 'Finalizing...';
+            if (loadingBar) loadingBar.style.width = '100%';
             resolve();
           };
           script.onerror = (error) => {
@@ -1074,7 +1086,7 @@
         return true;
       }
       
-      // Auto-load ambient music after game loads
+      // Auto-load ambient music after game loads (deferred to not block rendering)
       loadAmbientMusic() {
         setTimeout(() => {
           console.log('Loading Mars ambient music...');
@@ -1093,7 +1105,7 @@
           // Show click-to-play notification since autoplay might be blocked
           this.showClickToPlayNotification();
           
-        }, 1000); // Wait 1 second after game loads
+        }, 3000); // Wait 3 seconds after game loads - don't compete with rendering
       }
       
       // Show click-to-play notification
@@ -1556,7 +1568,36 @@
                 }
               },
               'onError': (event) => {
-                console.error('YouTube player error:', event.data);
+                const code = event && typeof event.data !== 'undefined' ? event.data : 'unknown';
+                console.error('YouTube player error:', code);
+
+                // Known YouTube iframe error codes:
+                // 2   - Invalid parameter
+                // 5   - HTML5 player error
+                // 101/150/153 - Playback not allowed or video unavailable/embeds restricted
+                if (code === 101 || code === 150 || code === 153) {
+                  // Gracefully handle restricted/unavailable audio: stop tracking as playing
+                  this.isPlaying = false;
+
+                  // Update UI to indicate audio is unavailable instead of leaving broken controls
+                  const titleElement = document.getElementById('youtube-title');
+                  if (titleElement) {
+                    titleElement.textContent = 'Audio unavailable in this region/embed';
+                  }
+
+                  const playPauseBtn = document.getElementById('youtube-play-pause');
+                  if (playPauseBtn) {
+                    playPauseBtn.textContent = 'Unavailable';
+                    playPauseBtn.disabled = true;
+                  }
+
+                  const volumeSlider = document.getElementById('youtube-volume');
+                  if (volumeSlider) {
+                    volumeSlider.disabled = true;
+                  }
+
+                  console.warn('YouTube audio cannot be played here (error', code, '). UI disabled gracefully.');
+                }
               }
             }
           });
