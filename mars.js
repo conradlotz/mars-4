@@ -1890,6 +1890,9 @@ class MarsSceneManager {
     this.animatedObjects = []; // Track animated elements for update loop
     this.guidedRouteWaypoints = []; // Beacons for optional guided driving route
     this.currentWaypointIndex = 0;
+    this.aiVehicles = []; // Ground traffic vehicles (mining trucks, cybertrucks, etc.)
+    this.aiRoutes = [];   // Reusable world-space routes for AI traffic
+    this.lastTrafficUpdateTime = null;
 
     // Get reference to the terrain mesh for proper ground placement
     // The terrain is the largest PlaneGeometry in the scene (3000-5000 units wide)
@@ -1922,6 +1925,9 @@ class MarsSceneManager {
 
     // Create an optional guided driving route using blinking beacons
     this.createGuidedRoute();
+
+    // Initialize optional ground traffic system (AI vehicles)
+    this.initializeTrafficSystem();
 
     console.log('✅ ✅ ✅ MarsSceneManager constructed with terrainSize=', terrainSize);
     console.log('Colony and rockets should now be visible in the scene!');
@@ -1977,6 +1983,281 @@ class MarsSceneManager {
     if (typeof console !== 'undefined') {
       console.log('MarsSceneManager: created rocket pads and rockets:', this.rockets.length);
     }
+  }
+
+  // Initialize AI ground traffic (mining convoys, cybertruck-like vehicles)
+  initializeTrafficSystem() {
+    try {
+      const perfSettings = getPerformanceSettings();
+
+      // Skip AI traffic only on mobile for performance
+      if (perfSettings.isMobile) {
+        this.aiVehicles = [];
+        this.aiRoutes = [];
+        return;
+      }
+
+      // Define a couple of simple routes between the colony and surrounding areas
+      this.createTrafficRoutes();
+
+      if (!this.aiRoutes || this.aiRoutes.length === 0) return;
+
+      const maxVehicles = perfSettings.detailLevel === 'high' ? 18 : 10;
+      const routeCount = this.aiRoutes.length;
+
+      for (let i = 0; i < maxVehicles; i++) {
+        const routeIndex = i % routeCount;
+        const route = this.aiRoutes[routeIndex];
+        if (!route || route.waypoints.length < 2) continue;
+
+        // Alternate vehicle types for visual variety
+        const typeRoll = i % 3;
+        let vehicleMesh;
+        if (typeRoll === 0) vehicleMesh = this.createMiningTruck();
+        else if (typeRoll === 1) vehicleMesh = this.createColonyRover();
+        else vehicleMesh = this.createCybertruckVehicle();
+
+        // Stagger starting positions along the route
+        const startT = (i / maxVehicles) * (route.waypoints.length - 1);
+        const baseIndex = Math.floor(startT);
+        const nextIndex = Math.min(baseIndex + 1, route.waypoints.length - 1);
+        const localT = startT - baseIndex;
+
+        const start = route.waypoints[baseIndex];
+        const end = route.waypoints[nextIndex];
+        const pos = new THREE.Vector3().copy(start).lerp(end, localT);
+
+        this.positionOnTerrain(vehicleMesh, pos.x, pos.z);
+        // Make AI vehicles slightly larger so they are easier to see
+        vehicleMesh.scale.set(1.4, 1.4, 1.4);
+        this.scene.add(vehicleMesh);
+
+        const speed = 18 + Math.random() * 10; // world units per second
+
+        this.aiVehicles.push({
+          mesh: vehicleMesh,
+          routeIndex,
+          segmentIndex: baseIndex,
+          segmentT: localT,
+          speed,
+          directionSign: Math.random() < 0.5 ? 1 : -1
+        });
+      }
+
+      console.log('AI ground traffic initialized. Vehicles:', this.aiVehicles.length);
+    } catch (e) {
+      console.warn('Failed to initialize AI traffic system:', e);
+      this.aiVehicles = [];
+      this.aiRoutes = [];
+    }
+  }
+
+  // Define a few looping traffic routes around the colony
+  createTrafficRoutes() {
+    this.aiRoutes = [];
+
+    if (!this.colonyCenter) {
+      // Fallback: approximate colony center near the known coordinates
+      this.colonyCenter = new THREE.Vector3(-360, 0, -560);
+    }
+
+    const base = this.colonyCenter.clone();
+
+    const makeWaypoint = (dx, dz) => {
+      const x = base.x + dx;
+      const z = base.z + dz;
+      // Sample terrain height directly for this point so vehicles follow ground
+      const y = this.getTerrainHeight(x, z);
+      return new THREE.Vector3(x, y, z);
+    };
+
+    // Route 1: Colony <-> mining site A (extended farther out)
+    const route1 = {
+      name: 'Colony-Mine-A',
+      waypoints: [
+        makeWaypoint(0, 0),
+        makeWaypoint(80, -60),
+        makeWaypoint(140, -160),
+        makeWaypoint(220, -260),
+        makeWaypoint(300, -380),
+        makeWaypoint(380, -520)
+      ]
+    };
+
+    // Route 2: Colony <-> mining site B (different direction, extended)
+    const route2 = {
+      name: 'Colony-Mine-B',
+      waypoints: [
+        makeWaypoint(0, 0),
+        makeWaypoint(-40, 100),
+        makeWaypoint(-120, 220),
+        makeWaypoint(-220, 320),
+        makeWaypoint(-320, 460),
+        makeWaypoint(-420, 620)
+      ]
+    };
+
+    // Route 3: Larger service loop around colony
+    const route3 = {
+      name: 'Colony-Loop',
+      waypoints: [
+        makeWaypoint(0, -70),
+        makeWaypoint(80, -40),
+        makeWaypoint(70, 60),
+        makeWaypoint(-40, 80),
+        makeWaypoint(-90, 0),
+        makeWaypoint(-40, -80)
+      ]
+    };
+
+    // Route 4: Long-haul route from colony toward rover spawn area (near 0,0)
+    const route4 = {
+      name: 'Colony-Spawn-LongHaul',
+      waypoints: [
+        makeWaypoint(0, 0),
+        makeWaypoint(120, 200),
+        makeWaypoint(240, 380),
+        makeWaypoint(360, 560) // This should be near (0, 0) in world space
+      ]
+    };
+
+    this.aiRoutes.push(route1, route2, route3, route4);
+  }
+
+  // Simple boxy mining truck
+  createMiningTruck() {
+    const group = new THREE.Group();
+
+    const bodyGeom = new THREE.BoxGeometry(10, 4, 6);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffcc66, metalness: 0.4, roughness: 0.6 });
+    const body = new THREE.Mesh(bodyGeom, bodyMat);
+    body.position.y = 3;
+    group.add(body);
+
+    const bedGeom = new THREE.BoxGeometry(8, 3, 5);
+    const bedMat = new THREE.MeshStandardMaterial({ color: 0xd58b3b, metalness: 0.3, roughness: 0.7 });
+    const bed = new THREE.Mesh(bedGeom, bedMat);
+    bed.position.set(-1, 5, 0);
+    group.add(bed);
+
+    const wheelGeom = new THREE.CylinderGeometry(1.2, 1.2, 1, 12);
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.2, roughness: 0.9 });
+    const wheelOffsets = [
+      [3.5, 0, 2.2],
+      [-3.5, 0, 2.2],
+      [3.5, 0, -2.2],
+      [-3.5, 0, -2.2]
+    ];
+
+    wheelOffsets.forEach(([x, y, z]) => {
+      const wheel = new THREE.Mesh(wheelGeom, wheelMat);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(x, 1.2, z);
+      group.add(wheel);
+    });
+
+    const lightGeom = new THREE.SphereGeometry(0.4, 12, 12);
+    const lightMat = new THREE.MeshBasicMaterial({ color: 0xffeeaa });
+    const headlightLeft = new THREE.Mesh(lightGeom, lightMat);
+    headlightLeft.position.set(5.2, 3.2, 1.2);
+    const headlightRight = headlightLeft.clone();
+    headlightRight.position.z = -1.2;
+    group.add(headlightLeft, headlightRight);
+
+    const headLight = new THREE.PointLight(0xfff0c0, 1.0, 60);
+    headLight.position.set(5.5, 3.2, 0);
+    group.add(headLight);
+
+    return group;
+  }
+
+  // Sleek colony utility rover
+  createColonyRover() {
+    const group = new THREE.Group();
+
+    const bodyGeom = new THREE.BoxGeometry(8, 3, 5);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x99c2ff, metalness: 0.6, roughness: 0.3 });
+    const body = new THREE.Mesh(bodyGeom, bodyMat);
+    body.position.y = 2.5;
+    group.add(body);
+
+    const cabinGeom = new THREE.BoxGeometry(4, 2.5, 4);
+    const cabinMat = new THREE.MeshStandardMaterial({ color: 0xd9ecff, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.8 });
+    const cabin = new THREE.Mesh(cabinGeom, cabinMat);
+    cabin.position.set(0, 4.3, 0);
+    group.add(cabin);
+
+    const wheelGeom = new THREE.CylinderGeometry(1.0, 1.0, 0.8, 16);
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.3, roughness: 0.8 });
+    const wheelOffsets = [
+      [3, 0, 2.0],
+      [-3, 0, 2.0],
+      [3, 0, -2.0],
+      [-3, 0, -2.0]
+    ];
+    wheelOffsets.forEach(([x, y, z]) => {
+      const wheel = new THREE.Mesh(wheelGeom, wheelMat);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(x, 1.0, z);
+      group.add(wheel);
+    });
+
+    const accentGeom = new THREE.BoxGeometry(1, 0.6, 3);
+    const accentMat = new THREE.MeshStandardMaterial({ color: 0x00e0ff, emissive: 0x0077aa, emissiveIntensity: 0.8 });
+    const accent = new THREE.Mesh(accentGeom, accentMat);
+    accent.position.set(-3.5, 3.0, 0);
+    group.add(accent);
+
+    const glow = new THREE.PointLight(0x00e0ff, 0.8, 40);
+    glow.position.set(-3.5, 3.0, 0);
+    group.add(glow);
+
+    return group;
+  }
+
+  // Low-poly cybertruck-inspired vehicle
+  createCybertruckVehicle() {
+    const group = new THREE.Group();
+
+    const bodyGeom = new THREE.BoxGeometry(9, 2.5, 4.5);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xc0c0c0, metalness: 0.9, roughness: 0.15 });
+    const body = new THREE.Mesh(bodyGeom, bodyMat);
+    body.position.y = 2.2;
+    group.add(body);
+
+    const roofGeom = new THREE.CylinderGeometry(0, 4.5, 3, 4, 1, false);
+    const roofMat = new THREE.MeshStandardMaterial({ color: 0xb0b0b0, metalness: 0.8, roughness: 0.2 });
+    const roof = new THREE.Mesh(roofGeom, roofMat);
+    roof.rotation.z = Math.PI / 2;
+    roof.position.set(-0.5, 4.0, 0);
+    group.add(roof);
+
+    const stripGeom = new THREE.BoxGeometry(4.5, 0.3, 0.4);
+    const stripMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 1.2 });
+    const lightStrip = new THREE.Mesh(stripGeom, stripMat);
+    lightStrip.position.set(4.8, 2.6, 0);
+    group.add(lightStrip);
+
+    const frontLight = new THREE.PointLight(0xffffff, 1.2, 70);
+    frontLight.position.set(5.0, 2.8, 0);
+    group.add(frontLight);
+
+    const wheelGeom = new THREE.CylinderGeometry(1.1, 1.1, 0.9, 14);
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.4, roughness: 0.8 });
+    const wheelOffsets = [
+      [3.4, 0, 2.0],
+      [-3.4, 0, 2.0],
+      [3.4, 0, -2.0],
+      [-3.4, 0, -2.0]
+    ];
+    wheelOffsets.forEach(([x, y, z]) => {
+      const wheel = new THREE.Mesh(wheelGeom, wheelMat);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(x, 1.1, z);
+      group.add(wheel);
+    });
+
+    return group;
   }
 
   // Control methods for rocket launch system
@@ -2671,13 +2952,19 @@ class MarsSceneManager {
     // Update city lighting based on time of day
     this.updateCityLighting();
 
-    // Update animated objects and vehicle convoys
-    this.updateAnimations(performance.now());
+    // Shared timestamp for all time-based systems in this manager
+    const now = (typeof performance !== 'undefined' && performance.now)
+      ? performance.now()
+      : Date.now();
+
+    // Update animated beacons, reactor rings, etc.
+    this.updateAnimations(now);
 
     // Continuous rocket traffic around the colony
-    this.updateRocketTraffic((typeof performance !== 'undefined' && performance.now)
-      ? performance.now()
-      : Date.now());
+    this.updateRocketTraffic(now);
+
+    // Ground traffic (AI mining convoys / colony vehicles)
+    this.updateTraffic(now);
   }
 
   // Check if the player has reached the next guided-route waypoint
@@ -2707,6 +2994,85 @@ class MarsSceneManager {
         reached: this.currentWaypointIndex,
         total: this.guidedRouteWaypoints.length
       };
+    }
+  }
+
+  // Animate AI ground traffic along predefined routes
+  updateTraffic(currentTime) {
+    if (!this.aiVehicles || this.aiVehicles.length === 0) return;
+    if (!this.aiRoutes || this.aiRoutes.length === 0) return;
+
+    // Throttle updates to avoid excessive work
+    if (this.lastTrafficUpdateTime == null) {
+      this.lastTrafficUpdateTime = currentTime;
+      return;
+    }
+
+    const deltaMs = currentTime - this.lastTrafficUpdateTime;
+    if (deltaMs <= 5) return; // too soon
+
+    this.lastTrafficUpdateTime = currentTime;
+    const dt = Math.min(deltaMs, 100) / 1000; // clamp to avoid huge jumps
+
+    for (const vehicle of this.aiVehicles) {
+      const route = this.aiRoutes[vehicle.routeIndex];
+      if (!route || !route.waypoints || route.waypoints.length < 2) continue;
+
+      const points = route.waypoints;
+      let i = vehicle.segmentIndex;
+      i = Math.max(0, Math.min(points.length - 2, i));
+
+      // Advance along the current segment based on speed
+      let a = points[i];
+      let b = points[i + 1];
+      const segVec = new THREE.Vector3().subVectors(b, a);
+      const segLen = segVec.length() || 1;
+
+      const distanceThisFrame = vehicle.speed * dt * vehicle.directionSign;
+      const deltaT = distanceThisFrame / segLen;
+      let t = (vehicle.segmentT || 0) + deltaT;
+
+      // Handle reaching segment ends with simple ping-pong behaviour
+      while (t > 1 || t < 0) {
+        if (t > 1) {
+          if (vehicle.directionSign > 0 && i < points.length - 2) {
+            t -= 1;
+            i++;
+          } else {
+            vehicle.directionSign = -1;
+            t = 1 - (t - 1);
+          }
+        } else if (t < 0) {
+          if (vehicle.directionSign < 0 && i > 0) {
+            t += 1;
+            i--;
+          } else {
+            vehicle.directionSign = 1;
+            t = -t;
+          }
+        }
+
+        i = Math.max(0, Math.min(points.length - 2, i));
+      }
+
+      vehicle.segmentIndex = i;
+      vehicle.segmentT = t;
+
+      a = points[i];
+      b = points[i + 1];
+
+      // Interpolate position between waypoints (includes terrain height from route creation)
+      const pos = new THREE.Vector3().copy(a).lerp(b, t);
+      if (vehicle.mesh) {
+        vehicle.mesh.position.copy(pos);
+
+        // Orient vehicle to face along its path
+        const dir = new THREE.Vector3().subVectors(b, a).multiplyScalar(vehicle.directionSign);
+        if (dir.lengthSq() > 0.0001) {
+          const yaw = Math.atan2(dir.x, dir.z);
+          vehicle.mesh.rotation.y = yaw;
+        }
+      }
     }
   }
 
