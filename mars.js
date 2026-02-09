@@ -331,7 +331,7 @@ scene.fog = new THREE.Fog(fogColor, perfSettings.fogDistance * 0.2 * fogDensity,
 // Endless terrain system with reduced complexity
 const terrainSystem = {
   chunkSize: 200, // Size of each terrain chunk
-  visibleRadius: 1, // Reduced visible radius (3x3 grid instead of 5x5)
+  visibleRadius: 50, // Large radius — allow free exploration across the terrain
   chunks: new Map(), // Store active chunks
   currentChunk: { x: 0, z: 0 }, // Current chunk coordinates
   lastUpdateTime: 0, // Track last update time for throttling
@@ -939,7 +939,7 @@ controls.enabled = false; // Disable orbit controls since we're starting in thir
 // Movement Logic - Make keys globally accessible for mobile controls
 window.keys = { w: false, a: false, s: false, d: false };
 const keys = window.keys; // Keep local reference for backward compatibility
-const speed = 0.2;
+const speed = 0.6;
 const rotationSpeed = 0.03;
 let isMoving = false;
 let currentSpeed = 0; // Track the current speed of the rover
@@ -1890,11 +1890,13 @@ class MarsSceneManager {
     this.collidables = [];  // Objects the rover can collide with { position, radius }
 
     // Procedural settlement spawning system
-    this.settlementGrid = 2000;       // Grid spacing — one potential site every 2000 units
-    this.settlementSpawnDist = 1800;   // Distance at which a settlement spawns
-    this.settlementDespawnDist = 3500; // Distance at which a settlement is removed
-    this.settlements = new Map();      // key "gx,gz" → { group, center, type, collidableStart }
-    this.lastSettlementCheck = 0;      // Throttle timestamp
+    this.settlementGrid = 400;          // Grid spacing — one potential site every 400 units
+    this.settlementSpawnDist = 800;     // Distance at which a settlement spawns
+    this.settlementDespawnDist = 1500;  // Distance at which a settlement is removed
+    this.settlements = new Map();       // key "gx,gz" → { group, center, type, collidableStart }
+    this.lastSettlementCheck = 0;       // Throttle timestamp
+    this.roads = new Map();             // key "from→to" → { group }
+    this.roadVehicles = [];             // Vehicles driving along roads
 
     // Get reference to the terrain mesh for proper ground placement
     // The terrain is the largest PlaneGeometry in the scene (3000-5000 units wide)
@@ -3332,8 +3334,8 @@ class MarsSceneManager {
 
         const hash = this._settlementHash(gx, gz);
 
-        // ~30% of grid cells have a settlement
-        if ((hash & 0xff) > 76) continue; // 77/256 ≈ 30%
+        // ~60% of grid cells have a settlement
+        if ((hash & 0xff) > 153) continue; // 154/256 ≈ 60%
 
         const cx = gx * grid + ((hash >>> 8) & 0xff) / 256 * grid * 0.6;
         const cz = gz * grid + ((hash >>> 16) & 0xff) / 256 * grid * 0.6;
@@ -3369,6 +3371,167 @@ class MarsSceneManager {
         });
       }
     }
+
+    // Build roads between nearby settlements
+    this._updateRoads(px, pz);
+
+    // Spawn vehicles on roads
+    this._updateRoadVehicles(px, pz);
+  }
+
+  // Create roads (flat strips) between pairs of nearby settlements
+  _updateRoads(px, pz) {
+    const maxRoadDist = this.settlementGrid * 2; // Connect settlements up to 2 grid cells apart
+    const roadDespawnDist = this.settlementDespawnDist + 200;
+
+    // Remove roads that are too far away
+    for (const [key, road] of this.roads) {
+      const mx = road.midX - px;
+      const mz = road.midZ - pz;
+      if (mx * mx + mz * mz > roadDespawnDist * roadDespawnDist) {
+        this.scene.remove(road.group);
+        road.group.traverse(child => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material && !child.material._shared) child.material.dispose();
+        });
+        this.roads.delete(key);
+      }
+    }
+
+    // Shared road material
+    if (!this._roadMaterial) {
+      this._roadMaterial = new THREE.MeshBasicMaterial({
+        color: 0x3a3028,
+        depthWrite: true
+      });
+      this._roadMaterial._shared = true;
+      this._roadLineMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffaa33,
+        depthWrite: true
+      });
+      this._roadLineMaterial._shared = true;
+    }
+
+    // Build roads between nearby spawned settlements
+    const entries = [...this.settlements.entries()];
+    for (let i = 0; i < entries.length; i++) {
+      for (let j = i + 1; j < entries.length; j++) {
+        const [keyA, a] = entries[i];
+        const [keyB, b] = entries[j];
+        const roadKey = keyA < keyB ? `${keyA}→${keyB}` : `${keyB}→${keyA}`;
+        if (this.roads.has(roadKey)) continue;
+
+        const dx = a.center.x - b.center.x;
+        const dz = a.center.z - b.center.z;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist > maxRoadDist || dist < 50) continue;
+
+        // Mid-point distance check
+        const midX = (a.center.x + b.center.x) / 2;
+        const midZ = (a.center.z + b.center.z) / 2;
+        const dmx = midX - px;
+        const dmz = midZ - pz;
+        if (dmx * dmx + dmz * dmz > this.settlementSpawnDist * this.settlementSpawnDist * 1.5) continue;
+
+        const roadGroup = new THREE.Group();
+
+        // Road surface — flat plane stretched between the two settlements
+        const roadWidth = 6;
+        const roadGeom = new THREE.PlaneGeometry(dist, roadWidth, 1, 1);
+        roadGeom.rotateX(-Math.PI / 2);
+        const road = new THREE.Mesh(roadGeom, this._roadMaterial);
+
+        // Position at midpoint, rotated to face from A to B
+        const angle = Math.atan2(b.center.z - a.center.z, b.center.x - a.center.x);
+        const groundY = (a.center.y + b.center.y) / 2 + 0.15;
+        road.position.set(midX, groundY, midZ);
+        road.rotation.y = -angle;
+        roadGroup.add(road);
+
+        // Center line (dashed effect via a thin strip)
+        const lineGeom = new THREE.PlaneGeometry(dist, 0.3, 1, 1);
+        lineGeom.rotateX(-Math.PI / 2);
+        const line = new THREE.Mesh(lineGeom, this._roadLineMaterial);
+        line.position.set(midX, groundY + 0.05, midZ);
+        line.rotation.y = -angle;
+        roadGroup.add(line);
+
+        this.scene.add(roadGroup);
+        this.roads.set(roadKey, {
+          group: roadGroup,
+          midX, midZ,
+          startX: a.center.x, startZ: a.center.z,
+          endX: b.center.x, endZ: b.center.z,
+          dist, angle, groundY
+        });
+      }
+    }
+  }
+
+  // Spawn and animate vehicles on roads
+  _updateRoadVehicles(px, pz) {
+    const maxVehicles = 20;
+
+    // Remove vehicles that are too far from player
+    for (let i = this.roadVehicles.length - 1; i >= 0; i--) {
+      const v = this.roadVehicles[i];
+      const dx = v.mesh.position.x - px;
+      const dz = v.mesh.position.z - pz;
+      if (dx * dx + dz * dz > this.settlementDespawnDist * this.settlementDespawnDist) {
+        this.scene.remove(v.mesh);
+        v.mesh.geometry.dispose();
+        v.mesh.material.dispose();
+        this.roadVehicles.splice(i, 1);
+      }
+    }
+
+    // Spawn new vehicles on active roads
+    if (this.roadVehicles.length < maxVehicles) {
+      for (const [, road] of this.roads) {
+        if (this.roadVehicles.length >= maxVehicles) break;
+        // ~5% chance per check to spawn a vehicle on each road
+        if (Math.random() > 0.05) continue;
+
+        const t = Math.random(); // 0..1 along road
+        const x = road.startX + (road.endX - road.startX) * t;
+        const z = road.startZ + (road.endZ - road.startZ) * t;
+
+        // Small vehicle mesh
+        const w = 1.5 + Math.random() * 1.5;
+        const h = 1 + Math.random() * 0.8;
+        const d = 2.5 + Math.random() * 2;
+        const vehGeom = new THREE.BoxGeometry(w, h, d);
+        const colors = [0xcc3333, 0x3366cc, 0xcccc33, 0x33cc66, 0xcc6633, 0xeeeeee];
+        const vehMat = new THREE.MeshStandardMaterial({
+          color: colors[Math.floor(Math.random() * colors.length)],
+          metalness: 0.6,
+          roughness: 0.3
+        });
+        const veh = new THREE.Mesh(vehGeom, vehMat);
+        veh.position.set(x, road.groundY + h / 2 + 0.3, z);
+        veh.rotation.y = road.angle + (Math.random() < 0.5 ? 0 : Math.PI); // face either direction
+
+        this.scene.add(veh);
+        this.roadVehicles.push({
+          mesh: veh,
+          road,
+          t,
+          speed: (0.0003 + Math.random() * 0.0006) * (Math.random() < 0.5 ? 1 : -1), // t per frame
+          direction: Math.random() < 0.5 ? 1 : -1
+        });
+      }
+    }
+
+    // Animate existing vehicles along their roads
+    for (const v of this.roadVehicles) {
+      v.t += v.speed;
+      // Bounce at endpoints
+      if (v.t > 1) { v.t = 1; v.speed = -v.speed; v.mesh.rotation.y += Math.PI; }
+      if (v.t < 0) { v.t = 0; v.speed = -v.speed; v.mesh.rotation.y += Math.PI; }
+
+      v.mesh.position.x = v.road.startX + (v.road.endX - v.road.startX) * v.t;
+      v.mesh.position.z = v.road.startZ + (v.road.endZ - v.road.startZ) * v.t;
+    }
   }
 
   // Build a settlement group at the given center; returns a THREE.Group
@@ -3384,154 +3547,648 @@ class MarsSceneManager {
     const cz = center.z;
     const gy = center.y;
 
-    // Shared materials
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0xd0d8e8, metalness: 0.7, roughness: 0.3, emissive: 0x111122, emissiveIntensity: 0.15 });
-    const glowMat = new THREE.MeshBasicMaterial({ color: 0x66ddff, transparent: true, opacity: 0.8 });
+    // Random colour palette per settlement (seeded)
+    const palettes = [
+      { wall: 0xd0d8e8, accent: 0x66ddff, glow: 0x44ffcc, beacon: 0xff66cc, emissive: 0x111122 },
+      { wall: 0xe8c8a0, accent: 0xff8844, glow: 0xffcc33, beacon: 0xff3333, emissive: 0x221100 },
+      { wall: 0xa0d8b8, accent: 0x33ff99, glow: 0x88ffaa, beacon: 0x00ffff, emissive: 0x002211 },
+      { wall: 0xc0b0e0, accent: 0xbb66ff, glow: 0xff44ff, beacon: 0xffaaff, emissive: 0x110022 },
+      { wall: 0xe0e0e0, accent: 0xff4466, glow: 0xff2222, beacon: 0xffff44, emissive: 0x220000 },
+      { wall: 0xb0c8e8, accent: 0x4488ff, glow: 0x2266ff, beacon: 0x88ccff, emissive: 0x001133 },
+      { wall: 0xf5e6c8, accent: 0xffaa00, glow: 0xff6600, beacon: 0xff8800, emissive: 0x331100 },
+    ];
+    const pal = palettes[Math.floor(rand() * palettes.length)];
+
+    const wallMat = new THREE.MeshStandardMaterial({ color: pal.wall, metalness: 0.7, roughness: 0.3, emissive: pal.emissive, emissiveIntensity: 0.15 });
+    const glowMat = new THREE.MeshBasicMaterial({ color: pal.accent, transparent: true, opacity: 0.85 });
+    const glow2Mat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.7 });
     const padMat  = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9, metalness: 0.2 });
+    const glassMat = new THREE.MeshStandardMaterial({ color: 0x88ccff, metalness: 0.9, roughness: 0.05, transparent: true, opacity: 0.4 });
+
+    // Helper: twisted box tower
+    const makeTwistedTower = (x, z, w, h, d, twist) => {
+      const segs = Math.max(3, Math.floor(h / 15));
+      const segH = h / segs;
+      for (let si = 0; si < segs; si++) {
+        const segGeom = new THREE.BoxGeometry(w, segH + 0.5, d);
+        const seg = new THREE.Mesh(segGeom, wallMat);
+        const sy = gy + segH * si + segH / 2;
+        seg.position.set(x, sy, z);
+        seg.rotation.y = twist * si;
+        group.add(seg);
+      }
+      this.registerCollidable({ x, z }, Math.max(w, d) * 0.8 + 2);
+    };
+
+    // Helper: add a floating ring
+    const addFloatingRing = (x, y, z, radius, tubeR) => {
+      const rGeom = new THREE.TorusGeometry(radius, tubeR || 1.2, 10, 24);
+      const ring = new THREE.Mesh(rGeom, glowMat);
+      ring.position.set(x, y, z);
+      ring.rotation.x = Math.PI / 2;
+      group.add(ring);
+    };
+
+    // Helper: spire
+    const addSpire = (x, z, height, baseR) => {
+      const spGeom = new THREE.ConeGeometry(baseR, height, 8);
+      const sp = new THREE.Mesh(spGeom, wallMat);
+      sp.position.set(x, gy + height / 2, z);
+      group.add(sp);
+      this.registerCollidable({ x, z }, baseR + 2);
+      // Glow tip
+      const tipGeom = new THREE.SphereGeometry(baseR * 0.4, 8, 8);
+      const tip = new THREE.Mesh(tipGeom, glow2Mat);
+      tip.position.set(0, height / 2 + baseR * 0.3, 0);
+      sp.add(tip);
+    };
+
+    // Helper: arch between two points
+    const addArch = (x1, z1, x2, z2, height) => {
+      const mx = (x1 + x2) / 2, mz = (z1 + z2) / 2;
+      const dx = x2 - x1, dz = z2 - z1;
+      const span = Math.sqrt(dx * dx + dz * dz);
+      const archGeom = new THREE.TorusGeometry(span / 2, 1.5, 8, 16, Math.PI);
+      const arch = new THREE.Mesh(archGeom, wallMat);
+      arch.position.set(mx, gy + height, mz);
+      arch.rotation.y = Math.atan2(dz, dx);
+      arch.rotation.z = Math.PI; // flip upwards
+      arch.rotation.order = 'YXZ';
+      group.add(arch);
+    };
+
+    // Helper: mushroom habitat
+    const addMushroom = (x, z, stemH, capR) => {
+      const stemGeom = new THREE.CylinderGeometry(capR * 0.25, capR * 0.3, stemH, 8);
+      const stem = new THREE.Mesh(stemGeom, wallMat);
+      stem.position.set(x, gy + stemH / 2, z);
+      group.add(stem);
+      const capGeom = new THREE.SphereGeometry(capR, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55);
+      const cap = new THREE.Mesh(capGeom, glassMat);
+      cap.position.set(x, gy + stemH, z);
+      group.add(cap);
+      this.registerCollidable({ x, z }, capR + 2);
+    };
+
+    // Helper: antenna array
+    const addAntennaArray = (x, z, count) => {
+      for (let a = 0; a < count; a++) {
+        const ax = x + (a - count / 2) * 6;
+        const h = 20 + rand() * 15;
+        const poleGeom = new THREE.CylinderGeometry(0.4, 0.4, h, 5);
+        const pole = new THREE.Mesh(poleGeom, wallMat);
+        pole.position.set(ax, gy + h / 2, z);
+        group.add(pole);
+        const dGeom = new THREE.SphereGeometry(2.5, 10, 8, 0, Math.PI);
+        const d = new THREE.Mesh(dGeom, glowMat);
+        d.rotation.x = -Math.PI / 4 + rand() * 0.5;
+        d.position.set(ax, gy + h + 1, z);
+        group.add(d);
+      }
+    };
+
+    // Helper: solar panel field
+    const addSolarField = (ox, oz, rows, cols) => {
+      const panelMat = new THREE.MeshStandardMaterial({ color: 0x1a1a44, metalness: 0.8, roughness: 0.2 });
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const pGeom = new THREE.BoxGeometry(5, 0.3, 3);
+          const panel = new THREE.Mesh(pGeom, panelMat);
+          panel.position.set(ox + c * 7, gy + 4 + Math.sin(r) * 0.5, oz + r * 5);
+          panel.rotation.x = -0.4;
+          group.add(panel);
+          // support pole
+          const sGeom = new THREE.CylinderGeometry(0.2, 0.2, 4, 4);
+          const support = new THREE.Mesh(sGeom, padMat);
+          support.position.set(ox + c * 7, gy + 2, oz + r * 5);
+          group.add(support);
+        }
+      }
+    };
+
+    // Helper: pressure tunnel between two points
+    const addTunnel = (x1, z1, x2, z2) => {
+      const dx = x2 - x1, dz = z2 - z1;
+      const len = Math.sqrt(dx * dx + dz * dz);
+      const tGeom = new THREE.CylinderGeometry(2.5, 2.5, len, 8);
+      tGeom.rotateZ(Math.PI / 2);
+      const tunnel = new THREE.Mesh(tGeom, wallMat);
+      const mx = (x1 + x2) / 2, mz = (z1 + z2) / 2;
+      tunnel.position.set(mx, gy + 3, mz);
+      tunnel.rotation.y = Math.atan2(dz, dx);
+      group.add(tunnel);
+    };
+
+    // Pick a sub-variant for the settlement type
+    const variant = Math.floor(rand() * 4);
 
     if (type === 'outpost') {
-      // Small outpost: 2-4 domes + landing pad
-      const count = 2 + Math.floor(rand() * 3);
-      for (let i = 0; i < count; i++) {
-        const angle = rand() * Math.PI * 2;
-        const dist = 20 + rand() * 40;
-        const x = cx + Math.cos(angle) * dist;
-        const z = cz + Math.sin(angle) * dist;
-        const r = 8 + rand() * 8;
-        const domeGeom = new THREE.SphereGeometry(r, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2);
-        const dome = new THREE.Mesh(domeGeom, wallMat);
-        dome.position.set(x, gy, z);
-        group.add(dome);
-        this.registerCollidable({ x, z }, r + 2);
-      }
-      // Landing pad
-      const padGeom = new THREE.CylinderGeometry(18, 18, 2, 6);
-      const pad = new THREE.Mesh(padGeom, padMat);
-      pad.position.set(cx, gy + 1, cz);
-      group.add(pad);
-      this.registerCollidable({ x: cx, z: cz }, 20);
+      if (variant === 0) {
+        // Classic domes with mushroom habitats
+        const count = 2 + Math.floor(rand() * 3);
+        const positions = [];
+        for (let i = 0; i < count; i++) {
+          const angle = rand() * Math.PI * 2;
+          const dist = 20 + rand() * 40;
+          const x = cx + Math.cos(angle) * dist;
+          const z = cz + Math.sin(angle) * dist;
+          positions.push({ x, z });
+          if (rand() > 0.5) {
+            addMushroom(x, z, 8 + rand() * 10, 8 + rand() * 6);
+          } else {
+            const r = 8 + rand() * 8;
+            const domeGeom = new THREE.SphereGeometry(r, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+            const dome = new THREE.Mesh(domeGeom, wallMat);
+            dome.position.set(x, gy, z);
+            group.add(dome);
+            this.registerCollidable({ x, z }, r + 2);
+          }
+        }
+        // Tunnels connecting adjacent domes
+        for (let i = 0; i < positions.length - 1; i++) {
+          addTunnel(positions[i].x, positions[i].z, positions[i + 1].x, positions[i + 1].z);
+        }
+        // Landing pad
+        const padGeom = new THREE.CylinderGeometry(18, 18, 2, 6);
+        const pad = new THREE.Mesh(padGeom, padMat);
+        pad.position.set(cx, gy + 1, cz);
+        group.add(pad);
+        this.registerCollidable({ x: cx, z: cz }, 20);
+        addAntennaArray(cx + 35, cz, 3);
 
-      // Small antenna
-      const poleGeom = new THREE.CylinderGeometry(0.5, 0.5, 25, 6);
-      const pole = new THREE.Mesh(poleGeom, wallMat);
-      pole.position.set(cx + 30, gy + 12.5, cz);
-      group.add(pole);
-      const dishGeom = new THREE.SphereGeometry(4, 12, 8, 0, Math.PI);
-      const dish = new THREE.Mesh(dishGeom, glowMat);
-      dish.rotation.x = -Math.PI / 4;
-      dish.position.set(cx + 30, gy + 26, cz);
-      group.add(dish);
+      } else if (variant === 1) {
+        // Spire outpost — a cluster of pointed towers
+        const count = 3 + Math.floor(rand() * 4);
+        for (let i = 0; i < count; i++) {
+          const angle = (i / count) * Math.PI * 2 + rand() * 0.5;
+          const dist = 15 + rand() * 35;
+          const x = cx + Math.cos(angle) * dist;
+          const z = cz + Math.sin(angle) * dist;
+          addSpire(x, z, 20 + rand() * 40, 5 + rand() * 5);
+        }
+        // Central floating ring beacon
+        addFloatingRing(cx, gy + 35, cz, 12, 1);
+        addSolarField(cx - 30, cz + 30, 3, 4);
+
+      } else if (variant === 2) {
+        // Geodesic cluster with arches
+        const count = 3 + Math.floor(rand() * 2);
+        const pts = [];
+        for (let i = 0; i < count; i++) {
+          const angle = rand() * Math.PI * 2;
+          const dist = 15 + rand() * 30;
+          const x = cx + Math.cos(angle) * dist;
+          const z = cz + Math.sin(angle) * dist;
+          pts.push({ x, z });
+          const r = 10 + rand() * 8;
+          const geoGeom = new THREE.IcosahedronGeometry(r, 1);
+          const geo = new THREE.Mesh(geoGeom, glassMat);
+          geo.position.set(x, gy + r, z);
+          group.add(geo);
+          this.registerCollidable({ x, z }, r + 2);
+        }
+        // Connect with arches
+        for (let i = 0; i < pts.length - 1; i++) {
+          addArch(pts[i].x, pts[i].z, pts[i + 1].x, pts[i + 1].z, 20 + rand() * 10);
+        }
+        addAntennaArray(cx - 25, cz - 20, 2);
+
+      } else {
+        // Solar farm outpost with a single watchtower
+        addSolarField(cx - 20, cz - 15, 4, 6);
+        // Watchtower
+        const tH = 30 + rand() * 20;
+        const tGeom = new THREE.CylinderGeometry(3, 4, tH, 8);
+        const tower = new THREE.Mesh(tGeom, wallMat);
+        tower.position.set(cx + 30, gy + tH / 2, cz + 30);
+        group.add(tower);
+        this.registerCollidable({ x: cx + 30, z: cz + 30 }, 6);
+        // Observation deck
+        const deckGeom = new THREE.CylinderGeometry(8, 6, 4, 12);
+        const deck = new THREE.Mesh(deckGeom, glassMat);
+        deck.position.set(0, tH / 2 + 2, 0);
+        tower.add(deck);
+        addFloatingRing(cx + 30, gy + tH + 8, cz + 30, 10, 0.8);
+        // Small hab dome
+        addMushroom(cx - 20, cz + 25, 6, 7);
+      }
 
     } else if (type === 'base') {
-      // Medium base: central building + several modules + perimeter
-      const centralHeight = 30 + rand() * 20;
-      const centralR = 25 + rand() * 10;
-      const centralGeom = new THREE.CylinderGeometry(centralR, centralR + 5, centralHeight, 16);
-      const central = new THREE.Mesh(centralGeom, wallMat);
-      central.position.set(cx, gy + centralHeight / 2, cz);
-      group.add(central);
-      this.registerCollidable({ x: cx, z: cz }, centralR + 7);
+      if (variant === 0) {
+        // Terraced pyramid base
+        const tiers = 4 + Math.floor(rand() * 3);
+        const baseW = 50 + rand() * 30;
+        for (let t = 0; t < tiers; t++) {
+          const w = baseW - t * (baseW / tiers) * 0.7;
+          const h = 8 + rand() * 6;
+          const tierGeom = new THREE.BoxGeometry(w, h, w);
+          const tier = new THREE.Mesh(tierGeom, wallMat);
+          const yOff = t * (h + 2) + h / 2;
+          tier.position.set(cx, gy + yOff, cz);
+          group.add(tier);
+          // Glow trim on each tier
+          const trimGeom = new THREE.BoxGeometry(w + 1, 0.8, w + 1);
+          const trim = new THREE.Mesh(trimGeom, glowMat);
+          trim.position.set(0, h / 2 + 0.4, 0);
+          tier.add(trim);
+        }
+        this.registerCollidable({ x: cx, z: cz }, baseW / 2 + 5);
+        // Crown spire on top
+        const topY = tiers * 12;
+        addSpire(cx, cz, 30 + rand() * 20, 6);
+        // Surrounding mushrooms
+        for (let i = 0; i < 4; i++) {
+          const angle = (i / 4) * Math.PI * 2 + rand() * 0.4;
+          const dist = baseW / 2 + 20 + rand() * 15;
+          addMushroom(cx + Math.cos(angle) * dist, cz + Math.sin(angle) * dist, 10 + rand() * 8, 6 + rand() * 4);
+        }
+        // Landing pads
+        for (let i = 0; i < 2; i++) {
+          const angle = rand() * Math.PI * 2;
+          const dist = baseW / 2 + 45 + rand() * 20;
+          const px = cx + Math.cos(angle) * dist;
+          const pz = cz + Math.sin(angle) * dist;
+          const padGeom = new THREE.CylinderGeometry(16, 16, 2, 6);
+          const pad = new THREE.Mesh(padGeom, padMat);
+          pad.position.set(px, gy + 1, pz);
+          group.add(pad);
+          this.registerCollidable({ x: px, z: pz }, 18);
+        }
 
-      // Dome on top
-      const domeGeom = new THREE.SphereGeometry(centralR - 2, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2);
-      const dome = new THREE.Mesh(domeGeom, wallMat);
-      dome.position.set(cx, gy + centralHeight, cz);
-      group.add(dome);
+      } else if (variant === 1) {
+        // Reactor core base — central glowing cylinder with orbiting modules
+        const coreR = 15 + rand() * 10;
+        const coreH = 40 + rand() * 30;
+        const coreGeom = new THREE.CylinderGeometry(coreR, coreR, coreH, 24);
+        const coreMat = new THREE.MeshStandardMaterial({ color: pal.accent, metalness: 0.9, roughness: 0.1, emissive: pal.accent, emissiveIntensity: 0.6 });
+        const core = new THREE.Mesh(coreGeom, coreMat);
+        core.position.set(cx, gy + coreH / 2, cz);
+        group.add(core);
+        this.registerCollidable({ x: cx, z: cz }, coreR + 5);
+        // Orbiting rings at different heights
+        for (let r = 0; r < 3; r++) {
+          addFloatingRing(cx, gy + coreH * 0.25 + r * coreH * 0.25, cz, coreR + 8 + r * 4, 1 + rand());
+        }
+        // Containment shell (wireframe-ish)
+        const shellGeom = new THREE.IcosahedronGeometry(coreR + 15, 1);
+        const shellMat = new THREE.MeshBasicMaterial({ color: pal.glow, wireframe: true, transparent: true, opacity: 0.3 });
+        const shell = new THREE.Mesh(shellGeom, shellMat);
+        shell.position.set(cx, gy + coreH / 2, cz);
+        group.add(shell);
+        // Hab blocks around the perimeter
+        const blockCount = 6 + Math.floor(rand() * 4);
+        for (let i = 0; i < blockCount; i++) {
+          const angle = (i / blockCount) * Math.PI * 2;
+          const dist = coreR + 30 + rand() * 20;
+          const bx = cx + Math.cos(angle) * dist;
+          const bz = cz + Math.sin(angle) * dist;
+          const bw = 8 + rand() * 8;
+          const bh = 8 + rand() * 12;
+          const bd = 8 + rand() * 8;
+          const bGeom = new THREE.BoxGeometry(bw, bh, bd);
+          const block = new THREE.Mesh(bGeom, wallMat);
+          block.position.set(bx, gy + bh / 2, bz);
+          group.add(block);
+          this.registerCollidable({ x: bx, z: bz }, Math.max(bw, bd) / 2 + 2);
+          // Glow window
+          const wGeom = new THREE.BoxGeometry(bw * 0.8, bh * 0.3, 0.5);
+          const win = new THREE.Mesh(wGeom, glowMat);
+          win.position.set(0, bh * 0.1, bd / 2 + 0.3);
+          block.add(win);
+        }
 
-      // Surrounding modules
-      const moduleCount = 4 + Math.floor(rand() * 4);
-      for (let i = 0; i < moduleCount; i++) {
-        const angle = (i / moduleCount) * Math.PI * 2 + rand() * 0.3;
-        const dist = centralR + 20 + rand() * 30;
-        const x = cx + Math.cos(angle) * dist;
-        const z = cz + Math.sin(angle) * dist;
-        const w = 8 + rand() * 10;
-        const h = 10 + rand() * 15;
-        const d = 8 + rand() * 10;
-        const modGeom = new THREE.BoxGeometry(w, h, d);
-        const mod = new THREE.Mesh(modGeom, wallMat);
-        mod.position.set(x, gy + h / 2, z);
-        group.add(mod);
-        this.registerCollidable({ x, z }, Math.max(w, d) / 2 + 2);
+      } else if (variant === 2) {
+        // Bio-dome research base — large transparent domes with greenhouses
+        const mainR = 30 + rand() * 15;
+        const mainGeom = new THREE.SphereGeometry(mainR, 24, 16);
+        const mainDome = new THREE.Mesh(mainGeom, glassMat);
+        mainDome.position.set(cx, gy + mainR * 0.7, cz);
+        group.add(mainDome);
+        this.registerCollidable({ x: cx, z: cz }, mainR + 3);
+        // Inner structure visible through glass
+        const innerGeom = new THREE.CylinderGeometry(mainR * 0.6, mainR * 0.6, mainR * 0.8, 12);
+        const inner = new THREE.Mesh(innerGeom, wallMat);
+        inner.position.set(cx, gy + mainR * 0.4, cz);
+        group.add(inner);
+        // Greenhouse tubes radiating out
+        for (let i = 0; i < 4; i++) {
+          const angle = (i / 4) * Math.PI * 2 + rand() * 0.3;
+          const len = 30 + rand() * 20;
+          const ex = cx + Math.cos(angle) * (mainR + len / 2 + 5);
+          const ez = cz + Math.sin(angle) * (mainR + len / 2 + 5);
+          const tGeom = new THREE.CylinderGeometry(4, 4, len, 8);
+          tGeom.rotateZ(Math.PI / 2);
+          const tube = new THREE.Mesh(tGeom, glassMat);
+          tube.position.set(ex, gy + 5, ez);
+          tube.rotation.y = angle;
+          group.add(tube);
+          // End cap dome
+          const capR = 8 + rand() * 5;
+          const capX = cx + Math.cos(angle) * (mainR + len + 8);
+          const capZ = cz + Math.sin(angle) * (mainR + len + 8);
+          addMushroom(capX, capZ, 4, capR);
+        }
+        addAntennaArray(cx + mainR + 20, cz - 15, 4);
 
-        // Glow strip
-        const stripGeom = new THREE.BoxGeometry(0.5, h * 0.9, 0.5);
-        const strip = new THREE.Mesh(stripGeom, glowMat);
-        strip.position.set(w / 2 + 0.3, 0, d / 2 + 0.3);
-        mod.add(strip);
-      }
-
-      // Landing pads
-      for (let i = 0; i < 2; i++) {
-        const angle = rand() * Math.PI * 2;
-        const dist = centralR + 60 + rand() * 20;
-        const x = cx + Math.cos(angle) * dist;
-        const z = cz + Math.sin(angle) * dist;
-        const padGeom = new THREE.CylinderGeometry(16, 16, 2, 6);
+      } else {
+        // Industrial base — tall chimneys, storage tanks, cranes
+        const centralH = 25 + rand() * 15;
+        const centralR = 20 + rand() * 10;
+        const centralGeom = new THREE.CylinderGeometry(centralR, centralR + 5, centralH, 16);
+        const central = new THREE.Mesh(centralGeom, wallMat);
+        central.position.set(cx, gy + centralH / 2, cz);
+        group.add(central);
+        this.registerCollidable({ x: cx, z: cz }, centralR + 7);
+        // Smokestacks
+        for (let i = 0; i < 3; i++) {
+          const sx = cx + (i - 1) * 15;
+          const sz = cz - centralR - 10;
+          const sh = 40 + rand() * 30;
+          const sGeom = new THREE.CylinderGeometry(2, 3, sh, 8);
+          const stack = new THREE.Mesh(sGeom, padMat);
+          stack.position.set(sx, gy + sh / 2, sz);
+          group.add(stack);
+          this.registerCollidable({ x: sx, z: sz }, 5);
+          // Glow top (exhaust)
+          const eGeom = new THREE.SphereGeometry(3, 8, 8);
+          const exhaust = new THREE.Mesh(eGeom, glow2Mat);
+          exhaust.position.set(0, sh / 2 + 1, 0);
+          stack.add(exhaust);
+        }
+        // Storage spheres
+        for (let i = 0; i < 2 + Math.floor(rand() * 2); i++) {
+          const angle = rand() * Math.PI * 2;
+          const dist = centralR + 25 + rand() * 15;
+          const tx = cx + Math.cos(angle) * dist;
+          const tz = cz + Math.sin(angle) * dist;
+          const tr = 8 + rand() * 6;
+          const tGeom = new THREE.SphereGeometry(tr, 14, 10);
+          const tank = new THREE.Mesh(tGeom, wallMat);
+          tank.position.set(tx, gy + tr, tz);
+          group.add(tank);
+          this.registerCollidable({ x: tx, z: tz }, tr + 2);
+          // Support ring
+          addFloatingRing(tx, gy + tr * 0.5, tz, tr + 2, 0.6);
+        }
+        // Crane
+        const craneH = 50 + rand() * 20;
+        const craneX = cx + centralR + 30;
+        const craneZ = cz;
+        const cranePole = new THREE.CylinderGeometry(1.5, 2, craneH, 6);
+        const pole = new THREE.Mesh(cranePole, padMat);
+        pole.position.set(craneX, gy + craneH / 2, craneZ);
+        group.add(pole);
+        const armGeom = new THREE.BoxGeometry(40, 2, 2);
+        const arm = new THREE.Mesh(armGeom, wallMat);
+        arm.position.set(craneX, gy + craneH, craneZ);
+        group.add(arm);
+        // Landing pad
+        const padGeom = new THREE.CylinderGeometry(18, 18, 2, 6);
         const pad = new THREE.Mesh(padGeom, padMat);
-        pad.position.set(x, gy + 1, z);
+        pad.position.set(cx - centralR - 30, gy + 1, cz + 20);
         group.add(pad);
-        this.registerCollidable({ x, z }, 18);
+        this.registerCollidable({ x: cx - centralR - 30, z: cz + 20 }, 20);
       }
 
     } else {
-      // City: cluster of towers with a tall centerpiece
-      const towerCount = 8 + Math.floor(rand() * 10);
-      const cityRadius = 150 + rand() * 100;
+      // ==== CITY — the wildest part ====
+      const cityRadius = 150 + rand() * 120;
+      const towerCount = 10 + Math.floor(rand() * 12);
 
+      // Pick a city architectural style
+      const cityStyle = Math.floor(rand() * 4);
+
+      // Tower generation
+      const towerPositions = [];
       for (let i = 0; i < towerCount; i++) {
         const angle = rand() * Math.PI * 2;
         const dist = 30 + rand() * cityRadius;
         const x = cx + Math.cos(angle) * dist;
         const z = cz + Math.sin(angle) * dist;
+        towerPositions.push({ x, z });
 
         const coreFactor = 1 - dist / (cityRadius + 30);
-        const h = 40 + coreFactor * 160 + rand() * 50;
-        const w = 10 + rand() * 14;
-        const d = 10 + rand() * 14;
+        const h = 50 + coreFactor * 200 + rand() * 80;
+        const w = 10 + rand() * 16;
+        const d = 10 + rand() * 16;
 
-        const towerGeom = new THREE.BoxGeometry(w, h, d);
-        const tower = new THREE.Mesh(towerGeom, wallMat);
-        tower.position.set(x, gy + h / 2, z);
-        group.add(tower);
-        this.registerCollidable({ x, z }, Math.max(w, d) / 2 + 2);
+        const towerShape = Math.floor(rand() * 6);
 
-        // Neon edges
-        const edgeGeom = new THREE.BoxGeometry(0.6, h, 0.6);
-        const e1 = new THREE.Mesh(edgeGeom, glowMat);
-        e1.position.set(w / 2 + 0.4, 0, d / 2 + 0.4);
-        tower.add(e1);
+        if (towerShape === 0) {
+          // Twisted tower
+          makeTwistedTower(x, z, w, h, d, 0.08 + rand() * 0.15);
+        } else if (towerShape === 1) {
+          // Tapered tower (wider at base)
+          const tGeom = new THREE.CylinderGeometry(w * 0.3, w * 0.7, h, 8 + Math.floor(rand() * 8));
+          const tower = new THREE.Mesh(tGeom, wallMat);
+          tower.position.set(x, gy + h / 2, z);
+          group.add(tower);
+          this.registerCollidable({ x, z }, w * 0.7 + 2);
+          // Balcony rings
+          const rings = 2 + Math.floor(rand() * 3);
+          for (let r = 0; r < rings; r++) {
+            const rY = h * (0.3 + r * 0.2);
+            const rR = w * (0.7 - r * 0.08);
+            addFloatingRing(x, gy + rY, z, rR + 3, 0.8);
+          }
+        } else if (towerShape === 2) {
+          // Crystal shard — tilted octahedron
+          const crystalGeom = new THREE.OctahedronGeometry(w * 0.7, 0);
+          const crystalMat = new THREE.MeshStandardMaterial({ color: pal.accent, metalness: 0.95, roughness: 0.05, transparent: true, opacity: 0.7 });
+          const crystal = new THREE.Mesh(crystalGeom, crystalMat);
+          crystal.scale.set(1, h / (w * 1.4), 1);
+          crystal.position.set(x, gy + h / 2, z);
+          crystal.rotation.z = (rand() - 0.5) * 0.15;
+          crystal.rotation.x = (rand() - 0.5) * 0.15;
+          group.add(crystal);
+          this.registerCollidable({ x, z }, w * 0.7 + 2);
+        } else if (towerShape === 3) {
+          // Stacked cylinders of decreasing radius
+          const stacks = 3 + Math.floor(rand() * 4);
+          let curR = w * 0.6;
+          let curY = gy;
+          for (let st = 0; st < stacks; st++) {
+            const sH = h / stacks + rand() * 5;
+            const sGeom = new THREE.CylinderGeometry(curR * 0.85, curR, sH, 12);
+            const seg = new THREE.Mesh(sGeom, wallMat);
+            seg.position.set(x, curY + sH / 2, z);
+            group.add(seg);
+            // Glow band between stacks
+            if (st > 0) {
+              const bandGeom = new THREE.TorusGeometry(curR + 1, 0.5, 6, 16);
+              const band = new THREE.Mesh(bandGeom, glowMat);
+              band.position.set(x, curY + 0.5, z);
+              band.rotation.x = Math.PI / 2;
+              group.add(band);
+            }
+            curY += sH;
+            curR *= 0.85;
+          }
+          this.registerCollidable({ x, z }, w * 0.6 + 2);
+        } else if (towerShape === 4) {
+          // Dome-topped slab
+          const slabGeom = new THREE.BoxGeometry(w, h * 0.75, d);
+          const slab = new THREE.Mesh(slabGeom, wallMat);
+          slab.position.set(x, gy + h * 0.375, z);
+          group.add(slab);
+          const domeR = Math.min(w, d) * 0.6;
+          const dtGeom = new THREE.SphereGeometry(domeR, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+          const dt = new THREE.Mesh(dtGeom, glassMat);
+          dt.position.set(x, gy + h * 0.75, z);
+          group.add(dt);
+          this.registerCollidable({ x, z }, Math.max(w, d) / 2 + 2);
+          // Window grid
+          const winRows = 3 + Math.floor(rand() * 4);
+          for (let wr = 0; wr < winRows; wr++) {
+            const wGeom = new THREE.BoxGeometry(w * 0.85, h * 0.06, 0.5);
+            const win = new THREE.Mesh(wGeom, glowMat);
+            win.position.set(0, -h * 0.3 + wr * (h * 0.17), d / 2 + 0.3);
+            slab.add(win);
+          }
+        } else {
+          // Classic box tower with neon edges and beacon
+          const towerGeom = new THREE.BoxGeometry(w, h, d);
+          const tower = new THREE.Mesh(towerGeom, wallMat);
+          tower.position.set(x, gy + h / 2, z);
+          group.add(tower);
+          this.registerCollidable({ x, z }, Math.max(w, d) / 2 + 2);
+          // Neon edges — random accent
+          for (let e = 0; e < 4; e++) {
+            const eGeom = new THREE.BoxGeometry(0.6, h, 0.6);
+            const edge = new THREE.Mesh(eGeom, rand() > 0.5 ? glowMat : glow2Mat);
+            const sx = (e % 2 === 0 ? 1 : -1) * (w / 2 + 0.4);
+            const sz = (e < 2 ? 1 : -1) * (d / 2 + 0.4);
+            edge.position.set(sx, 0, sz);
+            tower.add(edge);
+          }
+          // Roof beacon
+          const beaconGeom = new THREE.SphereGeometry(2, 8, 8);
+          const beacon = new THREE.Mesh(beaconGeom, new THREE.MeshBasicMaterial({ color: pal.beacon }));
+          beacon.position.set(0, h / 2 + 2, 0);
+          tower.add(beacon);
+        }
+      }
 
-        // Roof beacon
-        const beaconGeom = new THREE.SphereGeometry(1.8, 8, 8);
-        const beacon = new THREE.Mesh(beaconGeom, new THREE.MeshBasicMaterial({ color: 0xff66cc }));
-        beacon.position.set(0, h / 2 + 2, 0);
-        tower.add(beacon);
+      // Skybridges between nearby towers
+      for (let i = 0; i < towerPositions.length; i++) {
+        for (let j = i + 1; j < towerPositions.length; j++) {
+          const a = towerPositions[i], b = towerPositions[j];
+          const dx = a.x - b.x, dz = a.z - b.z;
+          const bridgeDist = Math.sqrt(dx * dx + dz * dz);
+          if (bridgeDist < 80 && rand() > 0.4) {
+            const bridgeH = 25 + rand() * 60;
+            const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+            const bGeom = new THREE.BoxGeometry(bridgeDist, 2, 3);
+            const bridge = new THREE.Mesh(bGeom, wallMat);
+            bridge.position.set(mx, gy + bridgeH, mz);
+            bridge.rotation.y = Math.atan2(b.z - a.z, b.x - a.x);
+            group.add(bridge);
+          }
+        }
       }
 
       // Flagship tower
-      const flagH = 400 + rand() * 200;
-      const flagW = 30 + rand() * 15;
-      const flagGeom = new THREE.BoxGeometry(flagW, flagH, flagW);
+      const flagH = 400 + rand() * 300;
+      const flagW = 25 + rand() * 20;
+      const flagStyle = Math.floor(rand() * 3);
       const flagMat = new THREE.MeshStandardMaterial({
         color: 0xf0f4ff, metalness: 1.0, roughness: 0.1,
-        emissive: 0x223366, emissiveIntensity: 0.5
+        emissive: pal.emissive, emissiveIntensity: 0.5
       });
-      const flagship = new THREE.Mesh(flagGeom, flagMat);
-      flagship.position.set(cx, gy + flagH / 2, cz);
-      group.add(flagship);
-      this.registerCollidable({ x: cx, z: cz }, flagW / 2 + 5);
 
-      // Crown ring
-      const crownGeom = new THREE.TorusGeometry(flagW * 0.8, 1.5, 12, 32);
-      const crown = new THREE.Mesh(crownGeom, glowMat);
-      crown.position.set(0, flagH / 2 - 30, 0);
-      crown.rotation.x = Math.PI / 2;
-      flagship.add(crown);
+      if (flagStyle === 0) {
+        // Twisted flagship
+        makeTwistedTower(cx, cz, flagW, flagH, flagW, 0.06 + rand() * 0.08);
+        // Override material on flagship segments — re-add glow
+        addFloatingRing(cx, gy + flagH * 0.5, cz, flagW + 10, 2);
+        addFloatingRing(cx, gy + flagH * 0.75, cz, flagW + 6, 1.5);
+        addFloatingRing(cx, gy + flagH * 0.95, cz, flagW + 3, 1.2);
+      } else if (flagStyle === 1) {
+        // Obelisk — tapered with a pointed crown
+        const obGeom = new THREE.CylinderGeometry(flagW * 0.15, flagW * 0.55, flagH, 6);
+        const ob = new THREE.Mesh(obGeom, flagMat);
+        ob.position.set(cx, gy + flagH / 2, cz);
+        group.add(ob);
+        this.registerCollidable({ x: cx, z: cz }, flagW * 0.55 + 5);
+        // Crown spire
+        const spH = flagH * 0.15;
+        const spGeom = new THREE.ConeGeometry(flagW * 0.2, spH, 6);
+        const spire = new THREE.Mesh(spGeom, new THREE.MeshBasicMaterial({ color: pal.glow }));
+        spire.position.set(0, flagH / 2 + spH / 2, 0);
+        ob.add(spire);
+        // Orbiting rings
+        for (let r = 0; r < 4; r++) {
+          addFloatingRing(cx, gy + flagH * (0.2 + r * 0.2), cz, flagW * 0.6 + r * 3, 1.2);
+        }
+      } else {
+        // Classic flagship with crown
+        const flagGeom = new THREE.BoxGeometry(flagW, flagH, flagW);
+        const flagship = new THREE.Mesh(flagGeom, flagMat);
+        flagship.position.set(cx, gy + flagH / 2, cz);
+        group.add(flagship);
+        this.registerCollidable({ x: cx, z: cz }, flagW / 2 + 5);
+        // Crown ring
+        const crownGeom = new THREE.TorusGeometry(flagW * 0.8, 1.5, 12, 32);
+        const crown = new THREE.Mesh(crownGeom, glowMat);
+        crown.position.set(0, flagH / 2 - 30, 0);
+        crown.rotation.x = Math.PI / 2;
+        flagship.add(crown);
+        // Neon stripes up the side
+        for (let ns = 0; ns < 6; ns++) {
+          const nsGeom = new THREE.BoxGeometry(0.8, flagH * 0.15, 0.8);
+          const stripe = new THREE.Mesh(nsGeom, ns % 2 === 0 ? glowMat : glow2Mat);
+          stripe.position.set(flagW / 2 + 0.5, -flagH / 2 + ns * flagH * 0.17 + flagH * 0.1, 0);
+          flagship.add(stripe);
+        }
+      }
+
+      // Decorative mega-arches at city entrances
+      const archCount = 2 + Math.floor(rand() * 2);
+      for (let a = 0; a < archCount; a++) {
+        const angle = (a / archCount) * Math.PI * 2 + rand() * 0.5;
+        const dist = cityRadius * 0.8;
+        const ax1 = cx + Math.cos(angle) * dist - Math.sin(angle) * 20;
+        const az1 = cz + Math.sin(angle) * dist + Math.cos(angle) * 20;
+        const ax2 = cx + Math.cos(angle) * dist + Math.sin(angle) * 20;
+        const az2 = cz + Math.sin(angle) * dist - Math.cos(angle) * 20;
+        addArch(ax1, az1, ax2, az2, 40 + rand() * 30);
+      }
+
+      // Scattered ground-level decorations: crates, tanks, debris
+      const decoCount = 8 + Math.floor(rand() * 10);
+      for (let dec = 0; dec < decoCount; dec++) {
+        const angle = rand() * Math.PI * 2;
+        const dist = 40 + rand() * cityRadius;
+        const dx = cx + Math.cos(angle) * dist;
+        const dz = cz + Math.sin(angle) * dist;
+        const decoType = Math.floor(rand() * 3);
+        if (decoType === 0) {
+          // Crate
+          const cw = 2 + rand() * 4;
+          const cGeom = new THREE.BoxGeometry(cw, cw, cw);
+          const crate = new THREE.Mesh(cGeom, padMat);
+          crate.position.set(dx, gy + cw / 2, dz);
+          crate.rotation.y = rand() * Math.PI;
+          group.add(crate);
+        } else if (decoType === 1) {
+          // Barrel/tank
+          const bGeom = new THREE.CylinderGeometry(1.5, 1.5, 3 + rand() * 2, 8);
+          const barrel = new THREE.Mesh(bGeom, wallMat);
+          barrel.position.set(dx, gy + 2, dz);
+          group.add(barrel);
+        } else {
+          // Glowing ground marker
+          const mGeom = new THREE.RingGeometry(1, 3, 16);
+          const marker = new THREE.Mesh(mGeom, glow2Mat);
+          marker.position.set(dx, gy + 0.2, dz);
+          marker.rotation.x = -Math.PI / 2;
+          group.add(marker);
+        }
+      }
 
       // Single ambient light for the city
-      const cityLight = new THREE.PointLight(0x88aaff, 1.5, 900);
-      cityLight.position.set(0, flagH * 0.4, 0);
+      const cityLight = new THREE.PointLight(pal.accent, 1.5, 900);
+      cityLight.position.set(cx, gy + flagH * 0.4, cz);
       group.add(cityLight);
     }
 
@@ -4544,12 +5201,10 @@ function animate(time) {
     Math.abs(currentChunk.z - terrainSystem.currentChunk.z)
   );
 
-  // If we're too far from the current chunk center or outside the terrain bounds
-  if (chunkDistance > terrainSystem.visibleRadius) {
-    // Reset to previous position if going too far
-    rover.position.x = previousPosition.x;
-    rover.position.z = previousPosition.z;
-    isMoving = false;
+  // If we're too far from the current chunk center, update the chunk tracking
+  // (no longer blocks movement — the rover can explore freely)
+  if (chunkDistance > 2) {
+    terrainSystem.currentChunk = { ...currentChunk };
   }
 
   // Handle turning by updating the tracked yaw value
