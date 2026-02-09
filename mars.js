@@ -134,7 +134,7 @@ if (window.gameRenderer) {
 
 // Scene, Camera, Renderer
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+const camera = new THREE.PerspectiveCamera(85, window.innerWidth / window.innerHeight, 0.1, 10000);
 camera.position.set(0, 10, 20);
 
 // Performance-optimized renderer with adaptive settings - MOBILE EMERGENCY MODE
@@ -1056,8 +1056,8 @@ window.gameEventListeners.add(window, 'keydown', keydownHandler);
 window.gameEventListeners.add(window, 'keyup', keyupHandler);
 
 // Add camera modes and third-person view
-// Lower and pull back third-person camera so even more sky is visible
-const cameraOffset = new THREE.Vector3(0, 3.5, 17); // Positive Z to position behind the rover
+// Third-person camera: higher, farther back, slight side offset for a cinematic angle
+const cameraOffset = new THREE.Vector3(3, 8, 22);
 
 // Change default camera mode to thirdPerson - Make globally accessible for mobile controls
 window.cameraMode = 'thirdPerson'; // 'orbit', 'thirdPerson', 'firstPerson'
@@ -1887,6 +1887,14 @@ class MarsSceneManager {
     this.aiRoutes = [];   // Reusable world-space routes for AI traffic
     this.lastTrafficUpdateTime = null;
     this.bulletTrains = []; // High-speed trains on elevated tracks
+    this.collidables = [];  // Objects the rover can collide with { position, radius }
+
+    // Procedural settlement spawning system
+    this.settlementGrid = 2000;       // Grid spacing — one potential site every 2000 units
+    this.settlementSpawnDist = 1800;   // Distance at which a settlement spawns
+    this.settlementDespawnDist = 3500; // Distance at which a settlement is removed
+    this.settlements = new Map();      // key "gx,gz" → { group, center, type, collidableStart }
+    this.lastSettlementCheck = 0;      // Throttle timestamp
 
     // Get reference to the terrain mesh for proper ground placement
     // The terrain is the largest PlaneGeometry in the scene (3000-5000 units wide)
@@ -1927,6 +1935,28 @@ class MarsSceneManager {
     console.log('Colony and rockets should now be visible in the scene!');
   }
 
+  // Register a collidable object with a position and bounding radius
+  registerCollidable(position, radius) {
+    this.collidables.push({ x: position.x, z: position.z, r: radius });
+  }
+
+  // Check if a world-space XZ position collides with any registered object
+  // Returns true if blocked
+  checkCollision(x, z, roverRadius) {
+    const len = this.collidables.length;
+    for (let i = 0; i < len; i++) {
+      const c = this.collidables[i];
+      const dx = x - c.x;
+      const dz = z - c.z;
+      const minDist = c.r + roverRadius;
+      // Squared distance check (avoids sqrt)
+      if (dx * dx + dz * dz < minDist * minDist) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   initializeRocketLaunchSystem() {
     if (this.rockets && this.rockets.length > 0) return;
 
@@ -1957,7 +1987,8 @@ class MarsSceneManager {
       pad.receiveShadow = true;
       this.scene.add(pad);
 
-      // Create rocket on the pad
+      // Register rocket pad as collidable (radius 22 + padding)
+      this.registerCollidable(padPos, 25);
       const rocket = this.createSimpleRocket();
       rocket.position.set(padPos.x, groundY, padPos.z);
       this.addRocketEffects(rocket, 'launch');
@@ -2761,6 +2792,24 @@ class MarsSceneManager {
     
     console.log('✅ Ultra high-definition futuristic colony created:', structures.length, 'main structures');
 
+    // Register collidable bounding volumes for the primary colony
+    // Command center levels (3 stacked cylinders at colony center, radius ~70-80)
+    this.registerCollidable({ x: colonyOffsetX, z: colonyOffsetZ }, 80);
+    // Top dome above command center
+    this.registerCollidable({ x: colonyOffsetX, z: colonyOffsetZ }, 60);
+    // Register individual structures that sit away from the center
+    structures.forEach(s => {
+      if (!s || !s.position) return;
+      const p = s.geometry && s.geometry.parameters;
+      if (!p) return;
+      // Determine a bounding radius from the geometry
+      const r = p.radiusTop || p.radiusBottom || p.radius ||
+                (p.width ? Math.max(p.width, p.depth || p.width) / 2 : 0);
+      if (r > 5) { // Only register structures large enough to matter
+        this.registerCollidable(s.position, r + 2); // +2 padding
+      }
+    });
+
     // Create a lightweight secondary colony (not a full deep-clone — saves hundreds of objects)
     try {
       const perfSettings = getPerformanceSettings();
@@ -2785,6 +2834,9 @@ class MarsSceneManager {
         });
 
         console.log('✅ Lightweight secondary colony created at', this.secondaryColonyCenter.x, this.secondaryColonyCenter.z);
+
+        // Register secondary colony as collidable (mirror the primary colony center)
+        this.registerCollidable(this.secondaryColonyCenter, 80);
 
         // Build elevated rail and bullet train between the two colonies
         this.createBulletTrainSystem();
@@ -2961,7 +3013,8 @@ class MarsSceneManager {
       this.scene.add(tower);
       structures.push(tower);
 
-      // Vertical neon edge strips (2 per building max for perf)
+      // Register skyscraper as collidable
+      this.registerCollidable({ x: x, z: z }, Math.max(width, depth) / 2 + 2);
       const edgeGeom = new THREE.BoxGeometry(0.7, baseHeight * 1.02, 0.7);
       const edgeMat = new THREE.MeshBasicMaterial({
         color: 0x66ddff,
@@ -3009,7 +3062,8 @@ class MarsSceneManager {
     this.scene.add(flagship);
     structures.push(flagship);
 
-    // Holographic crown ring near the top of the mega-tower
+    // Register flagship as collidable
+    this.registerCollidable({ x: center.x, z: center.z }, flagshipWidth / 2 + 5);
     const crownRingGeom = new THREE.TorusGeometry(flagshipWidth * 0.9, 1.8, 16, 64);
     const crownRingMat = new THREE.MeshStandardMaterial({
       color: 0x66ffff,
@@ -3207,6 +3261,283 @@ class MarsSceneManager {
     ];
   }
 
+  // ================================================================
+  // PROCEDURAL SETTLEMENT SPAWNING
+  // ================================================================
+
+  // Deterministic hash for a grid cell — decides if a settlement exists there and its type
+  _settlementHash(gx, gz) {
+    // Simple but effective integer hash
+    let h = (gx * 374761393 + gz * 668265263) ^ 0x5bd1e995;
+    h = Math.imul(h ^ (h >>> 15), 0x27d4eb2d);
+    h = h ^ (h >>> 13);
+    return h;
+  }
+
+  // Check and spawn/despawn settlements near the player
+  updateSettlements(playerPosition) {
+    const now = performance.now();
+    if (now - this.lastSettlementCheck < 2000) return; // check every 2 seconds
+    this.lastSettlementCheck = now;
+
+    const perfSettings = getPerformanceSettings();
+    if (perfSettings.isMobile) return;
+
+    const px = playerPosition.x;
+    const pz = playerPosition.z;
+    const grid = this.settlementGrid;
+
+    // Determine which grid cells are within spawn range
+    const scanRadius = Math.ceil(this.settlementSpawnDist / grid) + 1;
+    const playerGX = Math.floor(px / grid);
+    const playerGZ = Math.floor(pz / grid);
+
+    // Despawn settlements that are too far away
+    for (const [key, settlement] of this.settlements) {
+      const dx = settlement.center.x - px;
+      const dz = settlement.center.z - pz;
+      if (dx * dx + dz * dz > this.settlementDespawnDist * this.settlementDespawnDist) {
+        // Remove from scene
+        this.scene.remove(settlement.group);
+        settlement.group.traverse(child => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+            else child.material.dispose();
+          }
+        });
+        // Remove collidables that belong to this settlement
+        if (typeof settlement.collidableStart === 'number') {
+          this.collidables.splice(settlement.collidableStart,
+            settlement.collidableCount || 0);
+          // Adjust collidableStart for all remaining settlements
+          for (const [, s] of this.settlements) {
+            if (s.collidableStart > settlement.collidableStart) {
+              s.collidableStart -= (settlement.collidableCount || 0);
+            }
+          }
+        }
+        this.settlements.delete(key);
+      }
+    }
+
+    // Scan grid cells around the player — spawn new settlements
+    for (let gx = playerGX - scanRadius; gx <= playerGX + scanRadius; gx++) {
+      for (let gz = playerGZ - scanRadius; gz <= playerGZ + scanRadius; gz++) {
+        const key = `${gx},${gz}`;
+        if (this.settlements.has(key)) continue;
+
+        // Skip the origin area (the hand-placed colony lives there)
+        if (Math.abs(gx) <= 1 && Math.abs(gz) <= 1) continue;
+
+        const hash = this._settlementHash(gx, gz);
+
+        // ~30% of grid cells have a settlement
+        if ((hash & 0xff) > 76) continue; // 77/256 ≈ 30%
+
+        const cx = gx * grid + ((hash >>> 8) & 0xff) / 256 * grid * 0.6;
+        const cz = gz * grid + ((hash >>> 16) & 0xff) / 256 * grid * 0.6;
+
+        // Distance check
+        const dx = cx - px;
+        const dz2 = cz - pz;
+        if (dx * dx + dz2 * dz2 > this.settlementSpawnDist * this.settlementSpawnDist) continue;
+
+        // Determine settlement type from hash bits
+        const typeBits = (hash >>> 24) & 0xff;
+        let type;
+        if (typeBits < 100) type = 'outpost';       // ~39% — small
+        else if (typeBits < 200) type = 'base';      // ~39% — medium
+        else type = 'city';                           // ~22% — large
+
+        const groundY = this.getTerrainHeight(cx, cz);
+        const center = new THREE.Vector3(cx, groundY, cz);
+
+        console.log(`🏗️ Spawning procedural ${type} at (${Math.round(cx)}, ${Math.round(cz)})`);
+
+        const collidableStart = this.collidables.length;
+        const group = this._buildSettlement(type, center, hash);
+        const collidableCount = this.collidables.length - collidableStart;
+
+        this.scene.add(group);
+        this.settlements.set(key, {
+          group,
+          center,
+          type,
+          collidableStart,
+          collidableCount
+        });
+      }
+    }
+  }
+
+  // Build a settlement group at the given center; returns a THREE.Group
+  _buildSettlement(type, center, seed) {
+    const group = new THREE.Group();
+    group.position.set(0, 0, 0);
+
+    // Seeded pseudo-random so the same grid cell always produces the same layout
+    let s = seed;
+    const rand = () => { s = Math.imul(s ^ (s >>> 15), 0x5bd1e995); s = s ^ (s >>> 13); return ((s >>> 0) % 10000) / 10000; };
+
+    const cx = center.x;
+    const cz = center.z;
+    const gy = center.y;
+
+    // Shared materials
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0xd0d8e8, metalness: 0.7, roughness: 0.3, emissive: 0x111122, emissiveIntensity: 0.15 });
+    const glowMat = new THREE.MeshBasicMaterial({ color: 0x66ddff, transparent: true, opacity: 0.8 });
+    const padMat  = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9, metalness: 0.2 });
+
+    if (type === 'outpost') {
+      // Small outpost: 2-4 domes + landing pad
+      const count = 2 + Math.floor(rand() * 3);
+      for (let i = 0; i < count; i++) {
+        const angle = rand() * Math.PI * 2;
+        const dist = 20 + rand() * 40;
+        const x = cx + Math.cos(angle) * dist;
+        const z = cz + Math.sin(angle) * dist;
+        const r = 8 + rand() * 8;
+        const domeGeom = new THREE.SphereGeometry(r, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+        const dome = new THREE.Mesh(domeGeom, wallMat);
+        dome.position.set(x, gy, z);
+        group.add(dome);
+        this.registerCollidable({ x, z }, r + 2);
+      }
+      // Landing pad
+      const padGeom = new THREE.CylinderGeometry(18, 18, 2, 6);
+      const pad = new THREE.Mesh(padGeom, padMat);
+      pad.position.set(cx, gy + 1, cz);
+      group.add(pad);
+      this.registerCollidable({ x: cx, z: cz }, 20);
+
+      // Small antenna
+      const poleGeom = new THREE.CylinderGeometry(0.5, 0.5, 25, 6);
+      const pole = new THREE.Mesh(poleGeom, wallMat);
+      pole.position.set(cx + 30, gy + 12.5, cz);
+      group.add(pole);
+      const dishGeom = new THREE.SphereGeometry(4, 12, 8, 0, Math.PI);
+      const dish = new THREE.Mesh(dishGeom, glowMat);
+      dish.rotation.x = -Math.PI / 4;
+      dish.position.set(cx + 30, gy + 26, cz);
+      group.add(dish);
+
+    } else if (type === 'base') {
+      // Medium base: central building + several modules + perimeter
+      const centralHeight = 30 + rand() * 20;
+      const centralR = 25 + rand() * 10;
+      const centralGeom = new THREE.CylinderGeometry(centralR, centralR + 5, centralHeight, 16);
+      const central = new THREE.Mesh(centralGeom, wallMat);
+      central.position.set(cx, gy + centralHeight / 2, cz);
+      group.add(central);
+      this.registerCollidable({ x: cx, z: cz }, centralR + 7);
+
+      // Dome on top
+      const domeGeom = new THREE.SphereGeometry(centralR - 2, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+      const dome = new THREE.Mesh(domeGeom, wallMat);
+      dome.position.set(cx, gy + centralHeight, cz);
+      group.add(dome);
+
+      // Surrounding modules
+      const moduleCount = 4 + Math.floor(rand() * 4);
+      for (let i = 0; i < moduleCount; i++) {
+        const angle = (i / moduleCount) * Math.PI * 2 + rand() * 0.3;
+        const dist = centralR + 20 + rand() * 30;
+        const x = cx + Math.cos(angle) * dist;
+        const z = cz + Math.sin(angle) * dist;
+        const w = 8 + rand() * 10;
+        const h = 10 + rand() * 15;
+        const d = 8 + rand() * 10;
+        const modGeom = new THREE.BoxGeometry(w, h, d);
+        const mod = new THREE.Mesh(modGeom, wallMat);
+        mod.position.set(x, gy + h / 2, z);
+        group.add(mod);
+        this.registerCollidable({ x, z }, Math.max(w, d) / 2 + 2);
+
+        // Glow strip
+        const stripGeom = new THREE.BoxGeometry(0.5, h * 0.9, 0.5);
+        const strip = new THREE.Mesh(stripGeom, glowMat);
+        strip.position.set(w / 2 + 0.3, 0, d / 2 + 0.3);
+        mod.add(strip);
+      }
+
+      // Landing pads
+      for (let i = 0; i < 2; i++) {
+        const angle = rand() * Math.PI * 2;
+        const dist = centralR + 60 + rand() * 20;
+        const x = cx + Math.cos(angle) * dist;
+        const z = cz + Math.sin(angle) * dist;
+        const padGeom = new THREE.CylinderGeometry(16, 16, 2, 6);
+        const pad = new THREE.Mesh(padGeom, padMat);
+        pad.position.set(x, gy + 1, z);
+        group.add(pad);
+        this.registerCollidable({ x, z }, 18);
+      }
+
+    } else {
+      // City: cluster of towers with a tall centerpiece
+      const towerCount = 8 + Math.floor(rand() * 10);
+      const cityRadius = 150 + rand() * 100;
+
+      for (let i = 0; i < towerCount; i++) {
+        const angle = rand() * Math.PI * 2;
+        const dist = 30 + rand() * cityRadius;
+        const x = cx + Math.cos(angle) * dist;
+        const z = cz + Math.sin(angle) * dist;
+
+        const coreFactor = 1 - dist / (cityRadius + 30);
+        const h = 40 + coreFactor * 160 + rand() * 50;
+        const w = 10 + rand() * 14;
+        const d = 10 + rand() * 14;
+
+        const towerGeom = new THREE.BoxGeometry(w, h, d);
+        const tower = new THREE.Mesh(towerGeom, wallMat);
+        tower.position.set(x, gy + h / 2, z);
+        group.add(tower);
+        this.registerCollidable({ x, z }, Math.max(w, d) / 2 + 2);
+
+        // Neon edges
+        const edgeGeom = new THREE.BoxGeometry(0.6, h, 0.6);
+        const e1 = new THREE.Mesh(edgeGeom, glowMat);
+        e1.position.set(w / 2 + 0.4, 0, d / 2 + 0.4);
+        tower.add(e1);
+
+        // Roof beacon
+        const beaconGeom = new THREE.SphereGeometry(1.8, 8, 8);
+        const beacon = new THREE.Mesh(beaconGeom, new THREE.MeshBasicMaterial({ color: 0xff66cc }));
+        beacon.position.set(0, h / 2 + 2, 0);
+        tower.add(beacon);
+      }
+
+      // Flagship tower
+      const flagH = 400 + rand() * 200;
+      const flagW = 30 + rand() * 15;
+      const flagGeom = new THREE.BoxGeometry(flagW, flagH, flagW);
+      const flagMat = new THREE.MeshStandardMaterial({
+        color: 0xf0f4ff, metalness: 1.0, roughness: 0.1,
+        emissive: 0x223366, emissiveIntensity: 0.5
+      });
+      const flagship = new THREE.Mesh(flagGeom, flagMat);
+      flagship.position.set(cx, gy + flagH / 2, cz);
+      group.add(flagship);
+      this.registerCollidable({ x: cx, z: cz }, flagW / 2 + 5);
+
+      // Crown ring
+      const crownGeom = new THREE.TorusGeometry(flagW * 0.8, 1.5, 12, 32);
+      const crown = new THREE.Mesh(crownGeom, glowMat);
+      crown.position.set(0, flagH / 2 - 30, 0);
+      crown.rotation.x = Math.PI / 2;
+      flagship.add(crown);
+
+      // Single ambient light for the city
+      const cityLight = new THREE.PointLight(0x88aaff, 1.5, 900);
+      cityLight.position.set(0, flagH * 0.4, 0);
+      group.add(cityLight);
+    }
+
+    return group;
+  }
+
   update(playerPosition) {
     // Check if player has moved far enough to trigger scene repeat
     const distanceMoved = playerPosition.distanceTo(this.lastPlayerPosition);
@@ -3234,6 +3565,9 @@ class MarsSceneManager {
 
     // High-speed bullet train between the two colonies
     this.updateBulletTrain(now);
+
+    // Procedural settlements — spawn/despawn based on proximity
+    this.updateSettlements(playerPosition);
   }
 
   // Check if the player has reached the next guided-route waypoint
@@ -4177,6 +4511,14 @@ function animate(time) {
     rover.position.x += moveX;
     rover.position.z += moveZ;
 
+    // Collision detection — revert if the rover hits a structure
+    if (window.marsSceneManager &&
+        window.marsSceneManager.checkCollision(rover.position.x, rover.position.z, 2.5)) {
+      rover.position.x = previousPosition.x;
+      rover.position.z = previousPosition.z;
+      isMoving = false;
+    }
+
     // Position rover on terrain after movement
     positionRoverOnTerrain();
 
@@ -4499,14 +4841,15 @@ function updateCamera() {
         rover.position.z + vectors.offset.z
       );
 
-      // Smoothly move the camera to the target position
-      camera.position.lerp(vectors.target, 0.05);
+      // Snappier follow for responsive feel
+      camera.position.lerp(vectors.target, 0.1);
 
-      // Make the camera look at the rover
+      // Look slightly ahead of the rover (in its facing direction) for a dynamic feel
+      vectors.forward.set(0, 0, -1).applyAxisAngle(vectors.upAxis, roverYaw);
       camera.lookAt(
-        rover.position.x,
-        rover.position.y + 1.5,
-        rover.position.z
+        rover.position.x + vectors.forward.x * 5,
+        rover.position.y + 2.0,
+        rover.position.z + vectors.forward.z * 5
       );
       break;
 
