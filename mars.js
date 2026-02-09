@@ -730,7 +730,7 @@ scene.add(rover);
 const perfSettingsForRover = getPerformanceSettings();
 if (perfSettingsForRover.isMobile) {
   // Reduce ambient light intensity to prevent GPU overload
-  const ambientLight = new THREE.AmbientLight(0x404040, 0.4); // Reduced intensity
+  const ambientLight = new THREE.AmbientLight(0x332820, 0.3); // Dim warm-grey ambient
   scene.add(ambientLight);
   
   // Remove hemisphere light on mobile to reduce GPU load
@@ -855,10 +855,10 @@ const createDustParticles = () => {
   particles.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
 
   const particleMaterial = new THREE.PointsMaterial({
-    color: 0xaa7755,
+    color: 0x6b4433,
     size: 0.1,
     transparent: true,
-    opacity: 0.6,
+    opacity: 0.4,
     sizeAttenuation: true
   });
 
@@ -898,16 +898,16 @@ const dustParticles = createDustParticles();
 
 // Enhanced Lighting for Mars - update to match the reference image with Samsung adjustments
 // Ambient light (stronger reddish to simulate Mars atmosphere) with Samsung brightness boost
-const ambientIntensity = perfSettings.samsungOptimized ? 0.6 * perfSettings.ambientLightBoost : 0.6;
-const ambientColor = perfSettings.samsungOptimized ? 0xff9977 : 0xff8866;  // Slightly warmer for Samsung
+const ambientIntensity = perfSettings.samsungOptimized ? 0.45 * perfSettings.ambientLightBoost : 0.45;
+const ambientColor = perfSettings.samsungOptimized ? 0xaa8877 : 0x997766;  // Muted warm grey
 const ambientLight = new THREE.AmbientLight(ambientColor, ambientIntensity);
 scene.add(ambientLight);
 
-// Directional light (sun) - make it more orange/red like in the image with Samsung adjustments
-const sunIntensity = perfSettings.samsungOptimized ? 1.0 * perfSettings.materialBrightness : 1.0;
-const sunColor = perfSettings.samsungOptimized ? 0xff9955 : 0xff7744;  // Slightly warmer for Samsung
+// Directional light (sun) - dim, desaturated warm tone for realistic Mars
+const sunIntensity = perfSettings.samsungOptimized ? 0.85 * perfSettings.materialBrightness : 0.85;
+const sunColor = perfSettings.samsungOptimized ? 0xddaa88 : 0xcc9977;  // Muted warm sun
 const sunLight = new THREE.DirectionalLight(sunColor, sunIntensity);
-sunLight.position.set(-50, 30, 50); // Position the sun lower on the horizon
+sunLight.position.set(-50, 20, 50); // Sun lower on the horizon
 // sunLight.castShadow = true; // Disabled for better performance and cleaner look
 // sunLight.shadow.mapSize.width = 2048;
 // sunLight.shadow.mapSize.height = 2048;
@@ -920,9 +920,9 @@ sunLight.position.set(-50, 30, 50); // Position the sun lower on the horizon
 scene.add(sunLight);
 
 // Add a subtle hemisphere light to simulate light bouncing off the surface with Samsung adjustments
-const hemisphereIntensity = perfSettings.samsungOptimized ? 0.4 * perfSettings.ambientLightBoost : 0.4;
-const hemisphereSkyColor = perfSettings.samsungOptimized ? 0xff7744 : 0xff6633;
-const hemisphereGroundColor = perfSettings.samsungOptimized ? 0xbb5511 : 0xaa4400;
+const hemisphereIntensity = perfSettings.samsungOptimized ? 0.32 * perfSettings.ambientLightBoost : 0.32;
+const hemisphereSkyColor = perfSettings.samsungOptimized ? 0xaa8866 : 0x997755;
+const hemisphereGroundColor = perfSettings.samsungOptimized ? 0x664433 : 0x553322;
 const hemisphereLight = new THREE.HemisphereLight(hemisphereSkyColor, hemisphereGroundColor, hemisphereIntensity);
 scene.add(hemisphereLight);
 
@@ -5987,16 +5987,16 @@ function createRealisticMarsTerrain() {
   if (terrainPerfSettings.isMobile) { // Basic material on mobile only
     // Use basic material without textures - no additional WebGL contexts
     material = new THREE.MeshBasicMaterial({
-      color: 0xaa6633,  // Martian reddish-brown color
+      color: 0x7f4a2c,  // Muted Mars dust
       side: THREE.DoubleSide,
       transparent: false,
-      fog: true // Allow fog to affect material for depth
+      fog: true
     });
     console.log('Mobile: Using basic terrain material without textures');
   } else {
-    // Desktop: Use MeshLambertMaterial (much cheaper than Standard, still has lighting)
+    // Desktop: Use MeshLambertMaterial with realistic Mars coloring
     material = new THREE.MeshLambertMaterial({
-      color: 0xaa6633,
+      color: 0x7f4a2c,
       side: THREE.DoubleSide,
       fog: true
     });
@@ -6014,33 +6014,56 @@ function createRealisticMarsTerrain() {
   for (let i = 0; i < geometry.attributes.position.count; i++) {
     const elevation = positionArray[i * 3 + 1];
 
-    // Base color components (darker Mars red)
-    let r = 0.545; // Base red
-    let g = 0.271; // Base green
-    let b = 0.075; // Base blue
+    // Realistic Mars surface — muted dusty rust-brown
+    let r = 0.38;
+    let g = 0.20;
+    let b = 0.10;
 
-    // Adjust color based on elevation
+    // Elevation-based colour shifts for realism
     if (elevation > 5) {
-      // Higher terrain slightly lighter
-      const factor = Math.min((elevation - 5) / 15, 0.2);
-      r += factor;
-      g += factor;
-      b += factor;
-    } else if (elevation < -2) {
-      // Craters and low areas slightly darker
-      const factor = Math.min((-elevation - 2) / 5, 0.2);
+      // High ground: slightly lighter and dustier (exposed rock/regolith)
+      const factor = Math.min((elevation - 5) / 20, 0.12);
+      r += factor * 0.9;
+      g += factor * 0.7;
+      b += factor * 0.5;
+    } else if (elevation > 2) {
+      // Mid-altitude: faint warm tint
+      const factor = Math.min((elevation - 2) / 8, 0.06);
+      r += factor * 0.6;
+      g += factor * 0.3;
+    } else if (elevation < -5) {
+      // Deep craters / valleys: darker, cooler shadow tones
+      const factor = Math.min((-elevation - 5) / 10, 0.10);
+      r -= factor * 0.8;
+      g -= factor * 0.7;
+      b -= factor * 0.3;
+    } else if (elevation < -1) {
+      // Shallow low areas: slightly darker
+      const factor = Math.min((-elevation - 1) / 6, 0.06);
       r -= factor;
       g -= factor;
       b -= factor;
     }
 
-    // Add subtle deterministic variation based on position
+    // Broad regional hue variation (some areas more grey, some more red)
     const px = positionArray[i * 3];
     const pz = positionArray[i * 3 + 2];
-    const variation = (Math.sin(px * 0.73 + pz * 1.17) * Math.cos(px * 1.53 - pz * 0.89)) * 0.025;
-    r += variation;
-    g += variation;
-    b += variation;
+    const region = Math.sin(px * 0.003 + pz * 0.004) * Math.cos(px * 0.005 - pz * 0.002);
+    r += region * 0.04;
+    g += region * 0.015;
+    b += region * 0.01;
+
+    // Fine-grain deterministic noise for grittiness
+    const fineNoise = (Math.sin(px * 0.73 + pz * 1.17) * Math.cos(px * 1.53 - pz * 0.89)) * 0.02;
+    const microNoise = (Math.sin(px * 2.1 + pz * 3.4) * Math.cos(px * 1.8 - pz * 2.7)) * 0.008;
+    r += fineNoise + microNoise;
+    g += fineNoise * 0.7 + microNoise * 0.5;
+    b += fineNoise * 0.4 + microNoise * 0.3;
+
+    // Clamp to avoid going too bright or negative
+    r = Math.max(0.08, Math.min(0.52, r));
+    g = Math.max(0.04, Math.min(0.30, g));
+    b = Math.max(0.02, Math.min(0.18, b));
 
     // Set the colors
     colors[i * 3] = r;
@@ -6068,7 +6091,7 @@ function createRealisticMarsTexture() {
   
   // MOBILE EMERGENCY: Return solid color instead of complex texture
   if (marsPerfSettings.isMobile) {
-    context.fillStyle = '#a83c0c'; // Simple Mars red color
+    context.fillStyle = '#4a2510'; // Dim muted Mars dust
     context.fillRect(0, 0, textureSize, textureSize);
     const texture = new THREE.CanvasTexture(canvas);
     texture.generateMipmaps = false; // Prevent additional GPU load
@@ -6077,12 +6100,12 @@ function createRealisticMarsTexture() {
     return texture;
   }
 
-  // Base color - deeper reddish-orange like in the reference image
+  // Base color - dim muted Mars dust tones
   const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, '#a83c0c');
-  gradient.addColorStop(0.3, '#8a3208');
-  gradient.addColorStop(0.6, '#9c3a0a');
-  gradient.addColorStop(1, '#7a2e08');
+  gradient.addColorStop(0, '#4a2510');
+  gradient.addColorStop(0.3, '#3d1e0c');
+  gradient.addColorStop(0.6, '#45220e');
+  gradient.addColorStop(1, '#361a0a');
 
   context.fillStyle = gradient;
   context.fillRect(0, 0, canvas.width, canvas.height);
@@ -6104,16 +6127,16 @@ function createRealisticMarsTexture() {
 
     if (colorType < 0.33) {
       // Darker regions (iron-rich)
-      color1 = '#6a2208';
-      color2 = '#7a2a08';
+      color1 = '#351508';
+      color2 = '#3d1a08';
     } else if (colorType < 0.66) {
       // Medium reddish regions
-      color1 = '#9c3a0a';
-      color2 = '#8a3208';
+      color1 = '#4a200a';
+      color2 = '#401c08';
     } else {
       // More brownish regions (clay minerals)
-      color1 = '#704020';
-      color2 = '#603010';
+      color1 = '#382210';
+      color2 = '#2e1a0a';
     }
 
     gradient.addColorStop(0, color1);
