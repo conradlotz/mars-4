@@ -25,67 +25,53 @@ function updateVisualEffects(time, delta) {
   updateGameHUD();
 }
 
+// Cached DOM references for HUD (avoid getElementById every frame)
+let _hudElements = null;
+function _getHudElements() {
+  if (!_hudElements) {
+    _hudElements = {
+      health: document.getElementById('rover-health'),
+      fuel: document.getElementById('rover-fuel'),
+      compass: document.getElementById('rover-heading'),
+      route: document.getElementById('tour-status')
+    };
+  }
+  return _hudElements;
+}
+
+// Compass direction lookup (avoid recreating every frame)
+const _compassDirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+
 // Update HUD with game system information
 function updateGameHUD() {
   if (!rover) return;
-  
+  const hud = _getHudElements();
+
   // Update health display
-  if (rover.health !== undefined) {
-    const healthElement = document.getElementById('rover-health');
-    if (healthElement) {
-      healthElement.textContent = Math.round(rover.health);
-      
-      // Change color based on health
-      if (rover.health < 30) {
-        healthElement.style.color = '#ff4444';
-      } else if (rover.health < 60) {
-        healthElement.style.color = '#ffaa44';
-      } else {
-        healthElement.style.color = '#44ff44';
-      }
-    }
-  }
-  
-  // Update fuel display
-  if (rover.fuel !== undefined) {
-    const fuelElement = document.getElementById('rover-fuel');
-    if (fuelElement) {
-      fuelElement.textContent = Math.round(rover.fuel);
-      
-      // Change color based on fuel
-      if (rover.fuel < 100) {
-        fuelElement.style.color = '#ff4444';
-      } else if (rover.fuel < 300) {
-        fuelElement.style.color = '#ffaa44';
-      } else {
-        fuelElement.style.color = '#44aaff';
-      }
-    }
+  if (rover.health !== undefined && hud.health) {
+    const h = Math.round(rover.health);
+    hud.health.textContent = h;
+    hud.health.style.color = rover.health < 30 ? '#ff4444' : rover.health < 60 ? '#ffaa44' : '#44ff44';
   }
 
-  // Update compass / heading display if HUD element exists
-  const compassElement = document.getElementById('rover-heading');
-  if (compassElement && typeof window.roverYaw === 'number') {
-    // Convert yaw (radians, 0 = +Z) into compass bearing (0° = North)
+  // Update fuel display
+  if (rover.fuel !== undefined && hud.fuel) {
+    hud.fuel.textContent = Math.round(rover.fuel);
+    hud.fuel.style.color = rover.fuel < 100 ? '#ff4444' : rover.fuel < 300 ? '#ffaa44' : '#44aaff';
+  }
+
+  // Update compass / heading display
+  if (hud.compass && typeof window.roverYaw === 'number') {
     let degrees = (window.roverYaw * 180 / Math.PI) % 360;
     if (degrees < 0) degrees += 360;
-
-    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
     const idx = Math.round(degrees / 45) % 8;
-    const label = dirs[idx];
-
-    compassElement.textContent = `${label} (${degrees.toFixed(0)}°)`;
+    hud.compass.textContent = `${_compassDirs[idx]} (${degrees.toFixed(0)}°)`;
   }
 
-  // Update guided route HUD status if available
-  const routeElement = document.getElementById('tour-status');
-  if (routeElement && window.guidedRouteProgress) {
+  // Update guided route HUD status
+  if (hud.route && window.guidedRouteProgress) {
     const { reached, total } = window.guidedRouteProgress;
-    if (reached >= total) {
-      routeElement.textContent = 'Tour: Complete';
-    } else {
-      routeElement.textContent = `Tour: ${reached}/${total} beacons`;
-    }
+    hud.route.textContent = reached >= total ? 'Tour: Complete' : `Tour: ${reached}/${total} beacons`;
   }
 }
 
@@ -308,6 +294,10 @@ document.addEventListener('visibilitychange', () => {
 });
 document.body.appendChild(renderer.domElement);
 
+// Pure black background behind everything — the skybox paints over this
+renderer.setClearColor(0x000000, 1);
+scene.background = new THREE.Color(0x000000);
+
 // Defer night skybox creation - game starts in day mode, so create it in background
 let spaceSkybox = null;
 let _spaceSkyboxCreating = false;
@@ -333,9 +323,8 @@ function ensureSpaceSkybox() {
 // Start creating skybox in background after a short delay (not blocking initial load)
 setTimeout(ensureSpaceSkybox, 100);
 
-// Adaptive fog based on performance settings with Samsung adjustments
-// Match fog to the deep blue night sky instead of a brownish tone
-const fogColor = perfSettings.samsungOptimized ? 0x151b33 : 0x151b33;
+// Fog fades distant terrain to black, matching the void behind everything
+const fogColor = 0x000000;
 const fogDensity = perfSettings.samsungOptimized ? perfSettings.fogDensityReduction : 1.0;
 scene.fog = new THREE.Fog(fogColor, perfSettings.fogDistance * 0.2 * fogDensity, perfSettings.renderDistance);
 
@@ -1695,14 +1684,17 @@ class MarsAtmosphericEffects {
   }
 
   createAtmosphericHaze() {
-    // Create dynamic atmospheric haze that changes based on weather
-    const hazeGeometry = new THREE.PlaneGeometry(8000, 8000);
+    // Atmospheric haze that stays within terrain bounds
+    // Uses a dark Mars-dust tint that blends with the black background
+    const hazeGeometry = new THREE.PlaneGeometry(5000, 5000);
     const hazeMaterial = new THREE.MeshBasicMaterial({
-      color: 0xd08050,
+      color: 0x301808,
       transparent: true,
-      opacity: 0.1,
+      opacity: 0.06,
       side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending
+      blending: THREE.AdditiveBlending,
+      fog: true,           // Let fog fade it out at the edges
+      depthWrite: false
     });
     
     this.atmosphericHaze = new THREE.Mesh(hazeGeometry, hazeMaterial);
@@ -2004,7 +1996,7 @@ class MarsSceneManager {
 
       if (!this.aiRoutes || this.aiRoutes.length === 0) return;
 
-      const maxVehicles = perfSettings.detailLevel === 'high' ? 18 : 10;
+      const maxVehicles = perfSettings.detailLevel === 'high' ? 8 : 5;
       const routeCount = this.aiRoutes.length;
 
       for (let i = 0; i < maxVehicles; i++) {
@@ -2162,10 +2154,7 @@ class MarsSceneManager {
     headlightRight.position.z = -1.2;
     group.add(headlightLeft, headlightRight);
 
-    const headLight = new THREE.PointLight(0xfff0c0, 1.0, 60);
-    headLight.position.set(5.5, 3.2, 0);
-    group.add(headLight);
-
+    // Emissive headlight meshes are sufficient — no PointLight needed
     return group;
   }
 
@@ -2206,10 +2195,7 @@ class MarsSceneManager {
     accent.position.set(-3.5, 3.0, 0);
     group.add(accent);
 
-    const glow = new THREE.PointLight(0x00e0ff, 0.8, 40);
-    glow.position.set(-3.5, 3.0, 0);
-    group.add(glow);
-
+    // Emissive accent is sufficient — no PointLight needed
     return group;
   }
 
@@ -2252,9 +2238,7 @@ class MarsSceneManager {
     lightStrip.position.set(5.4, 2.4, 0);
     group.add(lightStrip);
 
-    const frontLight = new THREE.PointLight(0xffffff, 1.4, 90);
-    frontLight.position.set(5.6, 2.5, 0);
-    group.add(frontLight);
+    // Emissive light strip is sufficient — no PointLight needed for each cybertruck
 
     // Dark lower fascia
     const bumperGeom = new THREE.BoxGeometry(10.6, 1.0, 4.6);
@@ -2353,6 +2337,22 @@ class MarsSceneManager {
     // Store primary colony center for use by traffic and rail systems
     this.colonyCenter = new THREE.Vector3(colonyOffsetX, groundY, colonyOffsetZ);
     
+    // Shared materials for colony infrastructure (avoid duplicates)
+    const windowMaterial = new THREE.MeshStandardMaterial({
+      color: 0x4488ff,
+      roughness: 0.05,
+      metalness: 0.95,
+      transparent: true,
+      opacity: 0.7,
+      emissive: 0x2244ff,
+      emissiveIntensity: 0.4
+    });
+    const beamMaterial = new THREE.MeshStandardMaterial({
+      color: 0x334455,
+      roughness: 0.4,
+      metalness: 0.9
+    });
+
     // === MAIN COMMAND CENTER - Ultra-modern multi-level structure ===
     const commandCenterLevels = 3;
     for (let level = 0; level < commandCenterLevels; level++) {
@@ -2379,19 +2379,10 @@ class MarsSceneManager {
       structures.push(levelMesh);
       
       // Glass observation windows (ring around each level)
-      const windowCount = 24;
+      const windowCount = 8;
       for (let i = 0; i < windowCount; i++) {
         const angle = (i / windowCount) * Math.PI * 2;
         const windowGeometry = new THREE.BoxGeometry(8, 4, 0.5);
-        const windowMaterial = new THREE.MeshStandardMaterial({
-          color: 0x4488ff,
-          roughness: 0.05,
-          metalness: 0.95,
-          transparent: true,
-          opacity: 0.7,
-          emissive: 0x2244ff,
-          emissiveIntensity: 0.4
-        });
         const window = new THREE.Mesh(windowGeometry, windowMaterial);
         window.position.set(
           Math.cos(angle) * (levelRadius + 2),
@@ -2403,15 +2394,10 @@ class MarsSceneManager {
       }
       
       // Structural support beams
-      const beamCount = 8;
+      const beamCount = 4;
       for (let i = 0; i < beamCount; i++) {
         const angle = (i / beamCount) * Math.PI * 2;
         const beamGeometry = new THREE.BoxGeometry(3, levelHeight + 2, 3);
-        const beamMaterial = new THREE.MeshStandardMaterial({
-          color: 0x334455,
-          roughness: 0.4,
-          metalness: 0.9
-        });
         const beam = new THREE.Mesh(beamGeometry, beamMaterial);
         beam.position.set(
           Math.cos(angle) * (levelRadius - 2),
@@ -2423,7 +2409,7 @@ class MarsSceneManager {
     }
     
     // Top dome with holographic display
-    const topDomeGeometry = new THREE.SphereGeometry(55, 64, 32, 0, Math.PI * 2, 0, Math.PI / 2);
+    const topDomeGeometry = new THREE.SphereGeometry(55, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2);
     const topDomeMaterial = new THREE.MeshStandardMaterial({
       color: 0x88bbff,
       roughness: 0.08,
@@ -2471,7 +2457,7 @@ class MarsSceneManager {
     
     towerPositions.forEach((pos, index) => {
       const towerHeight = 140 + Math.random() * 30;
-      const segments = 20;
+      const segments = 6;
       
       // Create twisted tower with segments
       for (let seg = 0; seg < segments; seg++) {
@@ -2498,13 +2484,13 @@ class MarsSceneManager {
         this.scene.add(segment);
         structures.push(segment);
         
-        // LED strips on each segment
+        // LED strips on each segment (reduced for performance)
         const stripGeometry = new THREE.BoxGeometry(1, segHeight, 1);
         const stripMaterial = new THREE.MeshBasicMaterial({
           color: 0x00ffff
         });
-        for (let i = 0; i < 4; i++) {
-          const angle = (i / 4) * Math.PI * 2;
+        for (let i = 0; i < 2; i++) {
+          const angle = (i / 2) * Math.PI;
           const strip = new THREE.Mesh(stripGeometry, stripMaterial);
           strip.position.set(
             Math.cos(angle + twist) * 18,
@@ -2544,12 +2530,9 @@ class MarsSceneManager {
       beacon.position.y = 8;
       crown.add(beacon);
       
-      const beaconLight = new THREE.PointLight(0xff0000, 1, 150);
-      beaconLight.position.copy(beacon.position);
-      crown.add(beaconLight);
-      
+      // Use emissive beacon mesh for blinking instead of expensive PointLight
       this.animatedObjects.push({
-        mesh: beaconLight,
+        mesh: beacon,
         type: 'blink',
         phase: index * Math.PI / 2
       });
@@ -2619,18 +2602,15 @@ class MarsSceneManager {
         this.scene.add(pylonMesh);
       });
       
-      // Reactor light
-      const reactorLight = new THREE.PointLight(0x00ffff, 2.5, 200);
-      reactorLight.position.copy(core.position);
-      this.scene.add(reactorLight);
+      // Reactor glow handled by emissive materials above — no additional PointLight needed
     }
     
     // === ADVANCED SOLAR FARM - Hexagonal mirror array ===
     const solarCenterX = colonyOffsetX + 220;
     const solarCenterZ = colonyOffsetZ - 80;
     const hexRadius = 6;
-    const hexRows = 10;
-    const hexCols = 15;
+    const hexRows = 5;
+    const hexCols = 8;
     
     for (let row = 0; row < hexRows; row++) {
       for (let col = 0; col < hexCols; col++) {
@@ -2740,22 +2720,12 @@ class MarsSceneManager {
     centralLight.position.set(colonyOffsetX, groundY + 150, colonyOffsetZ);
     this.scene.add(centralLight);
     
-    // Spotlight beams from towers
-    towerPositions.forEach((pos, index) => {
-      const spotlight = new THREE.SpotLight(0x88ccff, 2, 400, Math.PI / 6, 0.5, 2);
-      spotlight.position.set(
-        colonyOffsetX + pos.x,
-        groundY + 120,
-        colonyOffsetZ + pos.z
-      );
-      spotlight.target.position.set(colonyOffsetX, groundY, colonyOffsetZ);
-      this.scene.add(spotlight);
-      this.scene.add(spotlight.target);
-    });
+    // Spotlight beams removed — emissive materials and central light provide sufficient effect
     
-    // Perimeter lighting system
+    
+    // Perimeter lighting system (reduced for performance)
     const perimeterRadius = 250;
-    const perimeterLights = 20;
+    const perimeterLights = 6;
     for (let i = 0; i < perimeterLights; i++) {
       const angle = (i / perimeterLights) * Math.PI * 2;
       const x = colonyOffsetX + Math.cos(angle) * perimeterRadius;
@@ -2781,10 +2751,7 @@ class MarsSceneManager {
       head.position.y = 7;
       post.add(head);
       
-      const postLight = new THREE.PointLight(0xffaa44, 0.8, 100);
-      postLight.position.copy(head.position);
-      post.add(postLight);
-      
+      // Emissive mesh is visible enough; skip PointLight for performance
       this.animatedObjects.push({
         mesh: head,
         type: 'blink',
@@ -2794,22 +2761,30 @@ class MarsSceneManager {
     
     console.log('✅ Ultra high-definition futuristic colony created:', structures.length, 'main structures');
 
-    // Create an exact replica colony a few miles away
+    // Create a lightweight secondary colony (not a full deep-clone — saves hundreds of objects)
     try {
       const perfSettings = getPerformanceSettings();
       if (!perfSettings.isMobile) {
-        const replicaOffset = new THREE.Vector3(2600, 0, 0); // ~a few km away on desktop
+        const replicaOffset = new THREE.Vector3(2600, 0, 0);
         this.secondaryColonyCenter = this.colonyCenter.clone().add(replicaOffset);
 
-        structures.forEach(original => {
+        // Clone only the main large structures (command center levels + dome + station)
+        // Skip small details like windows, beams, solar panels
+        const mainStructures = structures.filter(s => {
+          if (!s || !s.geometry || !s.geometry.parameters) return false;
+          const p = s.geometry.parameters;
+          // Only clone structures with significant radius/size
+          return (p.radiusTop && p.radiusTop > 15) || (p.width && p.width > 50) || (p.radius && p.radius > 15);
+        });
+        mainStructures.forEach(original => {
           if (!original) return;
-          const clone = original.clone(true);
+          const clone = original.clone(false); // shallow clone — no children (skips windows/beams)
           clone.position.x += replicaOffset.x;
           clone.position.z += replicaOffset.z;
           this.scene.add(clone);
         });
 
-        console.log('✅ Secondary colony replica created at', this.secondaryColonyCenter.x, this.secondaryColonyCenter.z);
+        console.log('✅ Lightweight secondary colony created at', this.secondaryColonyCenter.x, this.secondaryColonyCenter.z);
 
         // Build elevated rail and bullet train between the two colonies
         this.createBulletTrainSystem();
@@ -2858,72 +2833,36 @@ class MarsSceneManager {
   }
 
   getTerrainHeight(x, z) {
-    // Raycast only against the terrain mesh for accurate ground placement
-    const raycaster = new THREE.Raycaster();
-    raycaster.set(new THREE.Vector3(x, 500, z), new THREE.Vector3(0, -1, 0));
-    
-    // Try to find terrain mesh if not already set - search more thoroughly
+    // Reuse a single raycaster and direction vector (avoid allocating per call)
+    if (!this._heightRaycaster) {
+      this._heightRaycaster = new THREE.Raycaster();
+      this._heightRayOrigin = new THREE.Vector3();
+      this._heightRayDir = new THREE.Vector3(0, -1, 0);
+    }
+    this._heightRayOrigin.set(x, 500, z);
+    this._heightRaycaster.set(this._heightRayOrigin, this._heightRayDir);
+
+    // Try to find terrain mesh if not already set (one-time search)
     if (!this.terrainMesh) {
-      // First try: look for large PlaneGeometry (main terrain)
-      this.scene.traverse(child => {
-        if (child.isMesh && child.geometry) {
-          const params = child.geometry.parameters;
-          if (params && (params.width >= 2000 || params.height >= 2000)) {
-            this.terrainMesh = child;
-            return;
-          }
-          // Also check if it's a large plane by checking vertices
-          if (child.geometry.attributes && child.geometry.attributes.position) {
-            const pos = child.geometry.attributes.position;
-            const count = pos.count;
-            // Large terrain will have many vertices (1000+)
-            if (count > 1000) {
-              // Check bounding box to confirm it's large
-              child.geometry.computeBoundingBox();
-              const box = child.geometry.boundingBox;
-              if (box && (box.max.x - box.min.x > 2000 || box.max.z - box.min.z > 2000)) {
-                this.terrainMesh = child;
-                return;
-              }
-            }
-          }
-        }
-      });
-      
-      // Fallback: use the global marsSurface if available
-      if (!this.terrainMesh && typeof marsSurface !== 'undefined' && marsSurface) {
+      // Use the global marsSurface directly — fastest fallback
+      if (typeof marsSurface !== 'undefined' && marsSurface) {
         this.terrainMesh = marsSurface;
-      }
-      
-      // Last resort: search all meshes for the largest one
-      if (!this.terrainMesh) {
-        let largestMesh = null;
-        let largestSize = 0;
+      } else {
+        // Scan scene once for a large plane
         this.scene.traverse(child => {
+          if (this.terrainMesh) return;
           if (child.isMesh && child.geometry) {
-            child.geometry.computeBoundingBox();
-            const box = child.geometry.boundingBox;
-            if (box) {
-              const size = Math.max(
-                box.max.x - box.min.x,
-                box.max.z - box.min.z,
-                box.max.y - box.min.y
-              );
-              if (size > largestSize) {
-                largestSize = size;
-                largestMesh = child;
-              }
+            const params = child.geometry.parameters;
+            if (params && (params.width >= 2000 || params.height >= 2000)) {
+              this.terrainMesh = child;
             }
           }
         });
-        if (largestMesh && largestSize > 1000) {
-          this.terrainMesh = largestMesh;
-        }
       }
     }
     
     if (this.terrainMesh) {
-      const intersects = raycaster.intersectObject(this.terrainMesh, false);
+      const intersects = this._heightRaycaster.intersectObject(this.terrainMesh, false);
       if (intersects.length > 0) {
         return intersects[0].point.y;
       }
@@ -2984,12 +2923,12 @@ class MarsSceneManager {
     const colonyTallTowerHeight = 170; // based on residential towers near the main colony
     const flagshipHeight = colonyTallTowerHeight * 5; // ultra-tall centerpiece
 
-    // Dense ring of skyscrapers around the flagship core
-    let skyscraperCount = 100;
+    // Compact skyline — reduced object count for performance
+    let skyscraperCount = 25;
     if (perfSettings.detailLevel === 'normal') {
-      skyscraperCount = 70;
+      skyscraperCount = 18;
     } else if (perfSettings.detailLevel === 'low') {
-      skyscraperCount = 40;
+      skyscraperCount = 10;
     }
     for (let i = 0; i < skyscraperCount; i++) {
       const angle = Math.random() * Math.PI * 2;
@@ -3022,26 +2961,20 @@ class MarsSceneManager {
       this.scene.add(tower);
       structures.push(tower);
 
-      // Vertical neon edge strips for a more futuristic silhouette
+      // Vertical neon edge strips (2 per building max for perf)
       const edgeGeom = new THREE.BoxGeometry(0.7, baseHeight * 1.02, 0.7);
       const edgeMat = new THREE.MeshBasicMaterial({
         color: 0x66ddff,
         transparent: true,
         opacity: 0.8
       });
-      const edgeOffsets = [
-        { x: width / 2 + 0.4, z: depth / 2 + 0.4 },
-        { x: -width / 2 - 0.4, z: depth / 2 + 0.4 },
-        { x: width / 2 + 0.4, z: -depth / 2 - 0.4 },
-        { x: -width / 2 - 0.4, z: -depth / 2 - 0.4 }
-      ];
-      edgeOffsets.forEach(offset => {
-        if (Math.random() < 0.6) {
-          const edge = new THREE.Mesh(edgeGeom, edgeMat);
-          edge.position.set(offset.x, 0, offset.z);
-          tower.add(edge);
-        }
-      });
+      // Only add 2 diagonal edges for a sleek look
+      const e1 = new THREE.Mesh(edgeGeom, edgeMat);
+      e1.position.set(width / 2 + 0.4, 0, depth / 2 + 0.4);
+      tower.add(e1);
+      const e2 = new THREE.Mesh(edgeGeom, edgeMat);
+      e2.position.set(-width / 2 - 0.4, 0, -depth / 2 - 0.4);
+      tower.add(e2);
 
       // Roof beacon lights to make the skyline sparkle
       const beaconGeom = new THREE.SphereGeometry(2.2, 12, 12);
@@ -3050,12 +2983,9 @@ class MarsSceneManager {
       beacon.position.set(0, baseHeight / 2 + 3, 0);
       tower.add(beacon);
 
-      const beaconLight = new THREE.PointLight(0xff66cc, 0.9, 120);
-      beaconLight.position.copy(beacon.position);
-      tower.add(beaconLight);
-
+      // Emissive beacon mesh — no PointLight needed per building
       this.animatedObjects.push({
-        mesh: beaconLight,
+        mesh: beacon,
         type: 'blink',
         phase: Math.random() * Math.PI * 2
       });
@@ -3099,21 +3029,10 @@ class MarsSceneManager {
       speed: 0.02
     });
 
-    // Triple spotlight cluster beaming into the sky from the top
-    for (let i = 0; i < 3; i++) {
-      const spot = new THREE.SpotLight(0x99ddff, 2.2, 1200, Math.PI / 8, 0.6, 2);
-      spot.position.set(
-        center.x + Math.cos((i / 3) * Math.PI * 2) * 10,
-        center.y + flagshipHeight + 10,
-        center.z + Math.sin((i / 3) * Math.PI * 2) * 10
-      );
-      spot.target.position.set(center.x, center.y + flagshipHeight / 2, center.z);
-      this.scene.add(spot);
-      this.scene.add(spot.target);
-    }
+    // Flagship emissive glow is sufficient — SpotLights removed for performance
 
-    // Soft city-wide ambient glow
-    const cityLight = new THREE.PointLight(0x88aaff, 3.5, 2000);
+    // Single city-wide ambient glow (reduced intensity)
+    const cityLight = new THREE.PointLight(0x88aaff, 2.0, 1200);
     cityLight.position.set(center.x, center.y + 260, center.z);
     this.scene.add(cityLight);
 
@@ -3442,8 +3361,8 @@ class MarsSceneManager {
       start.y = startY;
       end.y = endY;
 
-      // Build elevated pylons along the route
-      const segmentCount = 24;
+      // Build elevated pylons along the route (reduced for performance)
+      const segmentCount = 12;
       const pylonGeometry = new THREE.CylinderGeometry(2, 3, 1, 10);
       const pylonMaterial = new THREE.MeshStandardMaterial({
         color: 0x666666,
@@ -4497,8 +4416,13 @@ function positionRoverOnTerrain() {
     const normal = closestIntersection.face.normal.clone();
     normal.transformDirection(closestIntersection.object.matrixWorld);
 
-    // Create a temporary up vector
-    const up = new THREE.Vector3(0, 1, 0);
+    // Reuse cached up vector
+    if (!window._terrainUp) {
+      window._terrainUp = new THREE.Vector3(0, 1, 0);
+      window._terrainAxis = new THREE.Vector3();
+      window._terrainTiltQuat = new THREE.Quaternion();
+    }
+    const up = window._terrainUp;
 
     // Calculate the angle between the normal and up vector
     const angle = up.angleTo(normal);
@@ -4512,10 +4436,10 @@ function positionRoverOnTerrain() {
     // Then apply terrain tilt if needed and angle is significant
     if (angle > 0.1 && angle < Math.PI / 6) {
       // Create rotation axis (perpendicular to both vectors)
-      const axis = new THREE.Vector3().crossVectors(up, normal).normalize();
+      const axis = window._terrainAxis.crossVectors(up, normal).normalize();
 
       // Create a quaternion for the terrain tilt
-      const tiltQuaternion = new THREE.Quaternion().setFromAxisAngle(axis, angle * 0.5);
+      const tiltQuaternion = window._terrainTiltQuat.setFromAxisAngle(axis, angle * 0.5);
 
       // Apply the tilt quaternion
       rover.quaternion.premultiply(tiltQuaternion);
@@ -4553,7 +4477,8 @@ function updateCamera() {
       offset: new THREE.Vector3(),
       target: new THREE.Vector3(),
       head: new THREE.Vector3(),
-      forward: new THREE.Vector3()
+      forward: new THREE.Vector3(),
+      upAxis: new THREE.Vector3(0, 1, 0) // cached axis for applyAxisAngle
     };
   }
 
@@ -4565,7 +4490,7 @@ function updateCamera() {
       vectors.offset.copy(cameraOffset);
 
       // Rotate the offset based on the rover's yaw
-      vectors.offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), roverYaw);
+      vectors.offset.applyAxisAngle(vectors.upAxis, roverYaw);
 
       // Add the offset to the rover's position
       vectors.target.set(
@@ -4595,7 +4520,7 @@ function updateCamera() {
 
       // Get the forward direction based on the tracked yaw
       vectors.forward.set(0, 0, -1);
-      vectors.forward.applyAxisAngle(new THREE.Vector3(0, 1, 0), roverYaw);
+      vectors.forward.applyAxisAngle(vectors.upAxis, roverYaw);
 
       // Set camera position
       camera.position.copy(vectors.head);
@@ -4639,9 +4564,10 @@ function createRealisticMarsTerrain() {
                      perfSettings.detailLevel === 'high' ? 5000 : 
                      perfSettings.detailLevel === 'normal' ? 3000 : 2000;
   
-  const segments = perfSettings.isMobile ? 64 : 
-                   perfSettings.detailLevel === 'high' ? 256 : 
-                   perfSettings.detailLevel === 'normal' ? 128 : 64;
+  // Reduce segments to dramatically speed up terrain generation
+  const segments = perfSettings.isMobile ? 48 : 
+                   perfSettings.detailLevel === 'high' ? 128 : 
+                   perfSettings.detailLevel === 'normal' ? 96 : 64;
   
   const geometry = new THREE.PlaneGeometry(
     terrainSize,
@@ -4709,198 +4635,199 @@ function createRealisticMarsTerrain() {
       elevation = largeFeatures + mediumFeatures + smallFeatures + microDetails;
     }
 
-    // Add some random variation for more natural look
-    const randomVariation = Math.random() * 0.5 - 0.25;
+    // Add deterministic variation based on position (not Math.random) for consistent terrain
+    const randomVariation = (Math.sin(x * 1.37 + z * 2.41) * Math.cos(x * 0.93 - z * 1.67)) * 0.25;
     elevation += randomVariation;
 
-    // Add specific Martian features (adaptive based on performance)
-    const featureMultiplier = perfSettings.detailLevel === 'high' ? 1.0 : 
-                              perfSettings.detailLevel === 'normal' ? 0.6 : 0.3;
+    // Add specific Martian features only on highest detail to avoid
+    // very long load times on typical devices.
+    if (perfSettings.detailLevel === 'high') {
+      const featureMultiplier = 1.0;
 
-    // 1. Add impact craters
-    const craterCount = Math.floor(15 * featureMultiplier);
-    for (let c = 0; c < craterCount; c++) {
-      const craterX = Math.sin(c * 1.1) * terrainSize * 0.4;
-      const craterZ = Math.cos(c * 1.7) * terrainSize * 0.4;
-      const craterSize = Math.random() * 30 + 10;
+      // 1. Add impact craters
+      const craterCount = Math.floor(15 * featureMultiplier);
+      for (let c = 0; c < craterCount; c++) {
+        const craterX = Math.sin(c * 1.1) * terrainSize * 0.4;
+        const craterZ = Math.cos(c * 1.7) * terrainSize * 0.4;
+        const craterSize = (Math.abs(Math.sin(c * 3.7)) * 30) + 10; // deterministic size
 
-      const distanceToCenter = Math.sqrt(Math.pow(x - craterX, 2) + Math.pow(z - craterZ, 2));
+        const distanceToCenter = Math.sqrt(Math.pow(x - craterX, 2) + Math.pow(z - craterZ, 2));
 
-      if (distanceToCenter < craterSize) {
-        // Crater shape: raised rim, depressed center
-        const normalizedDistance = distanceToCenter / craterSize;
+        if (distanceToCenter < craterSize) {
+          // Crater shape: raised rim, depressed center
+          const normalizedDistance = distanceToCenter / craterSize;
 
-        if (normalizedDistance < 0.8) {
-          // Inside crater - depression
-          const craterDepth = (0.8 - normalizedDistance) * 5;
-          elevation -= craterDepth;
-        } else if (normalizedDistance < 1.0) {
-          // Crater rim - raised
-          const rimHeight = (normalizedDistance - 0.8) * 10;
-          elevation += rimHeight;
-        }
-      }
-    }
-
-    // 2. Add dried river beds
-    const riverCount = Math.floor(5 * featureMultiplier);
-    for (let r = 0; r < riverCount; r++) {
-      const riverStartX = Math.sin(r * 2.1) * terrainSize * 0.4;
-      const riverStartZ = Math.cos(r * 3.7) * terrainSize * 0.4;
-      const riverEndX = Math.sin(r * 2.1 + 2) * terrainSize * 0.4;
-      const riverEndZ = Math.cos(r * 3.7 + 2) * terrainSize * 0.4;
-
-      // Calculate distance from point to line segment (river)
-      const riverLength = Math.sqrt(Math.pow(riverEndX - riverStartX, 2) + Math.pow(riverEndZ - riverStartZ, 2));
-      const riverDirX = (riverEndX - riverStartX) / riverLength;
-      const riverDirZ = (riverEndZ - riverStartZ) / riverLength;
-
-      const pointToStartX = x - riverStartX;
-      const pointToStartZ = z - riverStartZ;
-
-      const projection = pointToStartX * riverDirX + pointToStartZ * riverDirZ;
-      const projectionX = riverStartX + riverDirX * Math.max(0, Math.min(riverLength, projection));
-      const projectionZ = riverStartZ + riverDirZ * Math.max(0, Math.min(riverLength, projection));
-
-      const distanceToRiver = Math.sqrt(Math.pow(x - projectionX, 2) + Math.pow(z - projectionZ, 2));
-
-      if (distanceToRiver < 5 && projection > 0 && projection < riverLength) {
-        // River bed - depression with smooth edges
-        const riverDepth = Math.max(0, 3 - distanceToRiver) * 0.5;
-        elevation -= riverDepth;
-
-        // Add meanders
-        const meander = Math.sin(projection * 0.1) * Math.min(1, distanceToRiver);
-        elevation += meander * 0.3;
-      }
-    }
-
-    // 3. Add sand dunes
-    const duneCount = Math.floor(10 * featureMultiplier);
-    for (let d = 0; d < duneCount; d++) {
-      const duneX = Math.sin(d * 4.3) * terrainSize * 0.3;
-      const duneZ = Math.cos(d * 5.9) * terrainSize * 0.3;
-      const duneSize = Math.random() * 40 + 20;
-
-      const distanceToDune = Math.sqrt(Math.pow(x - duneX, 2) + Math.pow(z - duneZ, 2));
-
-      if (distanceToDune < duneSize) {
-        // Dune shape: asymmetric with gentle slope on one side, steep on other
-        const normalizedDistance = distanceToDune / duneSize;
-        const angle = Math.atan2(z - duneZ, x - duneX);
-
-        // Wind direction effect (asymmetric dunes)
-        const windFactor = Math.cos(angle * 2 + d);
-
-        const duneHeight = (1 - normalizedDistance) * 3 * (1 + windFactor * 0.5);
-        elevation += duneHeight;
-      }
-    }
-
-    // 3.1. Add ancient lake beds (more detailed than original)
-    const lakeCount = Math.floor(4 * featureMultiplier);
-    for (let l = 0; l < lakeCount; l++) {
-      const lakeX = Math.sin(l * 3.7) * terrainSize * 0.35;
-      const lakeZ = Math.cos(l * 2.9) * terrainSize * 0.35;
-      const lakeRadius = 120 + Math.random() * 180;
-
-      const distanceToLake = Math.sqrt(Math.pow(x - lakeX, 2) + Math.pow(z - lakeZ, 2));
-
-      if (distanceToLake < lakeRadius * 1.3) {
-        const normalizedDistance = distanceToLake / lakeRadius;
-        
-        if (normalizedDistance < 1) {
-          // Lake bed - depression
-          const lakeDepth = Math.pow(1 - normalizedDistance, 1.5) * 8;
-          elevation -= lakeDepth;
-        } else if (normalizedDistance < 1.3) {
-          // Ancient shoreline with sediment deposits
-          const shoreHeight = (normalizedDistance - 1) * 5;
-          elevation += shoreHeight;
-        }
-      }
-    }
-
-    // 3.2. Add dramatic canyon systems
-    const canyonCount = Math.floor(3 * featureMultiplier);
-    for (let c = 0; c < canyonCount; c++) {
-      const canyonStartX = Math.sin(c * 2.8) * terrainSize * 0.4;
-      const canyonStartZ = Math.cos(c * 3.2) * terrainSize * 0.4;
-      const canyonEndX = Math.sin(c * 2.8 + 2.5) * terrainSize * 0.4;
-      const canyonEndZ = Math.cos(c * 3.2 + 2.5) * terrainSize * 0.4;
-
-      // Canyon parameters
-      const canyonLength = Math.sqrt(Math.pow(canyonEndX - canyonStartX, 2) + Math.pow(canyonEndZ - canyonStartZ, 2));
-      const canyonDirX = (canyonEndX - canyonStartX) / canyonLength;
-      const canyonDirZ = (canyonEndZ - canyonStartZ) / canyonLength;
-
-      // Point projection onto canyon line
-      const pointToStartX = x - canyonStartX;
-      const pointToStartZ = z - canyonStartZ;
-      const projection = pointToStartX * canyonDirX + pointToStartZ * canyonDirZ;
-      const projectionX = canyonStartX + canyonDirX * Math.max(0, Math.min(canyonLength, projection));
-      const projectionZ = canyonStartZ + canyonDirZ * Math.max(0, Math.min(canyonLength, projection));
-
-      const distanceToCanyon = Math.sqrt(Math.pow(x - projectionX, 2) + Math.pow(z - projectionZ, 2));
-      const canyonWidth = 60 + Math.sin(projection * 0.02) * 20;
-
-      if (distanceToCanyon < canyonWidth && projection > 0 && projection < canyonLength) {
-        const normalizedDistance = distanceToCanyon / canyonWidth;
-        
-        // Canyon depth varies along its length
-        const canyonDepth = 15 + Math.sin(projection * 0.015) * 8;
-        
-        // Canyon profile: steep sides, flat bottom
-        if (normalizedDistance < 0.3) {
-          // Canyon floor
-          elevation -= canyonDepth;
-        } else if (normalizedDistance < 0.8) {
-          // Canyon walls - steep
-          const wallProfile = Math.pow((normalizedDistance - 0.3) / 0.5, 2);
-          elevation -= canyonDepth * (1 - wallProfile);
-        } else {
-          // Canyon rim - slightly raised
-          const rimHeight = (1 - normalizedDistance) * 2;
-          elevation += rimHeight;
-        }
-      }
-    }
-
-    // 3.3. Add spectacular rock formations (mesas, buttes)
-    const rockFormationCount = Math.floor(8 * featureMultiplier);
-    for (let rf = 0; rf < rockFormationCount; rf++) {
-      const rockX = Math.sin(rf * 4.1) * terrainSize * 0.3;
-      const rockZ = Math.cos(rf * 3.6) * terrainSize * 0.3;
-      const rockRadius = 40 + Math.random() * 60;
-      const rockHeight = 20 + Math.random() * 30;
-
-      const distanceToRock = Math.sqrt(Math.pow(x - rockX, 2) + Math.pow(z - rockZ, 2));
-
-      if (distanceToRock < rockRadius * 1.2) {
-        const normalizedDistance = distanceToRock / rockRadius;
-        
-        if (normalizedDistance < 1) {
-          // Mesa/butte formation - flat top, steep sides
-          const topRadius = rockRadius * 0.7;
-          if (distanceToRock < topRadius) {
-            // Flat top
-            elevation += rockHeight;
-          } else {
-            // Steep sides
-            const sideProfile = Math.pow((rockRadius - distanceToRock) / (rockRadius - topRadius), 3);
-            elevation += rockHeight * sideProfile;
+          if (normalizedDistance < 0.8) {
+            // Inside crater - depression
+            const craterDepth = (0.8 - normalizedDistance) * 5;
+            elevation -= craterDepth;
+          } else if (normalizedDistance < 1.0) {
+            // Crater rim - raised
+            const rimHeight = (normalizedDistance - 0.8) * 10;
+            elevation += rimHeight;
           }
-        } else if (normalizedDistance < 1.2) {
-          // Talus slopes around the formation
-          const talusHeight = (1.2 - normalizedDistance) * 3;
-          elevation += talusHeight;
         }
       }
-    }
 
-    // 4. Add mountain ranges
-    const mountainRangeCount = Math.floor(5 * featureMultiplier);
-    for (let m = 0; m < mountainRangeCount; m++) {
+      // 2. Add dried river beds
+      const riverCount = Math.floor(5 * featureMultiplier);
+      for (let r = 0; r < riverCount; r++) {
+        const riverStartX = Math.sin(r * 2.1) * terrainSize * 0.4;
+        const riverStartZ = Math.cos(r * 3.7) * terrainSize * 0.4;
+        const riverEndX = Math.sin(r * 2.1 + 2) * terrainSize * 0.4;
+        const riverEndZ = Math.cos(r * 3.7 + 2) * terrainSize * 0.4;
+
+        // Calculate distance from point to line segment (river)
+        const riverLength = Math.sqrt(Math.pow(riverEndX - riverStartX, 2) + Math.pow(riverEndZ - riverStartZ, 2));
+        const riverDirX = (riverEndX - riverStartX) / riverLength;
+        const riverDirZ = (riverEndZ - riverStartZ) / riverLength;
+
+        const pointToStartX = x - riverStartX;
+        const pointToStartZ = z - riverStartZ;
+
+        const projection = pointToStartX * riverDirX + pointToStartZ * riverDirZ;
+        const projectionX = riverStartX + riverDirX * Math.max(0, Math.min(riverLength, projection));
+        const projectionZ = riverStartZ + riverDirZ * Math.max(0, Math.min(riverLength, projection));
+
+        const distanceToRiver = Math.sqrt(Math.pow(x - projectionX, 2) + Math.pow(z - projectionZ, 2));
+
+        if (distanceToRiver < 5 && projection > 0 && projection < riverLength) {
+          // River bed - depression with smooth edges
+          const riverDepth = Math.max(0, 3 - distanceToRiver) * 0.5;
+          elevation -= riverDepth;
+
+          // Add meanders
+          const meander = Math.sin(projection * 0.1) * Math.min(1, distanceToRiver);
+          elevation += meander * 0.3;
+        }
+      }
+
+      // 3. Add sand dunes
+      const duneCount = Math.floor(10 * featureMultiplier);
+      for (let d = 0; d < duneCount; d++) {
+        const duneX = Math.sin(d * 4.3) * terrainSize * 0.3;
+        const duneZ = Math.cos(d * 5.9) * terrainSize * 0.3;
+        const duneSize = Math.abs(Math.sin(d * 2.3)) * 40 + 20; // deterministic
+
+        const distanceToDune = Math.sqrt(Math.pow(x - duneX, 2) + Math.pow(z - duneZ, 2));
+
+        if (distanceToDune < duneSize) {
+          // Dune shape: asymmetric with gentle slope on one side, steep on other
+          const normalizedDistance = distanceToDune / duneSize;
+          const angle = Math.atan2(z - duneZ, x - duneX);
+
+          // Wind direction effect (asymmetric dunes)
+          const windFactor = Math.cos(angle * 2 + d);
+
+          const duneHeight = (1 - normalizedDistance) * 3 * (1 + windFactor * 0.5);
+          elevation += duneHeight;
+        }
+      }
+
+      // 3.1. Add ancient lake beds (more detailed than original)
+      const lakeCount = Math.floor(4 * featureMultiplier);
+      for (let l = 0; l < lakeCount; l++) {
+        const lakeX = Math.sin(l * 3.7) * terrainSize * 0.35;
+        const lakeZ = Math.cos(l * 2.9) * terrainSize * 0.35;
+        const lakeRadius = 120 + Math.abs(Math.sin(l * 5.1)) * 180; // deterministic
+
+        const distanceToLake = Math.sqrt(Math.pow(x - lakeX, 2) + Math.pow(z - lakeZ, 2));
+
+        if (distanceToLake < lakeRadius * 1.3) {
+          const normalizedDistance = distanceToLake / lakeRadius;
+          
+          if (normalizedDistance < 1) {
+            // Lake bed - depression
+            const lakeDepth = Math.pow(1 - normalizedDistance, 1.5) * 8;
+            elevation -= lakeDepth;
+          } else if (normalizedDistance < 1.3) {
+            // Ancient shoreline with sediment deposits
+            const shoreHeight = (normalizedDistance - 1) * 5;
+            elevation += shoreHeight;
+          }
+        }
+      }
+
+      // 3.2. Add dramatic canyon systems
+      const canyonCount = Math.floor(3 * featureMultiplier);
+      for (let c = 0; c < canyonCount; c++) {
+        const canyonStartX = Math.sin(c * 2.8) * terrainSize * 0.4;
+        const canyonStartZ = Math.cos(c * 3.2) * terrainSize * 0.4;
+        const canyonEndX = Math.sin(c * 2.8 + 2.5) * terrainSize * 0.4;
+        const canyonEndZ = Math.cos(c * 3.2 + 2.5) * terrainSize * 0.4;
+
+        // Canyon parameters
+        const canyonLength = Math.sqrt(Math.pow(canyonEndX - canyonStartX, 2) + Math.pow(canyonEndZ - canyonStartZ, 2));
+        const canyonDirX = (canyonEndX - canyonStartX) / canyonLength;
+        const canyonDirZ = (canyonEndZ - canyonStartZ) / canyonLength;
+
+        // Point projection onto canyon line
+        const pointToStartX = x - canyonStartX;
+        const pointToStartZ = z - canyonStartZ;
+        const projection = pointToStartX * canyonDirX + pointToStartZ * canyonDirZ;
+        const projectionX = canyonStartX + canyonDirX * Math.max(0, Math.min(canyonLength, projection));
+        const projectionZ = canyonStartZ + canyonDirZ * Math.max(0, Math.min(canyonLength, projection));
+
+        const distanceToCanyon = Math.sqrt(Math.pow(x - projectionX, 2) + Math.pow(z - projectionZ, 2));
+        const canyonWidth = 60 + Math.sin(projection * 0.02) * 20;
+
+        if (distanceToCanyon < canyonWidth && projection > 0 && projection < canyonLength) {
+          const normalizedDistance = distanceToCanyon / canyonWidth;
+          
+          // Canyon depth varies along its length
+          const canyonDepth = 15 + Math.sin(projection * 0.015) * 8;
+          
+          // Canyon profile: steep sides, flat bottom
+          if (normalizedDistance < 0.3) {
+            // Canyon floor
+            elevation -= canyonDepth;
+          } else if (normalizedDistance < 0.8) {
+            // Canyon walls - steep
+            const wallProfile = Math.pow((normalizedDistance - 0.3) / 0.5, 2);
+            elevation -= canyonDepth * (1 - wallProfile);
+          } else {
+            // Canyon rim - slightly raised
+            const rimHeight = (1 - normalizedDistance) * 2;
+            elevation += rimHeight;
+          }
+        }
+      }
+
+      // 3.3. Add spectacular rock formations (mesas, buttes)
+      const rockFormationCount = Math.floor(8 * featureMultiplier);
+      for (let rf = 0; rf < rockFormationCount; rf++) {
+        const rockX = Math.sin(rf * 4.1) * terrainSize * 0.3;
+        const rockZ = Math.cos(rf * 3.6) * terrainSize * 0.3;
+        const rockRadius = 40 + Math.abs(Math.sin(rf * 7.3)) * 60; // deterministic
+        const rockHeight = 20 + Math.abs(Math.cos(rf * 5.1)) * 30; // deterministic
+
+        const distanceToRock = Math.sqrt(Math.pow(x - rockX, 2) + Math.pow(z - rockZ, 2));
+
+        if (distanceToRock < rockRadius * 1.2) {
+          const normalizedDistance = distanceToRock / rockRadius;
+          
+          if (normalizedDistance < 1) {
+            // Mesa/butte formation - flat top, steep sides
+            const topRadius = rockRadius * 0.7;
+            if (distanceToRock < topRadius) {
+              // Flat top
+              elevation += rockHeight;
+            } else {
+              // Steep sides
+              const sideProfile = Math.pow((rockRadius - distanceToRock) / (rockRadius - topRadius), 3);
+              elevation += rockHeight * sideProfile;
+            }
+          } else if (normalizedDistance < 1.2) {
+            // Talus slopes around the formation
+            const talusHeight = (1.2 - normalizedDistance) * 3;
+            elevation += talusHeight;
+          }
+        }
+      }
+
+      // 4. Add mountain ranges
+      const mountainRangeCount = Math.floor(5 * featureMultiplier);
+      for (let m = 0; m < mountainRangeCount; m++) {
       // Define mountain range parameters
       const rangeStartX = Math.sin(m * 2.7) * terrainSize * 0.4;
       const rangeStartZ = Math.cos(m * 3.1) * terrainSize * 0.4;
@@ -4953,57 +4880,45 @@ function createRealisticMarsTerrain() {
       }
     }
 
-    // 4.5 Add occasional very high mountains (rare and random)
-    const highMountainCount = Math.floor(30 * featureMultiplier);
-    for (let hm = 0; hm < highMountainCount; hm++) {
-      // Random position for high mountains
+    // 4.5 Add occasional very high mountains (deterministic selection)
+    // Instead of looping 30 mountains and rolling Math.random() per vertex,
+    // pre-select only ~3 mountains using a deterministic filter.
+    const highMountainCount = 3; // only 3 actual mountains (was 30 × 10% = ~3 anyway)
+    const highMountainSeeds = [2, 7, 19]; // fixed indices from the old 0-29 range
+    for (let hi = 0; hi < highMountainCount; hi++) {
+      const hm = highMountainSeeds[hi];
       const mountainX = Math.sin(hm * 7.3 + 2.1) * terrainSize * 0.4;
       const mountainZ = Math.cos(hm * 8.7 + 1.5) * terrainSize * 0.4;
 
-      // Make the mountain base wider than regular mountains
-      const mountainRadius = 420 + Math.random() * 100;
+      const mountainRadius = 420 + Math.abs(Math.sin(hm * 3.1)) * 100; // deterministic
 
-      // Calculate distance to mountain center
       const distanceToMountain = Math.sqrt(Math.pow(x - mountainX, 2) + Math.pow(z - mountainZ, 2));
 
-      // Only affect terrain within mountain radius
       if (distanceToMountain < mountainRadius) {
-        // Normalized distance from center (0 at center, 1 at edge)
         const normalizedDistance = distanceToMountain / mountainRadius;
-
-        // Very high peak height (2-3 times higher than regular mountains)
-        const peakHeight = 30 + Math.random() * 15;
-
-        // Steeper slope profile for dramatic mountains
+        const peakHeight = 30 + Math.abs(Math.cos(hm * 4.7)) * 15; // deterministic
         const slopeProfile = Math.pow(1 - normalizedDistance, 2);
-
-        // Calculate mountain height with steep profile
         const highMountainHeight = peakHeight * slopeProfile;
 
-        // Add some rocky detail to make it look more natural
         const rockDetail = (
           Math.sin(x * 0.05 + z * 0.06) *
           Math.cos(x * 0.06 - z * 0.05) *
           (1 - normalizedDistance) * 1.2
         );
 
-        // Only add the mountain with a low probability to make them rare
-        // This creates a 10% chance for each high mountain to actually appear
-        if (Math.random() < 0.1) {
-          elevation += highMountainHeight + rockDetail;
-        }
+        elevation += highMountainHeight + rockDetail;
       }
     }
 
-    // 5. Add impact craters
+    // 5. Add impact craters (deterministic positions based on index, not Math.random)
     const impactCraterCount = Math.floor(25 * featureMultiplier);
     for (let c = 0; c < impactCraterCount; c++) {
-      // Random crater position
-      const craterX = (Math.random() * 2 - 1) * terrainSize * 0.8;
-      const craterZ = (Math.random() * 2 - 1) * terrainSize * 0.8;
+      // Deterministic crater position using trig hashes
+      const craterX = Math.sin(c * 5.3 + 0.7) * terrainSize * 0.8;
+      const craterZ = Math.cos(c * 4.1 + 1.3) * terrainSize * 0.8;
 
-      // Random crater size (smaller craters are more common)
-      const craterSize = Math.pow(Math.random(), 1.5) * 50 + 15;
+      // Deterministic crater size
+      const craterSize = Math.pow(Math.abs(Math.sin(c * 3.7 + 2.1)), 1.5) * 50 + 15;
 
       // Calculate distance from current point to crater center
       const distanceToCrater = Math.sqrt(Math.pow(x - craterX, 2) + Math.pow(z - craterZ, 2));
@@ -5044,6 +4959,7 @@ function createRealisticMarsTerrain() {
         }
       }
     }
+    }
 
     // 6. Add gentle rocky terrain detail - no spikes
     const rockyDetail = (
@@ -5070,7 +4986,7 @@ function createRealisticMarsTerrain() {
   const terrainPerfSettings = getPerformanceSettings();
   let material;
   
-  if (terrainPerfSettings.isMobile || true) { // Force basic materials on ALL devices
+  if (terrainPerfSettings.isMobile) { // Basic material on mobile only
     // Use basic material without textures - no additional WebGL contexts
     material = new THREE.MeshBasicMaterial({
       color: 0xaa6633,  // Martian reddish-brown color
@@ -5078,13 +4994,15 @@ function createRealisticMarsTerrain() {
       transparent: false,
       fog: true // Allow fog to affect material for depth
     });
-    console.log('Emergency: Using basic terrain material without textures');
+    console.log('Mobile: Using basic terrain material without textures');
   } else {
-    // This branch should not execute in emergency mode
-    material = new THREE.MeshBasicMaterial({
+    // Desktop: Use MeshLambertMaterial (much cheaper than Standard, still has lighting)
+    material = new THREE.MeshLambertMaterial({
       color: 0xaa6633,
-      side: THREE.DoubleSide
+      side: THREE.DoubleSide,
+      fog: true
     });
+    console.log('Desktop: Using Lambert terrain material');
   }
 
   const terrain = new THREE.Mesh(geometry, material);
@@ -5118,8 +5036,10 @@ function createRealisticMarsTerrain() {
       b -= factor;
     }
 
-    // Add subtle random variation
-    const variation = (Math.random() - 0.5) * 0.05;
+    // Add subtle deterministic variation based on position
+    const px = positionArray[i * 3];
+    const pz = positionArray[i * 3 + 2];
+    const variation = (Math.sin(px * 0.73 + pz * 1.17) * Math.cos(px * 1.53 - pz * 0.89)) * 0.025;
     r += variation;
     g += variation;
     b += variation;
@@ -5209,8 +5129,8 @@ function createRealisticMarsTexture() {
     context.globalAlpha = 1.0;
   }
 
-  // Add more visible rock formations like in the reference image
-  for (let i = 0; i < 500; i++) {
+  // Add more visible rock formations (reduced for faster texture generation)
+  for (let i = 0; i < 150; i++) {
     const x = Math.random() * canvas.width;
     const y = Math.random() * canvas.height;
     const size = Math.random() * 30 + 10;
@@ -5237,8 +5157,8 @@ function createRealisticMarsTexture() {
     context.fill();
   }
 
-  // Add dust deposits
-  for (let i = 0; i < 200; i++) {
+  // Add dust deposits (reduced count)
+  for (let i = 0; i < 50; i++) {
     const x = Math.random() * canvas.width;
     const y = Math.random() * canvas.height;
     const radius = Math.random() * 200 + 50;
@@ -5274,8 +5194,8 @@ function createMarsNormalMap() {
   context.fillStyle = 'rgb(128, 128, 255)';
   context.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Add various bumps and details
-  for (let i = 0; i < 2000; i++) {
+  // Add various bumps and details (reduced count for faster generation)
+  for (let i = 0; i < 500; i++) {
     const x = Math.random() * canvas.width;
     const y = Math.random() * canvas.height;
     const radius = Math.random() * 10 + 2;
@@ -5300,8 +5220,8 @@ function createMarsNormalMap() {
     context.fill();
   }
 
-  // Add some larger features
-  for (let i = 0; i < 100; i++) {
+  // Add some larger features (reduced count)
+  for (let i = 0; i < 30; i++) {
     const x = Math.random() * canvas.width;
     const y = Math.random() * canvas.height;
     const radius = Math.random() * 30 + 10;
@@ -5343,8 +5263,8 @@ function createMarsRoughnessMap() {
   context.fillStyle = 'rgb(136, 136, 136)';
   context.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Add some random variations
-  for (let i = 0; i < 10000; i++) {
+  // Add some random variations (reduced count for faster generation)
+  for (let i = 0; i < 2000; i++) {
     const x = Math.random() * canvas.width;
     const y = Math.random() * canvas.height;
     const radius = Math.random() * 10 + 2;
@@ -5372,7 +5292,7 @@ function createSpaceSkybox() {
 
   // === LAYER 1: Static background sphere (smooth, high-quality) ===
   // Increased segments for smoother appearance (no triangles visible)
-  const skyboxGeometry = new THREE.SphereGeometry(5900, 128, 96); // More segments for ultra-smooth appearance
+  const skyboxGeometry = new THREE.SphereGeometry(5900, 64, 48); // Balanced: smooth enough at distance, fewer triangles
   const texture = createSphericalSkyTexture(perfSettings.isMobile ? 1024 : 2048); // Reduced from 4096 to prevent hanging
   texture.minFilter = THREE.LinearMipmapLinearFilter;
   texture.magFilter = THREE.LinearFilter;
@@ -5381,7 +5301,7 @@ function createSpaceSkybox() {
 
   const skyboxMaterial = new THREE.MeshBasicMaterial({
     map: texture, side: THREE.BackSide, fog: false,
-    transparent: true, opacity: 1.0, depthWrite: false
+    depthWrite: false
   });
   const skyboxMesh = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
   skyboxMesh.frustumCulled = false;
@@ -5507,11 +5427,16 @@ function createTwinklingStars() {
     speeds,
     sizes,
     originalSizes: new Float32Array(sizes), // copy for reference
+    _updateOffset: 0, // rolling offset for partial updates
     update(time) {
       const t = time * 0.001;
       const sizeAttr = geometry.attributes.size;
       const arr = sizeAttr.array;
-      for (let i = 0; i < starCount; i++) {
+      // Update only a batch of stars each frame to spread CPU cost
+      const batchSize = Math.min(4000, starCount);
+      const start = this._updateOffset;
+      const end = Math.min(start + batchSize, starCount);
+      for (let i = start; i < end; i++) {
         // Smooth sinusoidal twinkling with harmonics for natural look
         const twinkle = 0.55 + 0.45 * (
           Math.sin(t * speeds[i] + phases[i]) * 0.5 +
@@ -5520,6 +5445,7 @@ function createTwinklingStars() {
         );
         arr[i] = this.originalSizes[i] * twinkle;
       }
+      this._updateOffset = end >= starCount ? 0 : end;
       sizeAttr.needsUpdate = true;
     }
   };
@@ -5603,8 +5529,8 @@ function createShootingStarSystem() {
     const trail = new THREE.Mesh(trailGeo, trailMat);
     trail.frustumCulled = false;
 
-    // Bright head glow
-    const headGeo = new THREE.SphereGeometry(4, 8, 8);
+    // Bright head glow (no PointLight — too expensive for transient effects)
+    const headGeo = new THREE.SphereGeometry(4, 6, 6);
     const headMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
@@ -5614,12 +5540,8 @@ function createShootingStarSystem() {
     });
     const head = new THREE.Mesh(headGeo, headMat);
 
-    // Head glow light
-    const glowLight = new THREE.PointLight(0xaaccff, 0, 200);
-
     group.add(trail);
     group.add(head);
-    group.add(glowLight);
 
     const speed = 1500 + Math.random() * 2000;
     const lifetime = length / speed;
@@ -5627,7 +5549,7 @@ function createShootingStarSystem() {
     const brightness = 0.8 + Math.random() * 0.3;
 
     return {
-      trail, head, glowLight, trailMat, headMat,
+      trail, head, trailMat, headMat,
       start, end, direction, length, trailLen,
       speed, lifetime, brightness,
       progress: 0, active: true,
@@ -5643,14 +5565,12 @@ function createShootingStarSystem() {
       t.active = false;
       t.trailMat.opacity = 0;
       t.headMat.opacity = 0;
-      t.glowLight.intensity = 0;
       return;
     }
 
     // Position along path
     const pos = t.start.clone().lerp(t.end, t.progress);
     t.head.position.copy(pos);
-    t.glowLight.position.copy(pos);
 
     // Trail behind the head
     const trailEnd = t.start.clone().lerp(t.end, Math.max(0, t.progress - t.trailLen / t.length));
@@ -5668,7 +5588,6 @@ function createShootingStarSystem() {
 
     t.trailMat.opacity = alpha * 0.8;
     t.headMat.opacity = alpha;
-    t.glowLight.intensity = alpha * 2;
   }
 
   // Spawn timer
@@ -5693,11 +5612,10 @@ function createShootingStarSystem() {
       }
 
       // Cleanup inactive trails (keep array manageable)
-      while (trails.length > 30) {
+      while (trails.length > 10) {
         const old = trails.shift();
         if (old.trail.parent) old.trail.parent.remove(old.trail);
         if (old.head.parent) old.head.parent.remove(old.head);
-        if (old.glowLight.parent) old.glowLight.parent.remove(old.glowLight);
         old.trail.geometry.dispose();
         old.trailMat.dispose();
         old.head.geometry.dispose();
@@ -5755,30 +5673,24 @@ function createSphericalSkyTexture(size = null) {
   canvas.height = size;
   const context = canvas.getContext('2d');
 
-  // Fill with deep space gradient (flattened so there is no dark band)
-  const gradient = context.createRadialGradient(
-    size / 2, size / 2, 0,
-    size / 2, size / 2, size / 2
-  );
-  // Use nearly uniform deep blue so the horizon doesn't get darker
-  gradient.addColorStop(0, '#101024');
-  gradient.addColorStop(0.7, '#111127');
-  gradient.addColorStop(1, '#12122a');
-  context.fillStyle = gradient;
+  // Fill with pure black to match the scene background and fog
+  context.fillStyle = '#000000';
   context.fillRect(0, 0, canvas.width, canvas.height);
-  // Add subtle bluish-violet color wash to bias the sky like the reference image (brighter)
+
+  // Subtle vertical-only color wash (top-to-bottom = latitude only, no longitude
+  // variation, so the left/right wrap seam is invisible)
   context.globalCompositeOperation = 'screen';
-  const colorWash = context.createLinearGradient(0, 0, size, size);
-  colorWash.addColorStop(0, 'rgba(15,12,40,0.12)');
-  colorWash.addColorStop(0.4, 'rgba(30,40,100,0.16)');
-  colorWash.addColorStop(0.7, 'rgba(50,70,160,0.18)');
-  colorWash.addColorStop(1, 'rgba(25,25,75,0.10)');
+  const colorWash = context.createLinearGradient(0, 0, 0, size);
+  colorWash.addColorStop(0, 'rgba(15,12,40,0.10)');
+  colorWash.addColorStop(0.35, 'rgba(30,40,100,0.14)');
+  colorWash.addColorStop(0.65, 'rgba(50,70,160,0.16)');
+  colorWash.addColorStop(1, 'rgba(25,25,75,0.08)');
   context.fillStyle = colorWash;
   context.fillRect(0, 0, size, size);
 
-  // Add faint, dense background star speckle (small, faint points) to give the milky texture
+  // Add faint, dense background star speckle (reduced count for faster generation)
   context.globalCompositeOperation = 'lighter';
-  const speckleCount = Math.floor(size * size / 1200);
+  const speckleCount = Math.floor(size * size / 4000);
   for (let i = 0; i < speckleCount; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
@@ -5822,7 +5734,46 @@ function createSphericalSkyTexture(size = null) {
   // Add a single large, high-definition planet for visual impact
   addLargePlanetToCanvas(context, size);
 
-  // Note: blur(0px) is a no-op, removed unnecessary canvas copy for performance
+  // === HORIZONTAL SEAM BLENDING ===
+  // The left and right edges of this canvas meet on the sphere at a vertical
+  // seam line. Crossfade a strip on each side so the two edges match smoothly.
+  context.globalCompositeOperation = 'source-over';
+  context.globalAlpha = 1;
+  const blendWidth = Math.floor(size * 0.12);
+
+  // Snapshot the finished canvas before we touch the edges
+  const seamSnap = document.createElement('canvas');
+  seamSnap.width = size;
+  seamSnap.height = size;
+  seamSnap.getContext('2d').drawImage(canvas, 0, 0);
+
+  // --- Left edge: overlay right-side content fading from full at x=0 to zero ---
+  const leftStrip = document.createElement('canvas');
+  leftStrip.width = blendWidth;
+  leftStrip.height = size;
+  const leftCtx = leftStrip.getContext('2d');
+  leftCtx.drawImage(seamSnap, size - blendWidth, 0, blendWidth, size, 0, 0, blendWidth, size);
+  leftCtx.globalCompositeOperation = 'destination-in';
+  const leftMask = leftCtx.createLinearGradient(0, 0, blendWidth, 0);
+  leftMask.addColorStop(0, 'rgba(0,0,0,1)');
+  leftMask.addColorStop(1, 'rgba(0,0,0,0)');
+  leftCtx.fillStyle = leftMask;
+  leftCtx.fillRect(0, 0, blendWidth, size);
+  context.drawImage(leftStrip, 0, 0);
+
+  // --- Right edge: overlay left-side content fading from zero to full at x=size ---
+  const rightStrip = document.createElement('canvas');
+  rightStrip.width = blendWidth;
+  rightStrip.height = size;
+  const rightCtx = rightStrip.getContext('2d');
+  rightCtx.drawImage(seamSnap, 0, 0, blendWidth, size, 0, 0, blendWidth, size);
+  rightCtx.globalCompositeOperation = 'destination-in';
+  const rightMask = rightCtx.createLinearGradient(0, 0, blendWidth, 0);
+  rightMask.addColorStop(0, 'rgba(0,0,0,0)');
+  rightMask.addColorStop(1, 'rgba(0,0,0,1)');
+  rightCtx.fillStyle = rightMask;
+  rightCtx.fillRect(0, 0, blendWidth, size);
+  context.drawImage(rightStrip, size - blendWidth, 0);
 
   // Create texture with proper settings
   const texture = new THREE.CanvasTexture(canvas);

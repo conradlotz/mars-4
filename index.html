@@ -6,7 +6,7 @@
   <meta name="permissions-policy" content="accelerometer=*, autoplay=*, camera=*, clipboard-write=*, encrypted-media=*, fullscreen=*, geolocation=*, gyroscope=*, magnetometer=*, microphone=*, midi=*, payment=*, picture-in-picture=*, publickey-credentials-get=*, screen-wake-lock=*, sync-xhr=*, usb=*, web-share=*, xr-spatial-tracking=*">
   <title>Drive on Mars</title>
   <style>
-    body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; }
+    body { margin: 0; overflow: hidden; font-family: Arial, sans-serif; background: #000; }
     canvas { display: block; }
     .controls {
       position: absolute;
@@ -263,6 +263,50 @@
       gap: 15px;
       pointer-events: auto;
       max-width: 180px;
+    }
+
+    /* Simple navigation pad for mobile driving */
+    #mobile-nav-buttons {
+      position: absolute;
+      bottom: 40px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      pointer-events: auto;
+      z-index: 1100;
+    }
+
+    #mobile-nav-buttons .nav-row {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    #mobile-nav-buttons .nav-btn {
+      width: 54px;
+      height: 54px;
+      border-radius: 12px;
+      border: 2px solid rgba(255, 107, 53, 0.7);
+      background: rgba(0, 0, 0, 0.55);
+      color: #ffffff;
+      font-size: 22px;
+      font-weight: bold;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(8px);
+      transition: transform 0.08s ease, background 0.08s ease, box-shadow 0.08s ease;
+    }
+
+    #mobile-nav-buttons .nav-btn:active {
+      transform: scale(0.9);
+      background: rgba(255, 107, 53, 0.9);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
     }
     
     .mobile-btn {
@@ -567,9 +611,10 @@
   <!-- preload removed to prevent caching issues -->
   <!-- <link rel="preload" href="mars.js" as="script"> -->
   <!-- Load Three.js libraries (must load in order) -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/GLTFLoader.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+  <!-- Use defer so HTML and preloader render quickly before heavy JS executes -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/GLTFLoader.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js" defer></script>
 </head>
 <body>
   <!-- Preloader -->
@@ -654,6 +699,18 @@
         📷
         <span class="btn-label">CAMERA</span>
       </button>
+    </div>
+
+    <!-- Simple Navigation Pad for Mobile Driving -->
+    <div id="mobile-nav-buttons">
+      <div class="nav-row nav-row-top">
+        <button class="nav-btn" data-key="w" aria-label="Move Forward">▲</button>
+      </div>
+      <div class="nav-row nav-row-bottom">
+        <button class="nav-btn" data-key="a" aria-label="Turn Left">◀</button>
+        <button class="nav-btn" data-key="s" aria-label="Move Backward">▼</button>
+        <button class="nav-btn" data-key="d" aria-label="Turn Right">▶</button>
+      </div>
     </div>
   </div>
 
@@ -1207,6 +1264,12 @@
         // Platform-specific cleanup
         if (this.deviceSpecs.isMobile) {
           // Mobile cleanup
+          const mobileControls = document.getElementById('mobile-controls');
+          if (mobileControls) {
+            mobileControls.classList.add('show');
+            mobileControls.style.display = 'block';
+          }
+
           const settingsToggle = document.getElementById('settings-toggle');
           if (settingsToggle) {
             settingsToggle.style.display = 'none';
@@ -1632,6 +1695,64 @@
     };
     
     // YouTube audio now auto-loads silently in the background with no visible controls
+  </script>
+
+  <script>
+    // Wire up simple mobile navigation buttons to the existing rover key controls
+    (function setupMobileNavigationPad() {
+      if (typeof isMobileDevice !== 'function' || !isMobileDevice()) return;
+
+      const navContainer = document.getElementById('mobile-nav-buttons');
+      if (!navContainer) return;
+
+      function bindNavButtons() {
+        if (!window.keys) {
+          // mars.js not loaded yet; try again shortly
+          setTimeout(bindNavButtons, 300);
+          return;
+        }
+
+        const buttons = navContainer.querySelectorAll('.nav-btn[data-key]');
+        const setKey = (key, value) => {
+          if (!window.keys) return;
+          window.keys[key] = value;
+        };
+
+        buttons.forEach(btn => {
+          const key = btn.getAttribute('data-key');
+          if (!key) return;
+
+          const handleDown = (e) => {
+            if (e) e.preventDefault();
+            setKey(key, true);
+          };
+
+          const handleUp = (e) => {
+            if (e) e.preventDefault();
+            setKey(key, false);
+          };
+
+          // Touch events for real mobile use
+          btn.addEventListener('touchstart', handleDown, { passive: false });
+          btn.addEventListener('touchend', handleUp, { passive: false });
+          btn.addEventListener('touchcancel', handleUp, { passive: false });
+
+          // Mouse events so it can be tested in emulators
+          btn.addEventListener('mousedown', handleDown);
+          btn.addEventListener('mouseup', handleUp);
+          btn.addEventListener('mouseleave', handleUp);
+        });
+
+        console.log('Mobile navigation pad bound to rover controls');
+      }
+
+      // Start binding once DOM is ready; actual key map waits for mars.js
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bindNavButtons);
+      } else {
+        bindNavButtons();
+      }
+    })();
   </script>
 </body>
 </html>
