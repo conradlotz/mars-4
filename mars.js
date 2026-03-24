@@ -140,15 +140,15 @@ camera.position.set(0, 10, 20);
 // Performance-optimized renderer with adaptive settings - MOBILE EMERGENCY MODE
 const perfSettings = getPerformanceSettings();
 const renderer = new THREE.WebGLRenderer({
-  antialias: false, // Disabled for performance
-  powerPreference: perfSettings.isMobile ? 'low-power' : 'high-performance', // Use discrete GPU on desktop
-  precision: perfSettings.isMobile ? 'lowp' : 'mediump', // Higher precision on desktop for quality
+  antialias: !perfSettings.isMobile, // Antialiasing on desktop for crisp edges
+  powerPreference: perfSettings.isMobile ? 'low-power' : 'high-performance',
+  precision: perfSettings.isMobile ? 'lowp' : 'highp', // High precision on desktop for quality
   alpha: false,
   stencil: false,
   depth: true,
   logarithmicDepthBuffer: false,
   preserveDrawingBuffer: false,
-  failIfMajorPerformanceCaveat: false, // Don't fail on performance issues
+  failIfMajorPerformanceCaveat: false,
   premultipliedAlpha: false
 });
 
@@ -162,9 +162,18 @@ if (window.webglContextManager && typeof window.webglContextManager.register ===
 }
 
 // Adaptive pixel ratio for better visual quality - capped at 1 for mobile emergency performance
-const pixelRatio = perfSettings.isMobile ? 1 : // Force pixelRatio to 1 on mobile
-                   Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1);
+const pixelRatio = perfSettings.isMobile ? 1 :
+                   Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1.5);
 renderer.setPixelRatio(pixelRatio);
+
+// Desktop: enable ACES filmic tone mapping and sRGB output for cinematic look
+if (!perfSettings.isMobile) {
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.2;
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap; // soft shadows
+}
 
   // Mobile-specific renderer optimizations
 if (perfSettings.isMobile) {
@@ -390,89 +399,103 @@ function createRealisticRover() {
   const perfSettings = getPerformanceSettings();
 
   // Main chassis - lower platform
-  const chassisGeometry = new THREE.BoxGeometry(2.4, 0.2, 3.2); // Increased size for better visibility
+  const chassisGeometry = new THREE.BoxGeometry(2.4, 0.2, 3.2);
   const chassisMaterial = new THREE.MeshStandardMaterial({
-    color: perfSettings.isMobile ? 0xcccccc : 0x888888, // Brighter on mobile
-    roughness: 0.7,
-    metalness: 0.3,
-    emissive: perfSettings.isMobile ? 0x222222 : 0x000000, // Self-illuminating on mobile
-    emissiveIntensity: perfSettings.isMobile ? 0.2 : 0
+    color: perfSettings.isMobile ? 0xcccccc : 0x9a8e7a, // Warm anodized aluminum
+    roughness: 0.6,
+    metalness: 0.55,
+    emissive: perfSettings.isMobile ? 0x222222 : 0x100a00,
+    emissiveIntensity: perfSettings.isMobile ? 0.2 : 0.05
   });
   const chassis = new THREE.Mesh(chassisGeometry, chassisMaterial);
   chassis.position.y = 0.6;
-  // chassis.castShadow = true; // Disabled for cleaner look
+  chassis.castShadow = !perfSettings.isMobile;
+  chassis.receiveShadow = !perfSettings.isMobile;
   roverGroup.add(chassis);
 
   // Main body - central electronics box
   const bodyGeometry = new THREE.BoxGeometry(1.8, 0.6, 2.2);
   const bodyMaterial = new THREE.MeshStandardMaterial({
-    color: perfSettings.isMobile ? 0xffffff : 0xdddddd, // Brighter white on mobile
-    roughness: 0.5,
-    metalness: 0.5,
-    emissive: perfSettings.isMobile ? 0x333333 : 0x000000, // Strong self-illumination on mobile
-    emissiveIntensity: perfSettings.isMobile ? 0.3 : 0
+    color: perfSettings.isMobile ? 0xffffff : 0xe8dfd0, // Warm off-white (NASA rover color)
+    roughness: 0.4,
+    metalness: 0.35,
+    emissive: perfSettings.isMobile ? 0x333333 : 0x050300,
+    emissiveIntensity: perfSettings.isMobile ? 0.3 : 0.04
   });
   
   // Mark this as the main body for color customization
   bodyMaterial.userData = { isBody: true };
   const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
   body.position.y = 1.0;
-  // body.castShadow = true; // Disabled for cleaner look
+  body.castShadow = !perfSettings.isMobile;
+  body.receiveShadow = !perfSettings.isMobile;
   roverGroup.add(body);
 
   // RTG power source (radioisotope thermoelectric generator)
   const rtgGeometry = new THREE.CylinderGeometry(0.25, 0.25, 0.8, 16);
   const rtgMaterial = new THREE.MeshStandardMaterial({
-    color: 0x333333,
-    roughness: 0.3,
-    metalness: 0.8
+    color: 0x2a2a2a,
+    roughness: 0.25,
+    metalness: 0.9,
+    emissive: 0x200000, // faint heat glow
+    emissiveIntensity: 0.15
   });
   const rtg = new THREE.Mesh(rtgGeometry, rtgMaterial);
   rtg.position.set(-0.8, 1.0, -1.2);
   rtg.rotation.x = Math.PI / 2;
-  // rtg.castShadow = true; // Disabled for cleaner look
+  rtg.castShadow = !perfSettings.isMobile;
   roverGroup.add(rtg);
 
   // Heat radiators
   const radiatorGeometry = new THREE.BoxGeometry(1.0, 0.05, 0.6);
   const radiatorMaterial = new THREE.MeshStandardMaterial({
-    color: 0xaaaaaa,
-    roughness: 0.2,
-    metalness: 0.9
+    color: 0xc8c8b8, // slightly warm silver
+    roughness: 0.15,
+    metalness: 0.95
   });
 
   const radiator1 = new THREE.Mesh(radiatorGeometry, radiatorMaterial);
   radiator1.position.set(0, 1.3, -1.2);
-  // radiator1.castShadow = true; // Disabled for cleaner look
+  radiator1.castShadow = !perfSettings.isMobile;
   roverGroup.add(radiator1);
 
   const radiator2 = new THREE.Mesh(radiatorGeometry, radiatorMaterial);
   radiator2.position.set(0, 1.3, 1.2);
-  // radiator2.castShadow = true; // Disabled for cleaner look
+  radiator2.castShadow = !perfSettings.isMobile;
   roverGroup.add(radiator2);
 
   // Camera mast
-  const mastGeometry = new THREE.CylinderGeometry(0.08, 0.1, 1.2, 8);
-  const mastMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
+  const mastGeometry = new THREE.CylinderGeometry(0.08, 0.1, 1.2, 12);
+  const mastMaterial = new THREE.MeshStandardMaterial({
+    color: 0x8a8070,
+    roughness: 0.5,
+    metalness: 0.6
+  });
   const mast = new THREE.Mesh(mastGeometry, mastMaterial);
   mast.position.set(0, 1.9, 0.8);
-  // mast.castShadow = true; // Disabled for cleaner look
+  mast.castShadow = !perfSettings.isMobile;
   roverGroup.add(mast);
 
   // Mastcam (stereo cameras)
   const cameraBoxGeometry = new THREE.BoxGeometry(0.3, 0.2, 0.2);
-  const cameraBoxMaterial = new THREE.MeshStandardMaterial({ color: 0x222222 });
+  const cameraBoxMaterial = new THREE.MeshStandardMaterial({
+    color: 0x1a1a1a,
+    roughness: 0.3,
+    metalness: 0.7
+  });
   const cameraBox = new THREE.Mesh(cameraBoxGeometry, cameraBoxMaterial);
   cameraBox.position.y = 0.6;
-  // cameraBox.castShadow = true; // Disabled for cleaner look
+  cameraBox.castShadow = !perfSettings.isMobile;
   mast.add(cameraBox);
 
   // Camera lenses
   const lensGeometry = new THREE.CylinderGeometry(0.05, 0.05, 0.05, 16);
   const lensMaterial = new THREE.MeshStandardMaterial({
-    color: 0x111111,
-    roughness: 0.1,
-    metalness: 0.9
+    color: 0x080808,
+    roughness: 0.05,
+    metalness: 1.0,
+    emissive: 0x000510,
+    emissiveIntensity: 0.3
   });
 
   const leftLens = new THREE.Mesh(lensGeometry, lensMaterial);
@@ -488,15 +511,16 @@ function createRealisticRover() {
   // Solar panels
   const panelGeometry = new THREE.BoxGeometry(2.8, 0.05, 1.8);
   const panelMaterial = new THREE.MeshStandardMaterial({
-    color: perfSettings.isMobile ? 0x4466ff : 0x2244aa, // Brighter blue on mobile
-    roughness: 0.3,
-    metalness: 0.8,
-    emissive: perfSettings.isMobile ? 0x001133 : 0x000000, // Blue glow on mobile
-    emissiveIntensity: perfSettings.isMobile ? 0.4 : 0 // Strong blue emission for visibility
+    color: perfSettings.isMobile ? 0x4466ff : 0x1a3580, // Deep midnight blue
+    roughness: 0.15,
+    metalness: 0.85,
+    emissive: perfSettings.isMobile ? 0x001133 : 0x000820,
+    emissiveIntensity: perfSettings.isMobile ? 0.4 : 0.12 // Subtle phosphorescent glow
   });
   const panel = new THREE.Mesh(panelGeometry, panelMaterial);
   panel.position.y = 1.5;
-  // panel.castShadow = true; // Disabled for cleaner look
+  panel.castShadow = !perfSettings.isMobile;
+  panel.receiveShadow = !perfSettings.isMobile;
   roverGroup.add(panel);
 
   // Solar panel details - cells
@@ -578,30 +602,45 @@ function createRealisticRover() {
     metalness: 0.1
   });
 
-  // Add treads to wheels
+  // Add high-detail treads to wheels
   const wheelTextureCanvas = document.createElement('canvas');
-  wheelTextureCanvas.width = 64;
-  wheelTextureCanvas.height = 64;
+  wheelTextureCanvas.width = 128;
+  wheelTextureCanvas.height = 128;
   const wheelContext = wheelTextureCanvas.getContext('2d');
 
-  // Draw wheel treads
-  wheelContext.fillStyle = '#222';
-  wheelContext.fillRect(0, 0, 64, 64);
+  // Dark rubber base
+  wheelContext.fillStyle = '#1a1a1a';
+  wheelContext.fillRect(0, 0, 128, 128);
 
-  wheelContext.fillStyle = '#444';
-  for (let i = 0; i < 8; i++) {
-    wheelContext.fillRect(0, i * 8, 64, 4);
+  // Main tread bars
+  wheelContext.fillStyle = '#3a3a3a';
+  for (let i = 0; i < 10; i++) {
+    wheelContext.fillRect(0, i * 13, 128, 7);
+  }
+
+  // Cross-hatch detail on treads
+  wheelContext.fillStyle = '#2a2a2a';
+  for (let i = 0; i < 10; i++) {
+    for (let j = 0; j < 6; j++) {
+      wheelContext.fillRect(j * 22, i * 13 + 2, 10, 3);
+    }
+  }
+
+  // Edge highlight for depth
+  wheelContext.fillStyle = '#4a4a4a';
+  for (let i = 0; i < 10; i++) {
+    wheelContext.fillRect(0, i * 13, 128, 1);
   }
 
   const wheelTexture = new THREE.CanvasTexture(wheelTextureCanvas);
   wheelTexture.wrapS = THREE.RepeatWrapping;
   wheelTexture.wrapT = THREE.RepeatWrapping;
-  wheelTexture.repeat.set(6, 1);
+  wheelTexture.repeat.set(8, 1);
 
   const wheelMaterialWithTexture = new THREE.MeshStandardMaterial({
-    color: 0x333333,
-    roughness: 0.9,
-    metalness: 0.1,
+    color: 0x252525,
+    roughness: 0.95,
+    metalness: 0.05,
     map: wheelTexture
   });
 
@@ -621,7 +660,8 @@ function createRealisticRover() {
     const wheel = new THREE.Mesh(wheelGeometry, wheelMaterialWithTexture);
     wheel.position.set(pos.x, pos.y, pos.z);
     wheel.rotation.z = Math.PI / 2; // Rotate to correct orientation
-    // wheel.castShadow = true; // Disabled for cleaner look
+    wheel.castShadow = !perfSettings.isMobile;
+    wheel.receiveShadow = !perfSettings.isMobile;
 
     // Store original position for suspension
     originalWheelPositions.push(pos.y);
@@ -690,35 +730,50 @@ function createSolarPanelTexture() {
   }
   
   const canvas = document.createElement('canvas');
-  canvas.width = 64; // Reduced size for all devices
-  canvas.height = 64;
+  canvas.width = 256;
+  canvas.height = 256;
   const context = canvas.getContext('2d');
 
-  // Background color
-  context.fillStyle = '#2244aa';
+  // Deep blue base — photovoltaic substrate
+  context.fillStyle = '#112266';
   context.fillRect(0, 0, 256, 256);
 
-  // Draw solar cells
-  context.fillStyle = '#1a3380';
-  const cellSize = 32;
+  // Draw individual solar cells with grid lines
+  const cellsX = 10;
+  const cellsY = 8;
+  const cellW = 256 / cellsX;
+  const cellH = 256 / cellsY;
 
-  for (let x = 0; x < 8; x++) {
-    for (let y = 0; y < 8; y++) {
-      context.fillRect(x * cellSize + 1, y * cellSize + 1, cellSize - 2, cellSize - 2);
+  for (let x = 0; x < cellsX; x++) {
+    for (let y = 0; y < cellsY; y++) {
+      const px = x * cellW;
+      const py = y * cellH;
+      // Cell body — alternating shade for monocrystalline look
+      const shade = (x + y) % 2 === 0 ? '#152d8a' : '#1a3580';
+      context.fillStyle = shade;
+      context.fillRect(px + 1, py + 1, cellW - 2, cellH - 2);
+      // Top-edge highlight
+      context.fillStyle = 'rgba(120, 160, 255, 0.18)';
+      context.fillRect(px + 2, py + 2, cellW - 4, 3);
+      // Metallic bus-bar lines across each cell
+      context.fillStyle = 'rgba(200, 220, 255, 0.25)';
+      context.fillRect(px + cellW * 0.45, py + 2, 2, cellH - 4);
     }
   }
 
-  // Add highlights
-  context.fillStyle = 'rgba(255, 255, 255, 0.1)';
-  for (let x = 0; x < 8; x++) {
-    for (let y = 0; y < 8; y++) {
-      if ((x + y) % 2 === 0) {
-        context.fillRect(x * cellSize + 4, y * cellSize + 4, cellSize - 8, cellSize - 8);
-      }
-    }
+  // Outer grid border
+  context.strokeStyle = 'rgba(80, 110, 200, 0.6)';
+  context.lineWidth = 1;
+  for (let x = 0; x <= cellsX; x++) {
+    context.beginPath(); context.moveTo(x * cellW, 0); context.lineTo(x * cellW, 256); context.stroke();
+  }
+  for (let y = 0; y <= cellsY; y++) {
+    context.beginPath(); context.moveTo(0, y * cellH); context.lineTo(256, y * cellH); context.stroke();
   }
 
-  return new THREE.CanvasTexture(canvas);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.anisotropy = 4;
+  return tex;
 }
 
 const { rover, wheels, originalWheelPositions } = createRealisticRover();
@@ -838,28 +893,30 @@ setTimeout(() => {
 // Dust Particle System
 const createDustParticles = () => {
   const perfSettings = getPerformanceSettings();
-  const particleCount = Math.min(perfSettings.particleCount || 300, 500);
+  const particleCount = Math.min(perfSettings.particleCount || 400, 600);
   const particles = new THREE.BufferGeometry();
   const positions = new Float32Array(particleCount * 3);
   const sizes = new Float32Array(particleCount);
+  const opacities = new Float32Array(particleCount); // per-particle fade
 
   for (let i = 0; i < particleCount; i++) {
-    // Initialize particles off-screen
-    positions[i * 3] = 0;
-    positions[i * 3 + 1] = -10; // Below the surface
+    positions[i * 3]     = 0;
+    positions[i * 3 + 1] = -20; // start hidden below surface
     positions[i * 3 + 2] = 0;
-    sizes[i] = Math.random() * 0.1 + 0.05;
+    sizes[i] = Math.random() * 0.25 + 0.06;
+    opacities[i] = 0;
   }
 
   particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  particles.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+  particles.setAttribute('size',     new THREE.BufferAttribute(sizes, 1));
 
   const particleMaterial = new THREE.PointsMaterial({
-    color: 0xaa7755,
-    size: 0.1,
+    color: 0xc8895a,       // warm rust-ochre Mars dust
+    size: 0.18,
     transparent: true,
-    opacity: 0.6,
-    sizeAttenuation: true
+    opacity: 0.55,
+    sizeAttenuation: true,
+    depthWrite: false      // prevents dust from obscuring geometry
   });
 
   const particleSystem = new THREE.Points(particles, particleMaterial);
@@ -868,61 +925,79 @@ const createDustParticles = () => {
   return {
     system: particleSystem,
     update: (roverPosition, isMoving) => {
-      const positions = particleSystem.geometry.attributes.position.array;
+      const pos = particleSystem.geometry.attributes.position.array;
+      const speedMag = Math.abs(velocity); // use the physics velocity for intensity
+      const spread = 1.5 + speedMag * 8;  // wider plume at higher speed
 
-      if (isMoving) {
-        for (let i = 0; i < particleCount; i++) {
-          // Only update particles that are below the surface or have fallen too far
-          if (positions[i * 3 + 1] < 0.1 || positions[i * 3 + 1] > 3) {
-            // Create new particles behind the rover
-            const angle = Math.random() * Math.PI * 2;
-            const radius = Math.random() * 2;
+      for (let i = 0; i < particleCount; i++) {
+        const alive = pos[i * 3 + 1] > -5;
 
-            positions[i * 3] = roverPosition.x + Math.cos(angle) * radius;
-            positions[i * 3 + 1] = 0.1 + Math.random() * 0.2; // Just above the surface
-            positions[i * 3 + 2] = roverPosition.z + Math.sin(angle) * radius + 2; // Behind the rover
-          } else {
-            // Move existing particles
-            positions[i * 3] += (Math.random() - 0.5) * 0.05;
-            positions[i * 3 + 1] += 0.01; // Float upward
-            positions[i * 3 + 2] += (Math.random() - 0.5) * 0.05;
-          }
+        if (isMoving && (!alive || pos[i * 3 + 1] > 4 + speedMag * 10)) {
+          // Respawn behind the rover relative to travel direction
+          const angle = roverYaw + Math.PI + (Math.random() - 0.5) * 1.2;
+          const r = Math.random() * spread;
+          pos[i * 3]     = roverPosition.x + Math.cos(angle) * r;
+          pos[i * 3 + 1] = 0.05 + Math.random() * 0.3;
+          pos[i * 3 + 2] = roverPosition.z + Math.sin(angle) * r;
+        } else if (alive) {
+          // Drift upward and outward, settle quickly
+          pos[i * 3]     += (Math.random() - 0.5) * 0.04;
+          pos[i * 3 + 1] += 0.02 + speedMag * 0.15;
+          pos[i * 3 + 2] += (Math.random() - 0.5) * 0.04;
         }
-        particleSystem.geometry.attributes.position.needsUpdate = true;
       }
+      particleSystem.geometry.attributes.position.needsUpdate = true;
+
+      // Vary overall opacity with speed for subtle effect
+      particleMaterial.opacity = isMoving ? Math.min(0.18 + speedMag * 2.5, 0.65) : 0;
     }
   };
 };
 
 const dustParticles = createDustParticles();
 
-// Enhanced Lighting for Mars - update to match the reference image with Samsung adjustments
-// Ambient light (stronger reddish to simulate Mars atmosphere) with Samsung brightness boost
-const ambientIntensity = perfSettings.samsungOptimized ? 0.6 * perfSettings.ambientLightBoost : 0.6;
-const ambientColor = perfSettings.samsungOptimized ? 0xff9977 : 0xff8866;  // Slightly warmer for Samsung
+// Enhanced Lighting for Mars
+// Warm ambient light — Mars atmosphere scatters reddish light everywhere
+const ambientIntensity = perfSettings.samsungOptimized ? 0.55 * perfSettings.ambientLightBoost :
+                         perfSettings.isMobile ? 0.55 : 0.45;
+const ambientColor = perfSettings.samsungOptimized ? 0xff9977 : 0xffb088;
 const ambientLight = new THREE.AmbientLight(ambientColor, ambientIntensity);
 scene.add(ambientLight);
 
-// Directional light (sun) - make it more orange/red like in the image with Samsung adjustments
-const sunIntensity = perfSettings.samsungOptimized ? 1.0 * perfSettings.materialBrightness : 1.0;
-const sunColor = perfSettings.samsungOptimized ? 0xff9955 : 0xff7744;  // Slightly warmer for Samsung
+// Directional light (sun) — low horizon angle for long dramatic shadows
+const sunIntensity = perfSettings.samsungOptimized ? 1.2 * perfSettings.materialBrightness :
+                     perfSettings.isMobile ? 1.0 : 1.4;
+const sunColor = perfSettings.samsungOptimized ? 0xff9955 : 0xffc080; // warm peach-orange sunlight
 const sunLight = new THREE.DirectionalLight(sunColor, sunIntensity);
-sunLight.position.set(-50, 30, 50); // Position the sun lower on the horizon
-// sunLight.castShadow = true; // Disabled for better performance and cleaner look
-// sunLight.shadow.mapSize.width = 2048;
-// sunLight.shadow.mapSize.height = 2048;
-// sunLight.shadow.camera.near = 0.5;
-// sunLight.shadow.camera.far = 500;
-// sunLight.shadow.camera.left = -100;
-// sunLight.shadow.camera.right = 100;
-// sunLight.shadow.camera.top = 100;
-// sunLight.shadow.camera.bottom = -100;
+// Low-angle Mars sun — long shadows, dramatic look
+sunLight.position.set(-120, 55, 80);
+if (!perfSettings.isMobile) {
+  sunLight.castShadow = true;
+  sunLight.shadow.mapSize.width = 2048;
+  sunLight.shadow.mapSize.height = 2048;
+  sunLight.shadow.camera.near = 1;
+  sunLight.shadow.camera.far = 800;
+  sunLight.shadow.camera.left = -200;
+  sunLight.shadow.camera.right = 200;
+  sunLight.shadow.camera.top = 200;
+  sunLight.shadow.camera.bottom = -200;
+  sunLight.shadow.bias = -0.0005;
+  sunLight.shadow.normalBias = 0.02;
+}
 scene.add(sunLight);
 
-// Add a subtle hemisphere light to simulate light bouncing off the surface with Samsung adjustments
-const hemisphereIntensity = perfSettings.samsungOptimized ? 0.4 * perfSettings.ambientLightBoost : 0.4;
-const hemisphereSkyColor = perfSettings.samsungOptimized ? 0xff7744 : 0xff6633;
-const hemisphereGroundColor = perfSettings.samsungOptimized ? 0xbb5511 : 0xaa4400;
+// Secondary fill light — soft pink sky bounce from the opposite direction
+if (!perfSettings.isMobile) {
+  const fillLight = new THREE.DirectionalLight(0xff8866, 0.25);
+  fillLight.position.set(80, 40, -60);
+  scene.add(fillLight);
+}
+
+// Hemisphere light — sky gradient from hazy orange to dark rust ground
+const hemisphereIntensity = perfSettings.samsungOptimized ? 0.45 * perfSettings.ambientLightBoost :
+                             perfSettings.isMobile ? 0.4 : 0.5;
+const hemisphereSkyColor = perfSettings.samsungOptimized ? 0xff8855 : 0xffaa66;  // hazy orange sky
+const hemisphereGroundColor = perfSettings.samsungOptimized ? 0xbb5511 : 0x7a2800; // dark rust ground
 const hemisphereLight = new THREE.HemisphereLight(hemisphereSkyColor, hemisphereGroundColor, hemisphereIntensity);
 scene.add(hemisphereLight);
 
@@ -939,8 +1014,14 @@ controls.enabled = false; // Disable orbit controls since we're starting in thir
 // Movement Logic - Make keys globally accessible for mobile controls
 window.keys = { w: false, a: false, s: false, d: false };
 const keys = window.keys; // Keep local reference for backward compatibility
-const speed = 0.6;
-const rotationSpeed = 0.03;
+const MAX_SPEED = 0.18;          // Top speed (was 0.6 - reduced 3.3x for realism)
+const ACCELERATION = 0.008;      // How quickly the rover accelerates
+const DECELERATION = 0.012;      // How quickly the rover decelerates (braking)
+const COAST_DECEL = 0.005;       // Passive deceleration when no key held
+const MAX_ROTATION_SPEED = 0.014; // Maximum turn rate (was 0.03)
+const ROTATION_ACCEL = 0.002;    // Turn rate ramps up gradually
+let velocity = 0;                // Current velocity (-MAX_SPEED to +MAX_SPEED)
+let rotationVelocity = 0;        // Current turn rate
 let isMoving = false;
 let currentSpeed = 0; // Track the current speed of the rover
 
@@ -5156,15 +5237,25 @@ function animate(time) {
   // Store previous position before moving
   previousPosition.copy(rover.position);
 
-  if (keys.w || keys.s) {
+  // Smooth acceleration/deceleration physics
+  if (keys.w) {
+    velocity = Math.min(velocity + ACCELERATION, MAX_SPEED);
+  } else if (keys.s) {
+    velocity = Math.max(velocity - ACCELERATION, -MAX_SPEED * 0.7); // reverse slower
+  } else {
+    // Coast to a stop when no key held
+    if (velocity > 0) {
+      velocity = Math.max(velocity - COAST_DECEL, 0);
+    } else if (velocity < 0) {
+      velocity = Math.min(velocity + COAST_DECEL, 0);
+    }
+  }
+
+  if (Math.abs(velocity) > 0.0005) {
     isMoving = true;
-    const direction = keys.w ? -1 : 1; // Forward is negative Z in three.js
+    const moveX = Math.sin(roverYaw) * velocity;
+    const moveZ = Math.cos(roverYaw) * velocity;
 
-    // Calculate movement vector based on rover's rotation
-    const moveX = Math.sin(roverYaw) * speed * direction;
-    const moveZ = Math.cos(roverYaw) * speed * direction;
-
-    // Update rover position
     rover.position.x += moveX;
     rover.position.z += moveZ;
 
@@ -5173,14 +5264,17 @@ function animate(time) {
         window.marsSceneManager.checkCollision(rover.position.x, rover.position.z, 2.5)) {
       rover.position.x = previousPosition.x;
       rover.position.z = previousPosition.z;
+      velocity *= -0.3; // slight bounce-back on collision
       isMoving = false;
     }
 
     // Position rover on terrain after movement
     positionRoverOnTerrain();
 
-    // Set current speed based on direction - FIXED: positive for forward (w key)
-    currentSpeed = speed * (keys.w ? 1 : -1); // Positive for forward, negative for backward
+    // Set current speed based on velocity (positive = forward)
+    currentSpeed = velocity;
+  } else {
+    velocity = 0;
   }
 
   // Update Game Systems
@@ -5207,27 +5301,38 @@ function animate(time) {
     terrainSystem.currentChunk = { ...currentChunk };
   }
 
-  // Handle turning by updating the tracked yaw value
+  // Handle turning with smooth acceleration - turning radius scales with speed
+  const speedFactor = 0.4 + 0.6 * (Math.abs(velocity) / MAX_SPEED); // less turn at low speed
   if (keys.a || keys.d) {
-    const turnDirection = keys.a ? 1 : -1;
-    roverYaw += rotationSpeed * turnDirection;
+    const turnDir = keys.a ? 1 : -1;
+    rotationVelocity = Math.min(
+      Math.abs(rotationVelocity) + ROTATION_ACCEL,
+      MAX_ROTATION_SPEED
+    ) * turnDir;
+  } else {
+    // Dampen rotation when key released
+    rotationVelocity *= 0.6;
+    if (Math.abs(rotationVelocity) < 0.0001) rotationVelocity = 0;
+  }
 
-    // Normalize roverYaw to keep it within 0-2Ï€ range to prevent floating point issues
+  if (rotationVelocity !== 0) {
+    const effectiveRotation = rotationVelocity * speedFactor;
+    roverYaw += effectiveRotation;
+
+    // Normalize roverYaw to keep it within 0-2π range
     roverYaw = roverYaw % (Math.PI * 2);
     if (roverYaw < 0) roverYaw += Math.PI * 2;
-    
+
     // Keep global variable in sync for mobile controls
     window.roverYaw = roverYaw;
 
     // Differential wheel rotation for turning - only update if moving
     if (isMoving) {
-      // Optimize wheel rotation updates
+      const turnDirection = rotationVelocity > 0 ? 1 : -1;
       updateWheelRotation(wheels, currentSpeed, turnDirection);
-      //createRoverTireTracks(); 
     }
   } else if (isMoving) {
     // Straight movement, all wheels rotate at the same speed
-    // Only update every other frame for performance
     if (frameCount % 2 === 0) {
       wheels.forEach(wheel => {
         wheel.rotation.x += currentSpeed * 0.3;
@@ -5984,23 +6089,23 @@ function createRealisticMarsTerrain() {
   const terrainPerfSettings = getPerformanceSettings();
   let material;
   
-  if (terrainPerfSettings.isMobile) { // Basic material on mobile only
-    // Use basic material without textures - no additional WebGL contexts
+  if (terrainPerfSettings.isMobile) {
+    // Mobile: basic material, no textures
     material = new THREE.MeshBasicMaterial({
-      color: 0xaa6633,  // Martian reddish-brown color
+      color: 0xaa6633,
       side: THREE.DoubleSide,
       transparent: false,
-      fog: true // Allow fog to affect material for depth
+      fog: true
     });
-    console.log('Mobile: Using basic terrain material without textures');
   } else {
-    // Desktop: Use MeshLambertMaterial (much cheaper than Standard, still has lighting)
-    material = new THREE.MeshLambertMaterial({
-      color: 0xaa6633,
+    // Desktop: PBR Standard material for realistic surface look
+    material = new THREE.MeshStandardMaterial({
+      color: 0xb56a38,   // Warm iron-oxide Mars red
+      roughness: 0.92,   // Very rough dusty surface
+      metalness: 0.04,
       side: THREE.DoubleSide,
       fog: true
     });
-    console.log('Desktop: Using Lambert terrain material');
   }
 
   const terrain = new THREE.Mesh(geometry, material);
@@ -6013,37 +6118,46 @@ function createRealisticMarsTerrain() {
 
   for (let i = 0; i < geometry.attributes.position.count; i++) {
     const elevation = positionArray[i * 3 + 1];
-
-    // Base color components (darker Mars red)
-    let r = 0.545; // Base red
-    let g = 0.271; // Base green
-    let b = 0.075; // Base blue
-
-    // Adjust color based on elevation
-    if (elevation > 5) {
-      // Higher terrain slightly lighter
-      const factor = Math.min((elevation - 5) / 15, 0.2);
-      r += factor;
-      g += factor;
-      b += factor;
-    } else if (elevation < -2) {
-      // Craters and low areas slightly darker
-      const factor = Math.min((-elevation - 2) / 5, 0.2);
-      r -= factor;
-      g -= factor;
-      b -= factor;
-    }
-
-    // Add subtle deterministic variation based on position
     const px = positionArray[i * 3];
     const pz = positionArray[i * 3 + 2];
-    const variation = (Math.sin(px * 0.73 + pz * 1.17) * Math.cos(px * 1.53 - pz * 0.89)) * 0.025;
-    r += variation;
-    g += variation;
-    b += variation;
 
-    // Set the colors
-    colors[i * 3] = r;
+    // Base: warm Mars iron-oxide red (RGB ≈ 0.71, 0.41, 0.18)
+    let r = 0.71;
+    let g = 0.41;
+    let b = 0.18;
+
+    // High terrain → pale dusty pink (wind-eroded highlands)
+    if (elevation > 8) {
+      const t = Math.min((elevation - 8) / 20, 1.0);
+      r = r + (0.82 - r) * t;
+      g = g + (0.62 - g) * t;
+      b = b + (0.50 - b) * t;
+    }
+
+    // Very high → light buff/cream rock (exposed bedrock)
+    if (elevation > 20) {
+      const t = Math.min((elevation - 20) / 15, 1.0);
+      r = r + (0.88 - r) * t;
+      g = g + (0.76 - g) * t;
+      b = b + (0.60 - b) * t;
+    }
+
+    // Low/crater floors → dark iron grey (basalt, compacted soil)
+    if (elevation < -3) {
+      const t = Math.min((-elevation - 3) / 8, 0.6);
+      r = r * (1 - t) + 0.38 * t;
+      g = g * (1 - t) + 0.22 * t;
+      b = b * (1 - t) + 0.12 * t;
+    }
+
+    // Subtle geological variation (streaks, veins)
+    const vein = (Math.sin(px * 0.73 + pz * 1.17) * Math.cos(px * 1.53 - pz * 0.89)) * 0.04;
+    const ochre = (Math.sin(px * 0.19 - pz * 0.27) * Math.cos(px * 0.34 + pz * 0.11)) * 0.03;
+    r = Math.max(0, Math.min(1, r + vein + ochre * 0.5));
+    g = Math.max(0, Math.min(1, g + vein * 0.6 + ochre * 0.3));
+    b = Math.max(0, Math.min(1, b + vein * 0.3));
+
+    colors[i * 3]     = r;
     colors[i * 3 + 1] = g;
     colors[i * 3 + 2] = b;
   }
