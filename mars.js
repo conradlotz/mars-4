@@ -1014,11 +1014,11 @@ controls.enabled = false; // Disable orbit controls since we're starting in thir
 // Movement Logic - Make keys globally accessible for mobile controls
 window.keys = { w: false, a: false, s: false, d: false };
 const keys = window.keys; // Keep local reference for backward compatibility
-const MAX_SPEED = 0.18;          // Top speed (was 0.6 - reduced 3.3x for realism)
-const ACCELERATION = 0.008;      // How quickly the rover accelerates
-const DECELERATION = 0.012;      // How quickly the rover decelerates (braking)
-const COAST_DECEL = 0.005;       // Passive deceleration when no key held
-const MAX_ROTATION_SPEED = 0.014; // Maximum turn rate (was 0.03)
+const MAX_SPEED = 0.28;          // Top speed (feels like ~6 km/h for a Mars rover)
+const ACCELERATION = 0.012;      // How quickly the rover accelerates
+const DECELERATION = 0.016;      // How quickly the rover decelerates (braking)
+const COAST_DECEL = 0.006;       // Passive deceleration when no key held
+const MAX_ROTATION_SPEED = 0.016; // Maximum turn rate
 const ROTATION_ACCEL = 0.002;    // Turn rate ramps up gradually
 let velocity = 0;                // Current velocity (-MAX_SPEED to +MAX_SPEED)
 let rotationVelocity = 0;        // Current turn rate
@@ -6091,19 +6091,19 @@ function createRealisticMarsTerrain() {
   let material;
   
   if (terrainPerfSettings.isMobile) {
-    // Mobile: basic material — use the classic warm Mars red
+    // Mobile: basic material — warm Mars red, no vertex colors needed
     material = new THREE.MeshBasicMaterial({
-      color: 0xcc5522,
+      color: 0xcc4411,
+      vertexColors: true,
       side: THREE.DoubleSide,
-      transparent: false,
       fog: true
     });
   } else {
-    // Desktop: PBR Standard material — white base so vertex colors show at full saturation
-    material = new THREE.MeshStandardMaterial({
-      color: 0xffffff,   // White base — vertex colors are the sole tint
-      roughness: 0.92,   // Very rough dusty surface
-      metalness: 0.04,
+    // Desktop: Lambert — simple, predictable lighting, vertex colors show correctly
+    // (avoids PBR colour darkening under ACES tone mapping)
+    material = new THREE.MeshLambertMaterial({
+      color: 0xffffff, // white base so vertex colours are the sole tint
+      vertexColors: true,
       side: THREE.DoubleSide,
       fog: true
     });
@@ -6122,10 +6122,10 @@ function createRealisticMarsTerrain() {
     const px = positionArray[i * 3];
     const pz = positionArray[i * 3 + 2];
 
-    // Base: vivid Mars iron-oxide red — now the sole tint (material is white)
-    let r = 0.78;
-    let g = 0.36;
-    let b = 0.14;
+    // Base: vivid Mars iron-oxide red — vertex colours are the sole tint
+    let r = 0.82;
+    let g = 0.34;
+    let b = 0.12;
 
     // High terrain → pale dusty pink (wind-eroded highlands)
     if (elevation > 8) {
@@ -6164,7 +6164,6 @@ function createRealisticMarsTerrain() {
   }
 
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  material.vertexColors = true;
 
   return terrain;
 }
@@ -6499,12 +6498,12 @@ function createTwinklingStars() {
       colors[i * 3 + 2] = 1.0;
     }
 
-    // Star size: mostly very small; only a few larger highlights
+    // Star sizes — boosted across all tiers for a bright, spangled sky
     const sizeRoll = Math.random();
-    if (sizeRoll < 0.7) sizes[i] = 1.2 + Math.random() * 1.6;       // Tiny
-    else if (sizeRoll < 0.93) sizes[i] = 2.4 + Math.random() * 1.8; // Small
-    else if (sizeRoll < 0.985) sizes[i] = 4.0 + Math.random() * 2.0; // Medium
-    else sizes[i] = 6.0 + Math.random() * 3.0;                      // Rare bright
+    if (sizeRoll < 0.60) sizes[i] = 2.5 + Math.random() * 2.5;       // Common dim
+    else if (sizeRoll < 0.88) sizes[i] = 4.5 + Math.random() * 3.0;  // Medium
+    else if (sizeRoll < 0.97) sizes[i] = 7.0 + Math.random() * 4.0;  // Bright
+    else sizes[i] = 11.0 + Math.random() * 6.0;                       // Rare brilliant
 
     phases[i] = Math.random() * Math.PI * 2;
     speeds[i] = 0.3 + Math.random() * 2.5; // Various twinkle speeds
@@ -6519,7 +6518,7 @@ function createTwinklingStars() {
   const starTexture = createStarTexture();
 
   const material = new THREE.PointsMaterial({
-    size: 5, // Slightly larger for better visibility
+    size: 10, // Larger base size so stars are clearly visible
     map: starTexture,
     vertexColors: true,
     transparent: true,
@@ -6527,7 +6526,7 @@ function createTwinklingStars() {
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     sizeAttenuation: true,
-    alphaTest: 0.01 // Prevent rendering fully transparent pixels
+    alphaTest: 0.005
   });
 
   const points = new THREE.Points(geometry, material);
@@ -6565,30 +6564,30 @@ function createTwinklingStars() {
 }
 
 function createStarTexture() {
-  // Higher resolution texture for smoother stars (no pixelation)
+  // 64px is enough — stars are tiny points; higher res adds no benefit
   const canvas = document.createElement('canvas');
-  canvas.width = 128; // Increased from 64 for smoother appearance
-  canvas.height = 128;
+  canvas.width = 64;
+  canvas.height = 64;
   const ctx = canvas.getContext('2d');
+  const c = 32; // center
 
-  // Very soft radial gradient for smooth, beautiful star glow (EXTRA BRIGHT)
-  const center = 64;
-  const gradient = ctx.createRadialGradient(center, center, 0, center, center, center);
-  gradient.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
-  gradient.addColorStop(0.1, 'rgba(255, 255, 255, 1.0)');
-  gradient.addColorStop(0.2, 'rgba(255, 255, 255, 0.95)');
-  gradient.addColorStop(0.35, 'rgba(255, 255, 255, 0.75)');
-  gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.45)');
-  gradient.addColorStop(0.7, 'rgba(255, 255, 255, 0.18)');
-  gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  // Sharp bright core (inner 8%) fading to a very soft halo
+  // This gives crisp point-of-light look, not a blurry blob
+  const gradient = ctx.createRadialGradient(c, c, 0, c, c, c);
+  gradient.addColorStop(0,    'rgba(255,255,255,1.0)');
+  gradient.addColorStop(0.08, 'rgba(255,255,255,1.0)');
+  gradient.addColorStop(0.18, 'rgba(255,255,255,0.85)');
+  gradient.addColorStop(0.35, 'rgba(255,255,255,0.40)');
+  gradient.addColorStop(0.55, 'rgba(255,255,255,0.10)');
+  gradient.addColorStop(0.80, 'rgba(255,255,255,0.02)');
+  gradient.addColorStop(1.0,  'rgba(255,255,255,0.0)');
 
   ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, 128, 128);
+  ctx.fillRect(0, 0, 64, 64);
 
   const texture = new THREE.CanvasTexture(canvas);
-  texture.minFilter = THREE.LinearFilter; // Smooth filtering
+  texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
-  texture.needsUpdate = true;
   return texture;
 }
 
@@ -6786,36 +6785,21 @@ function createSphericalSkyTexture(size = null) {
   canvas.height = size;
   const context = canvas.getContext('2d');
 
-  // Fill with pure black to match the scene background and fog
-  context.fillStyle = '#000000';
+  // Deep midnight blue base — gives the sky luminous depth instead of void black
+  context.fillStyle = '#07091a';
   context.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Subtle vertical-only color wash (top-to-bottom = latitude only, no longitude
-  // variation, so the left/right wrap seam is invisible)
+  // Strong vertical blue-indigo wash — makes the whole sky feel bright and open
   context.globalCompositeOperation = 'screen';
   const colorWash = context.createLinearGradient(0, 0, 0, size);
-  colorWash.addColorStop(0, 'rgba(15,12,40,0.10)');
-  colorWash.addColorStop(0.35, 'rgba(30,40,100,0.14)');
-  colorWash.addColorStop(0.65, 'rgba(50,70,160,0.16)');
-  colorWash.addColorStop(1, 'rgba(25,25,75,0.08)');
+  colorWash.addColorStop(0,    'rgba(30,25,90,0.55)');
+  colorWash.addColorStop(0.30, 'rgba(55,75,180,0.48)');
+  colorWash.addColorStop(0.60, 'rgba(80,105,220,0.40)');
+  colorWash.addColorStop(1,    'rgba(40,50,130,0.30)');
   context.fillStyle = colorWash;
   context.fillRect(0, 0, size, size);
 
-  // Add faint, dense background star speckle (reduced count for faster generation)
-  context.globalCompositeOperation = 'lighter';
-  const speckleCount = Math.floor(size * size / 4000);
-  for (let i = 0; i < speckleCount; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
-    const r = Math.random() * 0.8; // tiny
-    const a = 0.02 + Math.random() * 0.06; // very faint
-    context.beginPath();
-    context.fillStyle = `rgba(${200 + Math.floor(Math.random()*55)}, ${200 + Math.floor(Math.random()*55)}, ${230 + Math.floor(Math.random()*25)}, ${a})`;
-    context.arc(x, y, r, 0, Math.PI * 2);
-    context.fill();
-  }
-
-  // Grain/noise removed to prevent dark patches in sky
+  // Note: background star speckle replaced by smooth gradient stars in addBrighterBackgroundStars
 
   // Gentle horizontal brightening around the horizon to fully eliminate any dim strip
   context.globalCompositeOperation = 'screen';
@@ -6894,69 +6878,64 @@ function createSphericalSkyTexture(size = null) {
   return texture;
 }
 
-// Add much brighter background stars
+// Add smooth background stars — each one is a radial gradient, never a hard pixel
 function addBrighterBackgroundStars(context, size) {
-  // Slightly increased background density so the sky feels richer
   const perfSettings = getPerformanceSettings();
-  const densityMultiplier = perfSettings.detailLevel === 'high' ? 0.55 : 
-                            perfSettings.detailLevel === 'normal' ? 0.4 : 0.22;
-  const starCount = Math.min(Math.floor(size * size / 800 * densityMultiplier), 14000);
+  const densityMultiplier = perfSettings.detailLevel === 'high' ? 0.55 :
+                            perfSettings.detailLevel === 'normal' ? 0.40 : 0.22;
+  const starCount = Math.min(Math.floor(size * size / 900 * densityMultiplier), 12000);
+
+  context.save();
+  context.globalCompositeOperation = 'lighter';
 
   for (let i = 0; i < starCount; i++) {
-    // Create cluster-like distribution
-    let x, y;
+    const x = Math.random() * size;
+    const y = Math.random() * size;
 
-    // 70% of stars are in subtle clusters, 30% are more random
-    if (Math.random() < 0.7) {
-      // Create cluster centers scattered throughout the sky
-      const clusterCount = 20;
-      const clusterIndex = Math.floor(Math.random() * clusterCount);
-      const clusterCenterX = (clusterIndex % 5) * (size / 5) + (size / 10);
-      const clusterCenterY = Math.floor(clusterIndex / 5) * (size / 4) + (size / 8);
+    // Core radius: sub-pixel to 1.2px — keeps stars crisp, not blocky
+    const coreR = 0.25 + Math.random() * 0.95;
+    // Soft glow halo: 2–4× the core
+    const glowR = coreR * (2.2 + Math.random() * 1.8);
 
-      // Distribute stars around cluster centers with Gaussian-like distribution
-      const distance = Math.pow(Math.random(), 2) * size / 4;
-      const angle = Math.random() * Math.PI * 2;
-      x = clusterCenterX + Math.cos(angle) * distance;
-      y = clusterCenterY + Math.sin(angle) * distance;
-
-      // Ensure coordinates are within canvas
-      x = Math.max(0, Math.min(size - 1, x));
-      y = Math.max(0, Math.min(size - 1, y));
+    // Star colour — white-blue majority, warm minority, rare reds
+    const cv = Math.random();
+    let rc, gc, bc;
+    if (cv < 0.60) {
+      // Cool white-blue
+      rc = 210 + Math.floor(Math.random() * 40);
+      gc = 215 + Math.floor(Math.random() * 35);
+      bc = 255;
+    } else if (cv < 0.80) {
+      // Warm white / yellow dwarf
+      rc = 255;
+      gc = 240 + Math.floor(Math.random() * 15);
+      bc = 195 + Math.floor(Math.random() * 40);
+    } else if (cv < 0.93) {
+      // Pure white
+      rc = gc = bc = 230 + Math.floor(Math.random() * 25);
     } else {
-      // Random distribution for remaining stars
-      x = Math.random() * size;
-      y = Math.random() * size;
+      // Orange/red giant
+      rc = 255;
+      gc = 160 + Math.floor(Math.random() * 50);
+      bc = 100 + Math.floor(Math.random() * 60);
     }
 
-    // Slightly larger radius for better visibility
-    const radius = Math.random() * 0.6 + 0.2;
+    const brightness = 0.80 + Math.random() * 0.20; // full brightness — lighter compositing handles the blend
 
-    // Much brighter stars for visibility
-    const colorVariation = Math.random();
-    let starColor;
-
-    if (colorVariation < 0.75) {
-      // White to slightly blue stars (most common)
-      const blueIntensity = 220 + Math.floor(Math.random() * 35);
-      const brightness = Math.random() * 0.6 + 0.25;  // Extra bright
-      starColor = `rgba(220, 220, ${blueIntensity}, ${brightness})`;
-    } else if (colorVariation < 0.9) {
-      // Slightly yellow/orange stars
-      const redGreen = 220 + Math.floor(Math.random() * 35);
-      const brightness = Math.random() * 0.6 + 0.25;  // Extra bright
-      starColor = `rgba(${redGreen}, ${redGreen - 10}, 200, ${brightness})`;
-    } else {
-      // Slightly red stars (least common)
-      const brightness = Math.random() * 0.6 + 0.25;  // Extra bright
-      starColor = `rgba(220, 180, 180, ${brightness})`;
-    }
+    // Draw: soft glow halo → crisp bright core
+    const grad = context.createRadialGradient(x, y, 0, x, y, glowR);
+    grad.addColorStop(0,    `rgba(${rc},${gc},${bc},${brightness.toFixed(2)})`);
+    grad.addColorStop(0.20, `rgba(${rc},${gc},${bc},${(brightness * 0.70).toFixed(2)})`);
+    grad.addColorStop(0.55, `rgba(${rc},${gc},${bc},${(brightness * 0.22).toFixed(2)})`);
+    grad.addColorStop(1,    'rgba(0,0,0,0)');
 
     context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fillStyle = starColor;
+    context.arc(x, y, glowR, 0, Math.PI * 2);
+    context.fillStyle = grad;
     context.fill();
   }
+
+  context.restore();
 }
 
 // Add brighter mid-layer stars
@@ -6976,18 +6955,21 @@ function addBrighterForegroundStars(context, size) {
     const radius = Math.random() * 0.9 + 0.3;
 
     const colorVariation = Math.random();
-    let coreColor;
+    let coreColor, glowColor;
     if (colorVariation < 0.8) {
-      coreColor = 'rgba(235, 240, 255, 1.0)';
+      coreColor = 'rgba(245, 248, 255, 1.0)';
+      glowColor = 'rgba(210, 225, 255, 0.75)';
     } else {
-      coreColor = 'rgba(255, 235, 220, 1.0)';
+      coreColor = 'rgba(255, 240, 210, 1.0)';
+      glowColor = 'rgba(255, 220, 170, 0.65)';
     }
 
-    const glowRadius = radius * 2.2;
+    const glowRadius = radius * 3.5; // wider halo for more impact
     const gradient = context.createRadialGradient(x, y, 0, x, y, glowRadius);
-    gradient.addColorStop(0, coreColor);
-    gradient.addColorStop(0.4, 'rgba(235, 240, 255, 0.55)');
-    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    gradient.addColorStop(0,    coreColor);
+    gradient.addColorStop(0.25, glowColor);
+    gradient.addColorStop(0.65, 'rgba(180, 200, 255, 0.20)');
+    gradient.addColorStop(1,    'rgba(0, 0, 0, 0)');
 
     context.beginPath();
     context.arc(x, y, glowRadius, 0, Math.PI * 2);
@@ -7018,42 +7000,39 @@ function addBrighterMilkyWay(context, size) {
   context.translate(centerX, centerY);
   context.rotate(bandAngle);
 
-  // Soft base band (brighter Milky Way)
+  // Bright Milky Way core band
   const baseGradient = context.createLinearGradient(0, -bandThickness / 2, 0, bandThickness / 2);
-  baseGradient.addColorStop(0, 'rgba(8, 12, 30, 0)');
-  baseGradient.addColorStop(0.25, 'rgba(60, 80, 140, 0.28)');
-  baseGradient.addColorStop(0.5, 'rgba(110, 140, 210, 0.45)');
-  baseGradient.addColorStop(0.75, 'rgba(60, 80, 140, 0.28)');
-  baseGradient.addColorStop(1, 'rgba(8, 12, 30, 0)');
+  baseGradient.addColorStop(0,    'rgba(8, 12, 30, 0)');
+  baseGradient.addColorStop(0.20, 'rgba(90, 110, 190, 0.45)');
+  baseGradient.addColorStop(0.50, 'rgba(160, 185, 255, 0.72)');
+  baseGradient.addColorStop(0.80, 'rgba(90, 110, 190, 0.45)');
+  baseGradient.addColorStop(1,    'rgba(8, 12, 30, 0)');
 
   context.fillStyle = baseGradient;
   context.beginPath();
   context.ellipse(0, 0, bandLength / 2, bandThickness / 2, 0, 0, Math.PI * 2);
   context.fill();
 
-  // Dense fine speckle along the band for the "milky" look
-  const speckleCount = Math.floor(size * 0.22);
-  for (let i = 0; i < speckleCount; i++) {
-    const t = (Math.random() - 0.5) * bandLength;
-    const offset = (Math.random() - 0.5) * bandThickness * 0.9;
+  // Smooth nebula-like luminosity blobs along the band (replaces grainy speckle)
+  // Use large, very soft radial gradients — they blend into a silky "milky" wash
+  const blobCount = 60;
+  for (let i = 0; i < blobCount; i++) {
+    const t = (Math.random() - 0.5) * bandLength * 0.95;
+    const offset = (Math.random() - 0.5) * bandThickness * 0.55;
+    const blobR = size * (0.022 + Math.random() * 0.065); // large soft blobs
+    const a = 0.18 + Math.random() * 0.38; // bright enough to see clearly
+    const blue = 200 + Math.floor(Math.random() * 55);
+    const green = 190 + Math.floor(Math.random() * 45);
+    const red = 175 + Math.floor(Math.random() * 40);
 
-    const x = t;
-    const y = offset * (0.5 + Math.random() * 0.7); // slightly flattened
-
-    const r = Math.random() * 1.3 + 0.2;
-    const a = 0.05 + Math.random() * 0.35;
-
-    const b = 220 + Math.floor(Math.random() * 30);
-    const g = 210 + Math.floor(Math.random() * 25);
-    const rCol = 200 + Math.floor(Math.random() * 25);
-
-    const dotGrad = context.createRadialGradient(x, y, 0, x, y, r * 2.2);
-    dotGrad.addColorStop(0, `rgba(${rCol}, ${g}, ${b}, ${a})`);
-    dotGrad.addColorStop(1, 'rgba(0,0,0,0)');
+    const blob = context.createRadialGradient(t, offset, 0, t, offset, blobR);
+    blob.addColorStop(0,   `rgba(${red},${green},${blue},${a.toFixed(3)})`);
+    blob.addColorStop(0.45, `rgba(${red},${green},${blue},${(a * 0.4).toFixed(3)})`);
+    blob.addColorStop(1,   'rgba(0,0,0,0)');
 
     context.beginPath();
-    context.arc(x, y, r * 2.2, 0, Math.PI * 2);
-    context.fillStyle = dotGrad;
+    context.arc(t, offset, blobR, 0, Math.PI * 2);
+    context.fillStyle = blob;
     context.fill();
   }
 
@@ -7103,20 +7082,7 @@ function addAtmosphericGlow(context, size) {
   context.fillRect(0, size * 0.8, size, size * 0.22);
 
   // Very light atmospheric haze, greatly reduced to avoid visible layers
-  context.globalCompositeOperation = 'screen';
-  for (let i = 0; i < 80; i++) {
-    const x = Math.random() * size;
-    const y = size * 0.84 + Math.random() * (size * 0.16);
-    const radius = Math.random() * 1.8 + 0.8;
-    const opacity = Math.random() * 0.06;
-
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fillStyle = `rgba(170, 190, 255, ${opacity})`;
-    context.fill();
-  }
-
-  // Removed strong light rays to keep the horizon smooth and shadow-free
+  // Horizon haze replaced by smooth gradient only — no hard-edged arc speckles
 
   // Reset blend mode
   context.globalCompositeOperation = 'source-over';
