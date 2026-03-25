@@ -81,7 +81,7 @@ let _cachedPerformanceSettings = null;
 
 // Day/night cycle variables - declared early to avoid temporal dead zone issues
 let lastTransitionUpdate = 0;
-let currentTimeOfDay = 0.5; // 0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk, 1 = midnight
+let currentTimeOfDay = 0.0; // 0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk, 1 = midnight
 let dayNightCycleSpeed = 0.00001; // Speed of day/night cycle (smaller = slower)
 let isManualTransition = false;
 let manualTransitionTarget = null;
@@ -307,30 +307,20 @@ document.body.appendChild(renderer.domElement);
 renderer.setClearColor(0x000000, 1);
 scene.background = new THREE.Color(0x000000);
 
-// Defer night skybox creation - game starts in day mode, so create it in background
+// Night skybox — create immediately since the game starts at night
 let spaceSkybox = null;
 let _spaceSkyboxCreating = false;
 
 function ensureSpaceSkybox() {
   if (spaceSkybox || _spaceSkyboxCreating) return;
   _spaceSkyboxCreating = true;
-  // Create skybox asynchronously in the next idle period
-  if (typeof requestIdleCallback !== 'undefined') {
-    requestIdleCallback(() => {
-      spaceSkybox = createSpaceSkybox();
-      scene.add(spaceSkybox);
-      console.log('Skybox created in background (idle callback)');
-    }, { timeout: 5000 });
-  } else {
-    setTimeout(() => {
-      spaceSkybox = createSpaceSkybox();
-      console.log('Skybox created in background (setTimeout)');
-    }, 2000);
-  }
+  spaceSkybox = createSpaceSkybox();
+  scene.add(spaceSkybox);
+  console.log('Skybox created (night start)');
 }
 
-// Start creating skybox in background after a short delay (not blocking initial load)
-setTimeout(ensureSpaceSkybox, 100);
+// Create skybox right away — night mode needs it visible from frame 1
+ensureSpaceSkybox();
 
 // Fog fades distant terrain to black, matching the void behind everything
 const fogColor = 0x000000;
@@ -7539,7 +7529,7 @@ function loadNonEssentialComponents() {
 }
 
 // Add a day/night toggle and cycle
-let isDaytime = true; // Ensure this is true by default
+let isDaytime = false; // Start at night so the starry sky is visible
 console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
 
 // Automatically initialize core scene elements once the game script
