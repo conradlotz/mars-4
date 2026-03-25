@@ -5253,8 +5253,9 @@ function animate(time) {
 
   if (Math.abs(velocity) > 0.0005) {
     isMoving = true;
-    const moveX = Math.sin(roverYaw) * velocity;
-    const moveZ = Math.cos(roverYaw) * velocity;
+    // Forward is negative Z in Three.js — negate velocity to match original convention
+    const moveX = Math.sin(roverYaw) * (-velocity);
+    const moveZ = Math.cos(roverYaw) * (-velocity);
 
     rover.position.x += moveX;
     rover.position.z += moveZ;
@@ -6090,17 +6091,17 @@ function createRealisticMarsTerrain() {
   let material;
   
   if (terrainPerfSettings.isMobile) {
-    // Mobile: basic material, no textures
+    // Mobile: basic material — use the classic warm Mars red
     material = new THREE.MeshBasicMaterial({
-      color: 0xaa6633,
+      color: 0xcc5522,
       side: THREE.DoubleSide,
       transparent: false,
       fog: true
     });
   } else {
-    // Desktop: PBR Standard material for realistic surface look
+    // Desktop: PBR Standard material — white base so vertex colors show at full saturation
     material = new THREE.MeshStandardMaterial({
-      color: 0xb56a38,   // Warm iron-oxide Mars red
+      color: 0xffffff,   // White base — vertex colors are the sole tint
       roughness: 0.92,   // Very rough dusty surface
       metalness: 0.04,
       side: THREE.DoubleSide,
@@ -6121,10 +6122,10 @@ function createRealisticMarsTerrain() {
     const px = positionArray[i * 3];
     const pz = positionArray[i * 3 + 2];
 
-    // Base: warm Mars iron-oxide red (RGB ≈ 0.71, 0.41, 0.18)
-    let r = 0.71;
-    let g = 0.41;
-    let b = 0.18;
+    // Base: vivid Mars iron-oxide red — now the sole tint (material is white)
+    let r = 0.78;
+    let g = 0.36;
+    let b = 0.14;
 
     // High terrain → pale dusty pink (wind-eroded highlands)
     if (elevation > 8) {
