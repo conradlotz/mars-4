@@ -6498,12 +6498,12 @@ function createTwinklingStars() {
       colors[i * 3 + 2] = 1.0;
     }
 
-    // Star size: mostly very small; only a few larger highlights
+    // Star sizes — boosted across all tiers for a bright, spangled sky
     const sizeRoll = Math.random();
-    if (sizeRoll < 0.7) sizes[i] = 1.2 + Math.random() * 1.6;       // Tiny
-    else if (sizeRoll < 0.93) sizes[i] = 2.4 + Math.random() * 1.8; // Small
-    else if (sizeRoll < 0.985) sizes[i] = 4.0 + Math.random() * 2.0; // Medium
-    else sizes[i] = 6.0 + Math.random() * 3.0;                      // Rare bright
+    if (sizeRoll < 0.60) sizes[i] = 2.5 + Math.random() * 2.5;       // Common dim
+    else if (sizeRoll < 0.88) sizes[i] = 4.5 + Math.random() * 3.0;  // Medium
+    else if (sizeRoll < 0.97) sizes[i] = 7.0 + Math.random() * 4.0;  // Bright
+    else sizes[i] = 11.0 + Math.random() * 6.0;                       // Rare brilliant
 
     phases[i] = Math.random() * Math.PI * 2;
     speeds[i] = 0.3 + Math.random() * 2.5; // Various twinkle speeds
@@ -6518,7 +6518,7 @@ function createTwinklingStars() {
   const starTexture = createStarTexture();
 
   const material = new THREE.PointsMaterial({
-    size: 5, // Slightly larger for better visibility
+    size: 10, // Larger base size so stars are clearly visible
     map: starTexture,
     vertexColors: true,
     transparent: true,
@@ -6526,7 +6526,7 @@ function createTwinklingStars() {
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     sizeAttenuation: true,
-    alphaTest: 0.01 // Prevent rendering fully transparent pixels
+    alphaTest: 0.005
   });
 
   const points = new THREE.Points(geometry, material);
@@ -6785,18 +6785,17 @@ function createSphericalSkyTexture(size = null) {
   canvas.height = size;
   const context = canvas.getContext('2d');
 
-  // Fill with pure black to match the scene background and fog
-  context.fillStyle = '#000000';
+  // Deep midnight blue base — gives the sky luminous depth instead of void black
+  context.fillStyle = '#07091a';
   context.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Subtle vertical-only color wash (top-to-bottom = latitude only, no longitude
-  // variation, so the left/right wrap seam is invisible)
+  // Strong vertical blue-indigo wash — makes the whole sky feel bright and open
   context.globalCompositeOperation = 'screen';
   const colorWash = context.createLinearGradient(0, 0, 0, size);
-  colorWash.addColorStop(0, 'rgba(15,12,40,0.10)');
-  colorWash.addColorStop(0.35, 'rgba(30,40,100,0.14)');
-  colorWash.addColorStop(0.65, 'rgba(50,70,160,0.16)');
-  colorWash.addColorStop(1, 'rgba(25,25,75,0.08)');
+  colorWash.addColorStop(0,    'rgba(30,25,90,0.55)');
+  colorWash.addColorStop(0.30, 'rgba(55,75,180,0.48)');
+  colorWash.addColorStop(0.60, 'rgba(80,105,220,0.40)');
+  colorWash.addColorStop(1,    'rgba(40,50,130,0.30)');
   context.fillStyle = colorWash;
   context.fillRect(0, 0, size, size);
 
@@ -6921,14 +6920,14 @@ function addBrighterBackgroundStars(context, size) {
       bc = 100 + Math.floor(Math.random() * 60);
     }
 
-    const brightness = 0.55 + Math.random() * 0.45;
+    const brightness = 0.80 + Math.random() * 0.20; // full brightness — lighter compositing handles the blend
 
     // Draw: soft glow halo → crisp bright core
     const grad = context.createRadialGradient(x, y, 0, x, y, glowR);
-    grad.addColorStop(0,   `rgba(${rc},${gc},${bc},${brightness.toFixed(2)})`);
-    grad.addColorStop(0.25, `rgba(${rc},${gc},${bc},${(brightness * 0.6).toFixed(2)})`);
-    grad.addColorStop(0.6,  `rgba(${rc},${gc},${bc},${(brightness * 0.15).toFixed(2)})`);
-    grad.addColorStop(1,   'rgba(0,0,0,0)');
+    grad.addColorStop(0,    `rgba(${rc},${gc},${bc},${brightness.toFixed(2)})`);
+    grad.addColorStop(0.20, `rgba(${rc},${gc},${bc},${(brightness * 0.70).toFixed(2)})`);
+    grad.addColorStop(0.55, `rgba(${rc},${gc},${bc},${(brightness * 0.22).toFixed(2)})`);
+    grad.addColorStop(1,    'rgba(0,0,0,0)');
 
     context.beginPath();
     context.arc(x, y, glowR, 0, Math.PI * 2);
@@ -6956,18 +6955,21 @@ function addBrighterForegroundStars(context, size) {
     const radius = Math.random() * 0.9 + 0.3;
 
     const colorVariation = Math.random();
-    let coreColor;
+    let coreColor, glowColor;
     if (colorVariation < 0.8) {
-      coreColor = 'rgba(235, 240, 255, 1.0)';
+      coreColor = 'rgba(245, 248, 255, 1.0)';
+      glowColor = 'rgba(210, 225, 255, 0.75)';
     } else {
-      coreColor = 'rgba(255, 235, 220, 1.0)';
+      coreColor = 'rgba(255, 240, 210, 1.0)';
+      glowColor = 'rgba(255, 220, 170, 0.65)';
     }
 
-    const glowRadius = radius * 2.2;
+    const glowRadius = radius * 3.5; // wider halo for more impact
     const gradient = context.createRadialGradient(x, y, 0, x, y, glowRadius);
-    gradient.addColorStop(0, coreColor);
-    gradient.addColorStop(0.4, 'rgba(235, 240, 255, 0.55)');
-    gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    gradient.addColorStop(0,    coreColor);
+    gradient.addColorStop(0.25, glowColor);
+    gradient.addColorStop(0.65, 'rgba(180, 200, 255, 0.20)');
+    gradient.addColorStop(1,    'rgba(0, 0, 0, 0)');
 
     context.beginPath();
     context.arc(x, y, glowRadius, 0, Math.PI * 2);
@@ -6998,13 +7000,13 @@ function addBrighterMilkyWay(context, size) {
   context.translate(centerX, centerY);
   context.rotate(bandAngle);
 
-  // Soft base band (brighter Milky Way)
+  // Bright Milky Way core band
   const baseGradient = context.createLinearGradient(0, -bandThickness / 2, 0, bandThickness / 2);
-  baseGradient.addColorStop(0, 'rgba(8, 12, 30, 0)');
-  baseGradient.addColorStop(0.25, 'rgba(60, 80, 140, 0.28)');
-  baseGradient.addColorStop(0.5, 'rgba(110, 140, 210, 0.45)');
-  baseGradient.addColorStop(0.75, 'rgba(60, 80, 140, 0.28)');
-  baseGradient.addColorStop(1, 'rgba(8, 12, 30, 0)');
+  baseGradient.addColorStop(0,    'rgba(8, 12, 30, 0)');
+  baseGradient.addColorStop(0.20, 'rgba(90, 110, 190, 0.45)');
+  baseGradient.addColorStop(0.50, 'rgba(160, 185, 255, 0.72)');
+  baseGradient.addColorStop(0.80, 'rgba(90, 110, 190, 0.45)');
+  baseGradient.addColorStop(1,    'rgba(8, 12, 30, 0)');
 
   context.fillStyle = baseGradient;
   context.beginPath();
@@ -7017,8 +7019,8 @@ function addBrighterMilkyWay(context, size) {
   for (let i = 0; i < blobCount; i++) {
     const t = (Math.random() - 0.5) * bandLength * 0.95;
     const offset = (Math.random() - 0.5) * bandThickness * 0.55;
-    const blobR = size * (0.018 + Math.random() * 0.055); // large soft blobs
-    const a = 0.04 + Math.random() * 0.18;
+    const blobR = size * (0.022 + Math.random() * 0.065); // large soft blobs
+    const a = 0.18 + Math.random() * 0.38; // bright enough to see clearly
     const blue = 200 + Math.floor(Math.random() * 55);
     const green = 190 + Math.floor(Math.random() * 45);
     const red = 175 + Math.floor(Math.random() * 40);
