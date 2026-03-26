@@ -946,16 +946,17 @@ const createDustParticles = () => {
 
 const dustParticles = createDustParticles();
 
-// Night lighting — cool blue-grey moonlight from Phobos, no direct sun
-const ambientIntensity = perfSettings.samsungOptimized ? 0.22 * perfSettings.ambientLightBoost :
-                         perfSettings.isMobile ? 0.22 : 0.20;
-const ambientColor = perfSettings.samsungOptimized ? 0x3355aa : 0x4466bb;
+// Night lighting — bright enough to play, cool moonlit tone
+const ambientIntensity = perfSettings.samsungOptimized ? 0.55 * perfSettings.ambientLightBoost :
+                         perfSettings.isMobile ? 0.55 : 0.50;
+const ambientColor = perfSettings.samsungOptimized ? 0x8899cc : 0x99aadd;
 const ambientLight = new THREE.AmbientLight(ambientColor, ambientIntensity);
 scene.add(ambientLight);
 
-// Directional light (sun) — off at night; kept at near-zero so toggle works later
-const sunIntensity = 0.0;
-const sunColor = 0xffc080; // warm peach-orange (inactive at night)
+// Dim directional moonlight — gives terrain shape and shadow depth at night
+const sunIntensity = perfSettings.samsungOptimized ? 0.3 * perfSettings.materialBrightness :
+                     perfSettings.isMobile ? 0.25 : 0.35;
+const sunColor = 0xaabbdd; // cool blue-white moonlight
 const sunLight = new THREE.DirectionalLight(sunColor, sunIntensity);
 // Low-angle Mars sun — long shadows, dramatic look
 sunLight.position.set(-120, 55, 80);
@@ -974,19 +975,19 @@ if (!perfSettings.isMobile) {
 }
 scene.add(sunLight);
 
-// Secondary fill light — disabled at night (no warm sky bounce without a sun)
-// if (!perfSettings.isMobile) {
-//   const fillLight = new THREE.DirectionalLight(0xff8866, 0.25);
-//   fillLight.position.set(80, 40, -60);
-//   scene.add(fillLight);
-// }
+// Secondary fill light — dim cool fill to lift shadow areas at night
+if (!perfSettings.isMobile) {
+  const fillLight = new THREE.DirectionalLight(0x334466, 0.15);
+  fillLight.position.set(80, 40, -60);
+  scene.add(fillLight);
+}
 
 // Hemisphere light — sky gradient from hazy orange to dark rust ground
-// Night hemisphere — dark starry sky above, near-black Mars ground below
-const hemisphereIntensity = perfSettings.samsungOptimized ? 0.12 * perfSettings.ambientLightBoost :
-                             perfSettings.isMobile ? 0.10 : 0.10;
-const hemisphereSkyColor = 0x0d1a30;   // deep midnight blue
-const hemisphereGroundColor = 0x100806; // near-black with faint rust tint
+// Night hemisphere — cool night sky above, dark rust ground below
+const hemisphereIntensity = perfSettings.samsungOptimized ? 0.35 * perfSettings.ambientLightBoost :
+                             perfSettings.isMobile ? 0.30 : 0.35;
+const hemisphereSkyColor = 0x1a2a4a;   // deep midnight blue
+const hemisphereGroundColor = 0x1a0a04; // very dark rust
 const hemisphereLight = new THREE.HemisphereLight(hemisphereSkyColor, hemisphereGroundColor, hemisphereIntensity);
 scene.add(hemisphereLight);
 
