@@ -946,18 +946,16 @@ const createDustParticles = () => {
 
 const dustParticles = createDustParticles();
 
-// Enhanced Lighting for Mars
-// Warm ambient light — Mars atmosphere scatters reddish light everywhere
-const ambientIntensity = perfSettings.samsungOptimized ? 0.55 * perfSettings.ambientLightBoost :
-                         perfSettings.isMobile ? 0.55 : 0.45;
-const ambientColor = perfSettings.samsungOptimized ? 0xff9977 : 0xffb088;
+// Night lighting — cool blue-grey moonlight from Phobos, no direct sun
+const ambientIntensity = perfSettings.samsungOptimized ? 0.22 * perfSettings.ambientLightBoost :
+                         perfSettings.isMobile ? 0.22 : 0.20;
+const ambientColor = perfSettings.samsungOptimized ? 0x3355aa : 0x4466bb;
 const ambientLight = new THREE.AmbientLight(ambientColor, ambientIntensity);
 scene.add(ambientLight);
 
-// Directional light (sun) — low horizon angle for long dramatic shadows
-const sunIntensity = perfSettings.samsungOptimized ? 1.2 * perfSettings.materialBrightness :
-                     perfSettings.isMobile ? 1.0 : 1.4;
-const sunColor = perfSettings.samsungOptimized ? 0xff9955 : 0xffc080; // warm peach-orange sunlight
+// Directional light (sun) — off at night; kept at near-zero so toggle works later
+const sunIntensity = 0.0;
+const sunColor = 0xffc080; // warm peach-orange (inactive at night)
 const sunLight = new THREE.DirectionalLight(sunColor, sunIntensity);
 // Low-angle Mars sun — long shadows, dramatic look
 sunLight.position.set(-120, 55, 80);
@@ -976,18 +974,19 @@ if (!perfSettings.isMobile) {
 }
 scene.add(sunLight);
 
-// Secondary fill light — soft pink sky bounce from the opposite direction
-if (!perfSettings.isMobile) {
-  const fillLight = new THREE.DirectionalLight(0xff8866, 0.25);
-  fillLight.position.set(80, 40, -60);
-  scene.add(fillLight);
-}
+// Secondary fill light — disabled at night (no warm sky bounce without a sun)
+// if (!perfSettings.isMobile) {
+//   const fillLight = new THREE.DirectionalLight(0xff8866, 0.25);
+//   fillLight.position.set(80, 40, -60);
+//   scene.add(fillLight);
+// }
 
 // Hemisphere light — sky gradient from hazy orange to dark rust ground
-const hemisphereIntensity = perfSettings.samsungOptimized ? 0.45 * perfSettings.ambientLightBoost :
-                             perfSettings.isMobile ? 0.4 : 0.5;
-const hemisphereSkyColor = perfSettings.samsungOptimized ? 0xff8855 : 0xffaa66;  // hazy orange sky
-const hemisphereGroundColor = perfSettings.samsungOptimized ? 0xbb5511 : 0x7a2800; // dark rust ground
+// Night hemisphere — dark starry sky above, near-black Mars ground below
+const hemisphereIntensity = perfSettings.samsungOptimized ? 0.12 * perfSettings.ambientLightBoost :
+                             perfSettings.isMobile ? 0.10 : 0.10;
+const hemisphereSkyColor = 0x0d1a30;   // deep midnight blue
+const hemisphereGroundColor = 0x100806; // near-black with faint rust tint
 const hemisphereLight = new THREE.HemisphereLight(hemisphereSkyColor, hemisphereGroundColor, hemisphereIntensity);
 scene.add(hemisphereLight);
 
@@ -5503,7 +5502,7 @@ function positionRoverOnTerrain() {
 
   if (closestIntersection) {
     // Position the rover at the intersection point plus a smaller offset to be closer to ground
-    rover.position.y = closestIntersection.point.y + 1.5;
+    rover.position.y = closestIntersection.point.y + 0.3;
 
     // Only calculate terrain alignment if the slope is significant
     const normal = closestIntersection.face.normal.clone();
@@ -5539,7 +5538,7 @@ function positionRoverOnTerrain() {
     }
   } else {
     // Fallback if no intersection found
-    rover.position.y = 1.5;
+    rover.position.y = 0.3;
 
     // Just apply the yaw rotation
     rover.rotation.set(0, 0, 0);
