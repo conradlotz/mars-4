@@ -86,6 +86,7 @@ let dayNightCycleSpeed = 0.00001; // Speed of day/night cycle (smaller = slower)
 let isManualTransition = false;
 let manualTransitionTarget = null;
 let manualTransitionSpeed = 0.005;
+let isDaytime = false; // Start at night so the starry sky is visible
 
 function getPerformanceSettings() {
   // Return cached settings if available (settings don't change during session)
@@ -166,10 +167,10 @@ const pixelRatio = perfSettings.isMobile ? 1 :
                    Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1.5);
 renderer.setPixelRatio(pixelRatio);
 
-// Desktop: enable ACES filmic tone mapping and sRGB output for cinematic look
+// Desktop: Reinhard tone mapping works well for night scenes (ACES crushes cool blue to black)
 if (!perfSettings.isMobile) {
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.2;
+  renderer.toneMapping = THREE.ReinhardToneMapping;
+  renderer.toneMappingExposure = 2.5;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap; // soft shadows
@@ -946,16 +947,17 @@ const createDustParticles = () => {
 
 const dustParticles = createDustParticles();
 
-// Night lighting — cool blue-grey moonlight from Phobos, no direct sun
-const ambientIntensity = perfSettings.samsungOptimized ? 0.22 * perfSettings.ambientLightBoost :
-                         perfSettings.isMobile ? 0.22 : 0.20;
-const ambientColor = perfSettings.samsungOptimized ? 0x3355aa : 0x4466bb;
+// Night lighting — bright enough to play, cool moonlit tone
+const ambientIntensity = perfSettings.samsungOptimized ? 0.90 * perfSettings.ambientLightBoost :
+                         perfSettings.isMobile ? 0.85 : 0.90;
+const ambientColor = perfSettings.samsungOptimized ? 0xaabbdd : 0xbbccee;
 const ambientLight = new THREE.AmbientLight(ambientColor, ambientIntensity);
 scene.add(ambientLight);
 
-// Directional light (sun) — off at night; kept at near-zero so toggle works later
-const sunIntensity = 0.0;
-const sunColor = 0xffc080; // warm peach-orange (inactive at night)
+// Directional moonlight — gives terrain shape and shadow depth at night
+const sunIntensity = perfSettings.samsungOptimized ? 0.6 * perfSettings.materialBrightness :
+                     perfSettings.isMobile ? 0.50 : 0.65;
+const sunColor = 0xccddf0; // cool blue-white moonlight
 const sunLight = new THREE.DirectionalLight(sunColor, sunIntensity);
 // Low-angle Mars sun — long shadows, dramatic look
 sunLight.position.set(-120, 55, 80);
@@ -974,19 +976,19 @@ if (!perfSettings.isMobile) {
 }
 scene.add(sunLight);
 
-// Secondary fill light — disabled at night (no warm sky bounce without a sun)
-// if (!perfSettings.isMobile) {
-//   const fillLight = new THREE.DirectionalLight(0xff8866, 0.25);
-//   fillLight.position.set(80, 40, -60);
-//   scene.add(fillLight);
-// }
+// Secondary fill light — cool fill to lift shadow areas at night
+if (!perfSettings.isMobile) {
+  const fillLight = new THREE.DirectionalLight(0x6688aa, 0.35);
+  fillLight.position.set(80, 40, -60);
+  scene.add(fillLight);
+}
 
 // Hemisphere light — sky gradient from hazy orange to dark rust ground
-// Night hemisphere — dark starry sky above, near-black Mars ground below
-const hemisphereIntensity = perfSettings.samsungOptimized ? 0.12 * perfSettings.ambientLightBoost :
-                             perfSettings.isMobile ? 0.10 : 0.10;
-const hemisphereSkyColor = 0x0d1a30;   // deep midnight blue
-const hemisphereGroundColor = 0x100806; // near-black with faint rust tint
+// Night hemisphere — cool night sky above, dark rust ground below
+const hemisphereIntensity = perfSettings.samsungOptimized ? 0.55 * perfSettings.ambientLightBoost :
+                             perfSettings.isMobile ? 0.50 : 0.60;
+const hemisphereSkyColor = 0x2a3a5a;   // deep midnight blue
+const hemisphereGroundColor = 0x3a1a08; // dark rust ground
 const hemisphereLight = new THREE.HemisphereLight(hemisphereSkyColor, hemisphereGroundColor, hemisphereIntensity);
 scene.add(hemisphereLight);
 
@@ -7528,7 +7530,6 @@ function loadNonEssentialComponents() {
 }
 
 // Add a day/night toggle and cycle
-let isDaytime = false; // Start at night so the starry sky is visible
 console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
 
 // Automatically initialize core scene elements once the game script
