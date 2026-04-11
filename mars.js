@@ -166,10 +166,10 @@ const pixelRatio = perfSettings.isMobile ? 1 :
                    Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1.5);
 renderer.setPixelRatio(pixelRatio);
 
-// Desktop: enable ACES filmic tone mapping and sRGB output for cinematic look
+// Desktop: Reinhard tone mapping works well for night scenes (ACES crushes cool blue to black)
 if (!perfSettings.isMobile) {
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.2;
+  renderer.toneMapping = THREE.ReinhardToneMapping;
+  renderer.toneMappingExposure = 2.5;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap; // soft shadows
@@ -947,16 +947,16 @@ const createDustParticles = () => {
 const dustParticles = createDustParticles();
 
 // Night lighting — bright enough to play, cool moonlit tone
-const ambientIntensity = perfSettings.samsungOptimized ? 0.55 * perfSettings.ambientLightBoost :
-                         perfSettings.isMobile ? 0.55 : 0.50;
-const ambientColor = perfSettings.samsungOptimized ? 0x8899cc : 0x99aadd;
+const ambientIntensity = perfSettings.samsungOptimized ? 0.90 * perfSettings.ambientLightBoost :
+                         perfSettings.isMobile ? 0.85 : 0.90;
+const ambientColor = perfSettings.samsungOptimized ? 0xaabbdd : 0xbbccee;
 const ambientLight = new THREE.AmbientLight(ambientColor, ambientIntensity);
 scene.add(ambientLight);
 
-// Dim directional moonlight — gives terrain shape and shadow depth at night
-const sunIntensity = perfSettings.samsungOptimized ? 0.3 * perfSettings.materialBrightness :
-                     perfSettings.isMobile ? 0.25 : 0.35;
-const sunColor = 0xaabbdd; // cool blue-white moonlight
+// Directional moonlight — gives terrain shape and shadow depth at night
+const sunIntensity = perfSettings.samsungOptimized ? 0.6 * perfSettings.materialBrightness :
+                     perfSettings.isMobile ? 0.50 : 0.65;
+const sunColor = 0xccddf0; // cool blue-white moonlight
 const sunLight = new THREE.DirectionalLight(sunColor, sunIntensity);
 // Low-angle Mars sun — long shadows, dramatic look
 sunLight.position.set(-120, 55, 80);
@@ -975,19 +975,19 @@ if (!perfSettings.isMobile) {
 }
 scene.add(sunLight);
 
-// Secondary fill light — dim cool fill to lift shadow areas at night
+// Secondary fill light — cool fill to lift shadow areas at night
 if (!perfSettings.isMobile) {
-  const fillLight = new THREE.DirectionalLight(0x334466, 0.15);
+  const fillLight = new THREE.DirectionalLight(0x6688aa, 0.35);
   fillLight.position.set(80, 40, -60);
   scene.add(fillLight);
 }
 
 // Hemisphere light — sky gradient from hazy orange to dark rust ground
 // Night hemisphere — cool night sky above, dark rust ground below
-const hemisphereIntensity = perfSettings.samsungOptimized ? 0.35 * perfSettings.ambientLightBoost :
-                             perfSettings.isMobile ? 0.30 : 0.35;
-const hemisphereSkyColor = 0x1a2a4a;   // deep midnight blue
-const hemisphereGroundColor = 0x1a0a04; // very dark rust
+const hemisphereIntensity = perfSettings.samsungOptimized ? 0.55 * perfSettings.ambientLightBoost :
+                             perfSettings.isMobile ? 0.50 : 0.60;
+const hemisphereSkyColor = 0x2a3a5a;   // deep midnight blue
+const hemisphereGroundColor = 0x3a1a08; // dark rust ground
 const hemisphereLight = new THREE.HemisphereLight(hemisphereSkyColor, hemisphereGroundColor, hemisphereIntensity);
 scene.add(hemisphereLight);
 
