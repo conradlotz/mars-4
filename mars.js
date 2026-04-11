@@ -86,6 +86,7 @@ let dayNightCycleSpeed = 0.00001; // Speed of day/night cycle (smaller = slower)
 let isManualTransition = false;
 let manualTransitionTarget = null;
 let manualTransitionSpeed = 0.005;
+let isDaytime = false; // Start at night so the starry sky is visible
 
 function getPerformanceSettings() {
   // Return cached settings if available (settings don't change during session)
@@ -7529,7 +7530,6 @@ function loadNonEssentialComponents() {
 }
 
 // Add a day/night toggle and cycle
-let isDaytime = false; // Start at night so the starry sky is visible
 console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
 
 // Automatically initialize core scene elements once the game script
