@@ -86,7 +86,7 @@ let dayNightCycleSpeed = 0.00001; // Speed of day/night cycle (smaller = slower)
 let isManualTransition = false;
 let manualTransitionTarget = null;
 let manualTransitionSpeed = 0.005;
-let isDaytime = false; // Start at night so the starry sky is visible
+var isDaytime = false; // Start at night so the starry sky is visible (var avoids TDZ)
 
 function getPerformanceSettings() {
   // Return cached settings if available (settings don't change during session)
