@@ -940,8 +940,8 @@ const createDustParticles = () => {
 const dustParticles = createDustParticles();
 
 // Night lighting — cool blue-grey moonlight from Phobos, no direct sun
-const ambientIntensity = perfSettings.samsungOptimized ? 0.22 * perfSettings.ambientLightBoost :
-                         perfSettings.isMobile ? 0.22 : 0.20;
+const ambientIntensity = perfSettings.samsungOptimized ? 0.14 * perfSettings.ambientLightBoost :
+                         perfSettings.isMobile ? 0.14 : 0.10;
 const ambientColor = perfSettings.samsungOptimized ? 0x3355aa : 0x4466bb;
 const ambientLight = new THREE.AmbientLight(ambientColor, ambientIntensity);
 scene.add(ambientLight);
@@ -6775,13 +6775,12 @@ function createSphericalSkyTexture(size = null) {
   context.fillStyle = '#07091a';
   context.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Strong vertical blue-indigo wash — makes the whole sky feel bright and open
+  // Very faint tint — deep space barely has any blue cast
   context.globalCompositeOperation = 'screen';
   const colorWash = context.createLinearGradient(0, 0, 0, size);
-  colorWash.addColorStop(0,    'rgba(30,25,90,0.30)');
-  colorWash.addColorStop(0.30, 'rgba(55,75,180,0.22)');
-  colorWash.addColorStop(0.60, 'rgba(80,105,220,0.16)');
-  colorWash.addColorStop(1,    'rgba(40,50,130,0.12)');
+  colorWash.addColorStop(0,    'rgba(10,8,30,0.06)');
+  colorWash.addColorStop(0.50, 'rgba(15,20,60,0.04)');
+  colorWash.addColorStop(1,    'rgba(10,12,35,0.03)');
   context.fillStyle = colorWash;
   context.fillRect(0, 0, size, size);
 
@@ -6791,7 +6790,7 @@ function createSphericalSkyTexture(size = null) {
   context.globalCompositeOperation = 'screen';
   const horizonBrighten = context.createLinearGradient(0, size * 0.6, 0, size * 0.9);
   horizonBrighten.addColorStop(0, 'rgba(40, 50, 110, 0.0)');
-  horizonBrighten.addColorStop(0.5, 'rgba(80, 90, 170, 0.08)');
+  horizonBrighten.addColorStop(0.5, 'rgba(80, 90, 170, 0.03)');
   horizonBrighten.addColorStop(1, 'rgba(40, 50, 110, 0.05)');
   context.fillStyle = horizonBrighten;
   context.fillRect(0, size * 0.6, size, size * 0.3);
@@ -6906,7 +6905,7 @@ function addBrighterBackgroundStars(context, size) {
       bc = 100 + Math.floor(Math.random() * 60);
     }
 
-    const brightness = 0.80 + Math.random() * 0.20; // full brightness — lighter compositing handles the blend
+    const brightness = 0.35 + Math.random() * 0.40; // dim background stars, lighter blend keeps sky dark
 
     // Draw: soft glow halo → crisp bright core
     const grad = context.createRadialGradient(x, y, 0, x, y, glowR);
@@ -6989,9 +6988,9 @@ function addBrighterMilkyWay(context, size) {
   // Bright Milky Way core band
   const baseGradient = context.createLinearGradient(0, -bandThickness / 2, 0, bandThickness / 2);
   baseGradient.addColorStop(0,    'rgba(8, 12, 30, 0)');
-  baseGradient.addColorStop(0.20, 'rgba(90, 110, 190, 0.45)');
-  baseGradient.addColorStop(0.50, 'rgba(160, 185, 255, 0.72)');
-  baseGradient.addColorStop(0.80, 'rgba(90, 110, 190, 0.45)');
+  baseGradient.addColorStop(0.20, 'rgba(90, 110, 190, 0.16)');
+  baseGradient.addColorStop(0.50, 'rgba(160, 185, 255, 0.30)');
+  baseGradient.addColorStop(0.80, 'rgba(90, 110, 190, 0.16)');
   baseGradient.addColorStop(1,    'rgba(8, 12, 30, 0)');
 
   context.fillStyle = baseGradient;
@@ -7006,7 +7005,7 @@ function addBrighterMilkyWay(context, size) {
     const t = (Math.random() - 0.5) * bandLength * 0.95;
     const offset = (Math.random() - 0.5) * bandThickness * 0.55;
     const blobR = size * (0.022 + Math.random() * 0.065); // large soft blobs
-    const a = 0.18 + Math.random() * 0.38; // bright enough to see clearly
+    const a = 0.06 + Math.random() * 0.14; // subtle nebula blobs
     const blue = 200 + Math.floor(Math.random() * 55);
     const green = 190 + Math.floor(Math.random() * 45);
     const red = 175 + Math.floor(Math.random() * 40);
@@ -7175,9 +7174,9 @@ function addMoonToCanvas(context, x, y, radius) {
 
 // Add a large, high-definition planet to the sky
 function addLargePlanetToCanvas(context, size) {
-  // Position the planet near the central upper sky so it's easy to see
-  const x = size * 0.5;
-  const y = size * 0.4;
+  // Position in upper-right region — not centered, so it doesn't look like a sun
+  const x = size * 0.74;
+  const y = size * 0.18;
   const radius = size * 0.034;
 
   context.save();
