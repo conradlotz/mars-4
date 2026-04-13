@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Conrad Lotz — Drive on Mars</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, sans-serif;
+      background: #000;
+      color: #fff;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Starfield canvas background */
+    #starfield {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+
+    /* Subtle Mars-dust gradient overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse at 50% 100%, rgba(45, 24, 16, 0.7) 0%, transparent 70%);
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    main {
+      position: relative;
+      z-index: 2;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 60px 24px 80px;
+    }
+
+    /* Back link */
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: rgba(255, 255, 255, 0.5);
+      text-decoration: none;
+      font-size: 13px;
+      margin-bottom: 48px;
+      transition: color 0.2s;
+      letter-spacing: 0.04em;
+    }
+    .back-link:hover { color: #ff6b35; }
+    .back-link::before { content: '←'; }
+
+    /* Hero */
+    .hero {
+      display: flex;
+      align-items: center;
+      gap: 32px;
+      margin-bottom: 56px;
+      flex-wrap: wrap;
+    }
+
+    .avatar {
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #ff6b35 0%, #2d1810 100%);
+      border: 3px solid rgba(255, 107, 53, 0.5);
+      box-shadow: 0 0 24px rgba(255, 107, 53, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+      flex-shrink: 0;
+    }
+
+    .hero-text h1 {
+      font-size: clamp(1.8rem, 5vw, 2.6rem);
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      text-shadow: 0 0 20px rgba(255, 107, 53, 0.4);
+    }
+
+    .hero-text .role {
+      font-size: 0.95rem;
+      color: #ff6b35;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-top: 6px;
+    }
+
+    /* Card */
+    .card {
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(255, 107, 53, 0.2);
+      border-radius: 12px;
+      padding: 28px 32px;
+      margin-bottom: 24px;
+      backdrop-filter: blur(12px);
+    }
+
+    .card h2 {
+      font-size: 0.75rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #ff6b35;
+      margin-bottom: 16px;
+    }
+
+    .card p {
+      font-size: 0.97rem;
+      line-height: 1.75;
+      color: rgba(255, 255, 255, 0.85);
+    }
+
+    /* Stats row */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat {
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(255, 107, 53, 0.2);
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+      backdrop-filter: blur(12px);
+    }
+
+    .stat-value {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #ff6b35;
+      line-height: 1;
+      text-shadow: 0 0 12px rgba(255, 107, 53, 0.5);
+    }
+
+    .stat-label {
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.5);
+      margin-top: 6px;
+    }
+
+    /* Feature tags */
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .tag {
+      font-size: 0.78rem;
+      padding: 5px 12px;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 107, 53, 0.4);
+      color: rgba(255, 255, 255, 0.75);
+      letter-spacing: 0.04em;
+      background: rgba(255, 107, 53, 0.07);
+    }
+
+    /* CTA button */
+    .cta {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 12px 28px;
+      background: linear-gradient(90deg, #ff6b35 0%, #f7931e 100%);
+      color: #fff;
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      text-decoration: none;
+      border-radius: 8px;
+      transition: opacity 0.2s, box-shadow 0.2s;
+      box-shadow: 0 4px 20px rgba(255, 107, 53, 0.35);
+    }
+    .cta:hover {
+      opacity: 0.88;
+      box-shadow: 0 6px 28px rgba(255, 107, 53, 0.55);
+    }
+
+    /* Footer */
+    footer {
+      position: relative;
+      z-index: 2;
+      text-align: center;
+      padding-bottom: 32px;
+      font-size: 0.78rem;
+      color: rgba(255, 255, 255, 0.25);
+      letter-spacing: 0.06em;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="starfield"></canvas>
+
+<main>
+  <a class="back-link" href="index.html">Back to Drive on Mars</a>
+
+  <div class="hero">
+    <div class="avatar">🚀</div>
+    <div class="hero-text">
+      <h1>Conrad Lotz</h1>
+      <div class="role">Creator &amp; Lead Developer</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>About</h2>
+    <p>
+      Conrad Lotz is the creator and lead developer of <strong>Drive on Mars</strong> —
+      an interactive 3D Mars rover simulation built with Three.js and WebGL.
+      He designed and implemented everything from the procedurally-generated Martian
+      terrain to the rover's physics, day/night cycle, weather systems, and mobile
+      touch controls, delivering a rich exploration experience that runs in the browser
+      on any device.
+    </p>
+  </div>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-value">48+</div>
+      <div class="stat-label">Commits</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">7.5k</div>
+      <div class="stat-label">Lines of JS</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">3D</div>
+      <div class="stat-label">WebGL / Three.js</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value">∞</div>
+      <div class="stat-label">Terrain Chunks</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>What he built</h2>
+    <p>Drive on Mars is a full-featured browser game — no installs, no plugins.</p>
+    <div class="tags">
+      <span class="tag">Procedural Terrain</span>
+      <span class="tag">Rover Physics</span>
+      <span class="tag">Day / Night Cycle</span>
+      <span class="tag">Impact Craters</span>
+      <span class="tag">AI Traffic</span>
+      <span class="tag">Sample Collection</span>
+      <span class="tag">Rockets &amp; Colonies</span>
+      <span class="tag">Mobile Controls</span>
+      <span class="tag">Adaptive Performance</span>
+      <span class="tag">Guided Tour Beacons</span>
+      <span class="tag">Atmospheric Effects</span>
+      <span class="tag">Starry Sky</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Get in touch</h2>
+    <p>Interested in the project or want to collaborate?</p>
+    <a class="cta" href="https://github.com/conradlotz" target="_blank" rel="noopener">
+      GitHub ↗
+    </a>
+  </div>
+</main>
+
+<footer>Drive on Mars &nbsp;·&nbsp; Built by Conrad Lotz</footer>
+
+<script>
+  // Lightweight procedural starfield
+  const canvas = document.getElementById('starfield');
+  const ctx = canvas.getContext('2d');
+  let stars = [];
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+
+  function initStars(count = 280) {
+    stars = Array.from({ length: count }, () => ({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      r: Math.random() * 1.2 + 0.2,
+      a: Math.random(),
+      da: (Math.random() - 0.5) * 0.004,
+    }));
+  }
+
+  function drawStars() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (const s of stars) {
+      s.a = Math.max(0.05, Math.min(1, s.a + s.da));
+      if (s.a <= 0.05 || s.a >= 1) s.da *= -1;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255,255,255,${s.a.toFixed(2)})`;
+      ctx.fill();
+    }
+    requestAnimationFrame(drawStars);
+  }
+
+  resize();
+  initStars();
+  drawStars();
+  window.addEventListener('resize', () => { resize(); initStars(); });
+</script>
+
+</body>
+</html>
