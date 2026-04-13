@@ -169,7 +169,7 @@ renderer.setPixelRatio(pixelRatio);
 // Desktop: enable ACES filmic tone mapping and sRGB output for cinematic look
 if (!perfSettings.isMobile) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.2;
+  renderer.toneMappingExposure = 0.85;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap; // soft shadows
@@ -771,16 +771,9 @@ const { rover, wheels, originalWheelPositions } = createRealisticRover();
 rover.rotation.y = 0;
 scene.add(rover);
 
-// Add enhanced ambient lighting for mobile devices
+// Mobile rover visibility logging
 const perfSettingsForRover = getPerformanceSettings();
 if (perfSettingsForRover.isMobile) {
-  // Reduce ambient light intensity to prevent GPU overload
-  const ambientLight = new THREE.AmbientLight(0x404040, 0.4); // Reduced intensity
-  scene.add(ambientLight);
-  
-  // Remove hemisphere light on mobile to reduce GPU load
-  console.log('Mobile lighting optimized for performance');
-  
   console.log('Mobile enhanced lighting added for rover visibility');
   console.log('Rover position:', rover.position);
   console.log('Rover visible:', rover.visible);
@@ -2468,7 +2461,7 @@ class MarsSceneManager {
         color: level === 0 ? 0xe8f0ff : level === 1 ? 0xd5e5ff : 0xc2d9ff,
         roughness: 0.15,
         metalness: 0.85,
-        envMapIntensity: 2
+        envMapIntensity: 0.8
       });
       const levelMesh = new THREE.Mesh(levelGeometry, levelMaterial);
       levelMesh.position.set(
@@ -2573,7 +2566,7 @@ class MarsSceneManager {
           color: seg % 2 === 0 ? 0xc8d4e0 : 0xb5c5d8,
           roughness: 0.25,
           metalness: 0.85,
-          envMapIntensity: 1.5
+          envMapIntensity: 0.8
         });
         const segment = new THREE.Mesh(segGeometry, segMaterial);
         segment.position.set(
@@ -2819,7 +2812,7 @@ class MarsSceneManager {
     
     // === ATMOSPHERIC LIGHTING - Enhanced dramatic effects ===
     // Main colony central light
-    const centralLight = new THREE.PointLight(0xffffff, 3, 500);
+    const centralLight = new THREE.PointLight(0xffffff, 1.2, 500);
     centralLight.position.set(colonyOffsetX, groundY + 150, colonyOffsetZ);
     this.scene.add(centralLight);
     
@@ -3158,7 +3151,7 @@ class MarsSceneManager {
     // Flagship emissive glow is sufficient — SpotLights removed for performance
 
     // Single city-wide ambient glow (reduced intensity)
-    const cityLight = new THREE.PointLight(0x88aaff, 2.0, 1200);
+    const cityLight = new THREE.PointLight(0x88aaff, 0.7, 1200);
     cityLight.position.set(center.x, center.y + 260, center.z);
     this.scene.add(cityLight);
 
@@ -4257,7 +4250,7 @@ class MarsSceneManager {
       }
 
       // Single ambient light for the city
-      const cityLight = new THREE.PointLight(pal.accent, 1.5, 900);
+      const cityLight = new THREE.PointLight(pal.accent, 0.6, 900);
       cityLight.position.set(cx, gy + flagH * 0.4, cz);
       group.add(cityLight);
     }
@@ -6785,10 +6778,10 @@ function createSphericalSkyTexture(size = null) {
   // Strong vertical blue-indigo wash — makes the whole sky feel bright and open
   context.globalCompositeOperation = 'screen';
   const colorWash = context.createLinearGradient(0, 0, 0, size);
-  colorWash.addColorStop(0,    'rgba(30,25,90,0.55)');
-  colorWash.addColorStop(0.30, 'rgba(55,75,180,0.48)');
-  colorWash.addColorStop(0.60, 'rgba(80,105,220,0.40)');
-  colorWash.addColorStop(1,    'rgba(40,50,130,0.30)');
+  colorWash.addColorStop(0,    'rgba(30,25,90,0.30)');
+  colorWash.addColorStop(0.30, 'rgba(55,75,180,0.22)');
+  colorWash.addColorStop(0.60, 'rgba(80,105,220,0.16)');
+  colorWash.addColorStop(1,    'rgba(40,50,130,0.12)');
   context.fillStyle = colorWash;
   context.fillRect(0, 0, size, size);
 
@@ -6798,7 +6791,7 @@ function createSphericalSkyTexture(size = null) {
   context.globalCompositeOperation = 'screen';
   const horizonBrighten = context.createLinearGradient(0, size * 0.6, 0, size * 0.9);
   horizonBrighten.addColorStop(0, 'rgba(40, 50, 110, 0.0)');
-  horizonBrighten.addColorStop(0.5, 'rgba(80, 90, 170, 0.22)');
+  horizonBrighten.addColorStop(0.5, 'rgba(80, 90, 170, 0.08)');
   horizonBrighten.addColorStop(1, 'rgba(40, 50, 110, 0.05)');
   context.fillStyle = horizonBrighten;
   context.fillRect(0, size * 0.6, size, size * 0.3);
