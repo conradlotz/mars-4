@@ -5053,6 +5053,10 @@ class MarsSceneManager {
   // }
 }
 
+// Add a day/night toggle and cycle
+let isDaytime = false; // Start at night so the starry sky is visible
+console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
+
 // Scene manager is created via loadNonEssentialComponents / initializeScene - no duplicate needed here
 let sceneManager = null;
 
@@ -7526,10 +7530,6 @@ function loadNonEssentialComponents() {
 
   console.log("Non-essential components queued for background loading");
 }
-
-// Add a day/night toggle and cycle
-let isDaytime = false; // Start at night so the starry sky is visible
-console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
 
 // Automatically initialize core scene elements once the game script
 // has finished loading. This ensures MarsSceneManager (and the
