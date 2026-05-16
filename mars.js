@@ -5145,6 +5145,9 @@ class MarsSceneManager {
   // }
 }
 
+// Add a day/night toggle and cycle (isDaytime declared at top of file)
+console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
+
 // Scene manager is created via loadNonEssentialComponents / initializeScene - no duplicate needed here
 let sceneManager = null;
 
@@ -7357,7 +7360,6 @@ function loadNonEssentialComponents() {
 
 // Day/night toggle and cycle (isDaytime declared at top of file)
 console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
-
 // Automatically initialize core scene elements once the game script
 // has finished loading. This ensures MarsSceneManager (and the
 // colony/rocket traffic it controls) is constructed on desktop,
@@ -7379,4 +7381,3 @@ try {
   console.error('âŒ Error during initializeScene:', e);
   console.error('Error stack:', e.stack);
 }
-
