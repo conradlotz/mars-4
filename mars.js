@@ -167,10 +167,10 @@ const pixelRatio = perfSettings.isMobile ? 1 :
                    Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1.5);
 renderer.setPixelRatio(pixelRatio);
 
-// Desktop: enable ACES filmic tone mapping and sRGB output for cinematic look
+// Desktop: Reinhard tone mapping works well for night scenes (ACES crushes cool blue to black)
 if (!perfSettings.isMobile) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.9;
+  renderer.toneMappingExposure = 1.2;
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap; // soft shadows
