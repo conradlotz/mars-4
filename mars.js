@@ -5576,10 +5576,10 @@ function positionRoverOnTerrain() {
   // Reuse raycaster object instead of creating a new one each time
   if (!window.terrainRaycaster) {
     window.terrainRaycaster = new THREE.Raycaster();
-    window.terrainRaycaster.ray.direction.set(0, -1, 0); // Cast ray downward
   }
 
-  // Position the ray origin above the rover's current position
+  // Reset every frame — camera-collision code mutates direction
+  window.terrainRaycaster.ray.direction.set(0, -1, 0);
   window.terrainRaycaster.ray.origin.set(rover.position.x, 20, rover.position.z);
 
   // Get all active terrain chunks to check for intersections
@@ -5703,15 +5703,16 @@ function updateCamera(deltaMs) {
       );
 
       // Terrain-collision avoidance: pull camera in front of any hill it would clip through
-      if (window.terrainRaycaster) {
+      if (!window.cameraRaycaster) window.cameraRaycaster = new THREE.Raycaster();
+      {
         const toCamera = vectors.target.clone().sub(rover.position);
         const dist = toCamera.length();
         const dir = toCamera.clone().normalize();
-        window.terrainRaycaster.ray.origin.set(rover.position.x, rover.position.y + 2, rover.position.z);
-        window.terrainRaycaster.ray.direction.copy(dir);
+        window.cameraRaycaster.ray.origin.set(rover.position.x, rover.position.y + 2, rover.position.z);
+        window.cameraRaycaster.ray.direction.copy(dir);
         const terrainMeshes = [];
         for (const chunk of terrainSystem.chunks.values()) terrainMeshes.push(chunk);
-        const hits = window.terrainRaycaster.intersectObjects(terrainMeshes);
+        const hits = window.cameraRaycaster.intersectObjects(terrainMeshes);
         if (hits.length > 0 && hits[0].distance < dist) {
           const safeDist = Math.max(hits[0].distance - 1.5, 3);
           vectors.target.copy(rover.position).addScaledVector(dir, safeDist);
