@@ -5593,14 +5593,6 @@ function positionRoverOnTerrain() {
     terrainChunks.push(marsSurface);
   }
 
-  // Also include road plane meshes so the rover rides on top of roads
-  if (window.marsSceneManager && window.marsSceneManager.roads) {
-    for (const road of window.marsSceneManager.roads.values()) {
-      if (road.group && road.group.children[0]) {
-        terrainChunks.push(road.group.children[0]);
-      }
-    }
-  }
 
   // Check for intersections with all terrain chunks
   let closestIntersection = null;
