@@ -92,7 +92,7 @@ function getPerformanceSettings() {
   // Return cached settings if available (settings don't change during session)
   if (_cachedPerformanceSettings) return _cachedPerformanceSettings;
   
-  const isMobile = false;
+  const isMobile = !!(window.GAME_PERFORMANCE_SETTINGS && window.GAME_PERFORMANCE_SETTINGS.isMobile);
   
   // Desktop settings - capped to prevent GPU crashes
   _cachedPerformanceSettings = window.GAME_PERFORMANCE_SETTINGS || {
@@ -324,7 +324,7 @@ function ensureSpaceSkybox() {
 ensureSpaceSkybox();
 
 // Fog fades distant terrain to black, matching the void behind everything
-const fogColor = 0x000000;
+const fogColor = 0x6B1F00;
 const fogDensity = perfSettings.samsungOptimized ? perfSettings.fogDensityReduction : 1.0;
 scene.fog = new THREE.Fog(fogColor, perfSettings.fogDistance * 0.2 * fogDensity, perfSettings.renderDistance);
 
@@ -966,11 +966,11 @@ if (!perfSettings.isMobile) {
   sunLight.shadow.mapSize.width = 2048;
   sunLight.shadow.mapSize.height = 2048;
   sunLight.shadow.camera.near = 1;
-  sunLight.shadow.camera.far = 800;
-  sunLight.shadow.camera.left = -200;
-  sunLight.shadow.camera.right = 200;
-  sunLight.shadow.camera.top = 200;
-  sunLight.shadow.camera.bottom = -200;
+  sunLight.shadow.camera.far = 1200;
+  sunLight.shadow.camera.left = -400;
+  sunLight.shadow.camera.right = 400;
+  sunLight.shadow.camera.top = 400;
+  sunLight.shadow.camera.bottom = -400;
   sunLight.shadow.bias = -0.0005;
   sunLight.shadow.normalBias = 0.02;
 }
@@ -1004,13 +1004,13 @@ controls.enabled = false; // Disable orbit controls since we're starting in thir
 // Movement Logic - Make keys globally accessible for mobile controls
 window.keys = { w: false, a: false, s: false, d: false };
 const keys = window.keys; // Keep local reference for backward compatibility
-const MAX_SPEED = 0.46;          // Quicker top speed while keeping rover handling stable
+const MAX_SPEED = 0.25;
 const REVERSE_SPEED_FACTOR = 0.55;
-const ACCELERATION = 0.020;      // Faster launch from rest for snappier gameplay
-const DECELERATION = 0.026;      // Braking stays responsive at the higher speed
-const COAST_DECEL = 0.009;       // Passive deceleration when no key held
-const MAX_ROTATION_SPEED = 0.020; // Slightly quicker turn rate
-const ROTATION_ACCEL = 0.003;    // Turn rate ramps up gradually
+const ACCELERATION = 0.012;
+const DECELERATION = 0.016;
+const COAST_DECEL = 0.006;
+const MAX_ROTATION_SPEED = 0.018;
+const ROTATION_ACCEL = 0.003;
 let velocity = 0;                // Current velocity (-MAX_SPEED to +MAX_SPEED)
 let rotationVelocity = 0;        // Current turn rate
 let isMoving = false;
@@ -1130,6 +1130,7 @@ window.gameEventListeners.add(window, 'keyup', keyupHandler);
 // Add camera modes and third-person view
 // Third-person camera: higher, farther back, slight side offset for a cinematic angle
 const cameraOffset = new THREE.Vector3(3, 8, 22);
+const cameraSpring = { velocity: new THREE.Vector3() };
 
 // Change default camera mode to thirdPerson - Make globally accessible for mobile controls
 window.cameraMode = 'thirdPerson'; // 'orbit', 'thirdPerson', 'firstPerson'
@@ -2326,26 +2327,28 @@ class MarsSceneManager {
       roughness: 0.72
     });
 
-    // Low stainless skateboard/body.
-    const bodyGeom = new THREE.BoxGeometry(10.5, 2.6, 4.5);
+    // Wide flat skateboard chassis
+    const bodyGeom = new THREE.BoxGeometry(11.0, 2.2, 4.8);
     const body = new THREE.Mesh(bodyGeom, stainlessMat);
-    body.position.y = 1.75;
+    body.position.y = 1.6;
     group.add(body);
 
-    // Faceted cabin slabs read more like a Cybertruck than a triangle roof.
-    const windshield = new THREE.Mesh(new THREE.BoxGeometry(3.9, 0.18, 4.25), glassMat);
-    windshield.position.set(1.15, 3.05, 0);
-    windshield.rotation.z = -0.45;
+    // Cybertruck's signature steep single-slope windshield
+    const windshield = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.18, 4.6), glassMat);
+    windshield.position.set(1.4, 3.2, 0);
+    windshield.rotation.z = -0.62; // steeper rake
     group.add(windshield);
 
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(4.15, 0.22, 4.15), stainlessMat);
-    roof.position.set(-1.05, 3.72, 0);
-    roof.rotation.z = 0.06;
+    // Flat roof panel (very short, near the rear)
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.22, 4.5), stainlessMat);
+    roof.position.set(-1.6, 4.1, 0);
+    roof.rotation.z = 0.04;
     group.add(roof);
 
-    const rearSail = new THREE.Mesh(new THREE.BoxGeometry(3.85, 0.22, 4.25), stainlessMat);
-    rearSail.position.set(-3.0, 3.0, 0);
-    rearSail.rotation.z = 0.42;
+    // Aggressive rear sail sloping downward to the bed
+    const rearSail = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.22, 4.6), stainlessMat);
+    rearSail.position.set(-3.8, 3.3, 0);
+    rearSail.rotation.z = 0.52;
     group.add(rearSail);
 
     const sideGlassGeom = new THREE.BoxGeometry(3.1, 0.9, 0.16);
@@ -2444,17 +2447,24 @@ class MarsSceneManager {
 
   // --- UPDATE animated objects ---
   updateAnimations(time) {
-    // Animated objects (beacons, radar dishes)
+    const rover = window.rover;
+    const roverPos = rover ? rover.position : null;
+    const BEACON_CULL_DIST_SQ = 700 * 700;
+
     for (const anim of this.animatedObjects) {
       if (!anim.mesh) continue;
-      if (anim.type === 'blink') {
-        anim.mesh.visible = true;
-        if (anim.mesh.isPointLight && anim.mesh.userData.steadyIntensity === undefined) {
-          anim.mesh.userData.steadyIntensity = anim.mesh.intensity;
+
+      // Skip beacons that are too far from the rover
+      if (roverPos && anim.type === 'blink') {
+        const wp = new THREE.Vector3();
+        anim.mesh.getWorldPosition(wp);
+        const dx = wp.x - roverPos.x, dz = wp.z - roverPos.z;
+        if (dx * dx + dz * dz > BEACON_CULL_DIST_SQ) {
+          anim.mesh.visible = false;
+          continue;
         }
-        if (anim.mesh.isPointLight) {
-          anim.mesh.intensity = anim.mesh.userData.steadyIntensity;
-        }
+        const t = time * 0.001;
+        anim.mesh.visible = Math.sin(t * 1.8 + anim.phase) > 0.3;
       } else if (anim.type === 'rotate') {
         anim.mesh.rotation.y += anim.speed;
       }
@@ -3108,8 +3118,8 @@ class MarsSceneManager {
         color: 0xcfd8ff,
         metalness: 0.9,
         roughness: 0.2,
-        emissive: 0x111633,
-        emissiveIntensity: 0.35
+        emissive: 0x2244aa,
+        emissiveIntensity: 0.55
       });
       const tower = new THREE.Mesh(towerGeom, towerMat);
       tower.position.set(x, groundY + baseHeight / 2, z);
@@ -3605,7 +3615,7 @@ class MarsSceneManager {
         const z = road.startZ + (road.endZ - road.startZ) * t;
 
         const veh = this.createCybertruckVehicle();
-        const scale = 0.45 + Math.random() * 0.18;
+        const scale = 0.9 + Math.random() * 0.35;
         veh.scale.set(scale, scale, scale);
         veh.position.set(x, road.groundY + 0.3, z);
         veh.rotation.y = road.angle + (Math.random() < 0.5 ? 0 : Math.PI); // face either direction
@@ -5391,7 +5401,7 @@ function animate(time) {
   }
 
   // Handle turning with smooth acceleration - turning radius scales with speed
-  const speedFactor = 0.4 + 0.6 * (Math.abs(velocity) / MAX_SPEED); // less turn at low speed
+  const speedFactor = 1.0 - 0.4 * (Math.abs(velocity) / MAX_SPEED); // tighter steering at low speed, reduced at high speed
   if (keys.a || keys.d) {
     const turnDir = keys.a ? 1 : -1;
     rotationVelocity = Math.min(
@@ -5441,7 +5451,7 @@ function animate(time) {
 
   // Update camera position based on mode - throttle for performance
   if (frameCount % frameThrottle === 0) {
-    updateCamera();
+    updateCamera(delta);
   }
 
   // Update dust particles - only when moving and throttled based on performance
@@ -5583,6 +5593,15 @@ function positionRoverOnTerrain() {
     terrainChunks.push(marsSurface);
   }
 
+  // Also include road plane meshes so the rover rides on top of roads
+  if (window.marsSceneManager && window.marsSceneManager.roads) {
+    for (const road of window.marsSceneManager.roads.values()) {
+      if (road.group && road.group.children[0]) {
+        terrainChunks.push(road.group.children[0]);
+      }
+    }
+  }
+
   // Check for intersections with all terrain chunks
   let closestIntersection = null;
   let closestDistance = Infinity;
@@ -5660,40 +5679,62 @@ function updateWheelSuspension(wheels, originalWheelPositions) {
   });
 }
 
-// Optimize the updateCamera function
-function updateCamera() {
-  // Reuse vector objects to reduce garbage collection
+function updateCamera(deltaMs) {
+  const dt = Math.min((deltaMs || 16.67) / 1000, 0.05);
+
   if (!window.cameraVectors) {
     window.cameraVectors = {
       offset: new THREE.Vector3(),
       target: new THREE.Vector3(),
       head: new THREE.Vector3(),
       forward: new THREE.Vector3(),
-      upAxis: new THREE.Vector3(0, 1, 0) // cached axis for applyAxisAngle
+      upAxis: new THREE.Vector3(0, 1, 0)
     };
   }
-
   const vectors = window.cameraVectors;
 
   switch (cameraMode) {
-    case 'thirdPerson':
-      // Calculate the desired camera position in third-person view
-      vectors.offset.copy(cameraOffset);
-
-      // Rotate the offset based on the rover's yaw
+    case 'thirdPerson': {
+      // Speed-adaptive zoom: pull back and up at higher speeds
+      const speedRatio = Math.abs(velocity) / MAX_SPEED;
+      vectors.offset.set(
+        cameraOffset.x,
+        cameraOffset.y + speedRatio * 4,
+        cameraOffset.z + speedRatio * 10
+      );
       vectors.offset.applyAxisAngle(vectors.upAxis, roverYaw);
 
-      // Add the offset to the rover's position
       vectors.target.set(
         rover.position.x + vectors.offset.x,
         rover.position.y + vectors.offset.y,
         rover.position.z + vectors.offset.z
       );
 
-      // Snappier follow for responsive feel
-      camera.position.lerp(vectors.target, 0.1);
+      // Terrain-collision avoidance: pull camera in front of any hill it would clip through
+      if (window.terrainRaycaster) {
+        const toCamera = vectors.target.clone().sub(rover.position);
+        const dist = toCamera.length();
+        const dir = toCamera.clone().normalize();
+        window.terrainRaycaster.ray.origin.set(rover.position.x, rover.position.y + 2, rover.position.z);
+        window.terrainRaycaster.ray.direction.copy(dir);
+        const terrainMeshes = [];
+        for (const chunk of terrainSystem.chunks.values()) terrainMeshes.push(chunk);
+        const hits = window.terrainRaycaster.intersectObjects(terrainMeshes);
+        if (hits.length > 0 && hits[0].distance < dist) {
+          const safeDist = Math.max(hits[0].distance - 1.5, 3);
+          vectors.target.copy(rover.position).addScaledVector(dir, safeDist);
+          vectors.target.y = rover.position.y + 2;
+        }
+      }
 
-      // Look slightly ahead of the rover (in its facing direction) for a dynamic feel
+      // Spring-damper follow: stiffness pulls toward target, damping kills oscillation
+      const stiffness = 10.0;
+      const damping = 7.0;
+      const displacement = vectors.target.clone().sub(camera.position);
+      cameraSpring.velocity.addScaledVector(displacement, stiffness * dt);
+      cameraSpring.velocity.multiplyScalar(Math.max(0, 1 - damping * dt));
+      camera.position.addScaledVector(cameraSpring.velocity, dt);
+
       vectors.forward.set(0, 0, -1).applyAxisAngle(vectors.upAxis, roverYaw);
       camera.lookAt(
         rover.position.x + vectors.forward.x * 5,
@@ -5701,32 +5742,21 @@ function updateCamera() {
         rover.position.z + vectors.forward.z * 5
       );
       break;
+    }
 
-    case 'firstPerson':
-      // Position the camera at the rover's "head"
-      vectors.head.set(
-        rover.position.x,
-        rover.position.y + 2.5,
-        rover.position.z
-      );
-
-      // Get the forward direction based on the tracked yaw
-      vectors.forward.set(0, 0, -1);
-      vectors.forward.applyAxisAngle(vectors.upAxis, roverYaw);
-
-      // Set camera position
+    case 'firstPerson': {
+      vectors.head.set(rover.position.x, rover.position.y + 2.5, rover.position.z);
+      vectors.forward.set(0, 0, -1).applyAxisAngle(vectors.upAxis, roverYaw);
       camera.position.copy(vectors.head);
-
-      // Look in the direction the rover is facing
       camera.lookAt(
         vectors.head.x + vectors.forward.x * 10,
         vectors.head.y,
         vectors.head.z + vectors.forward.z * 10
       );
       break;
+    }
 
     case 'orbit':
-      // In orbit mode, the OrbitControls handle the camera
       break;
   }
 }
