@@ -254,142 +254,6 @@
     }
     
     /* Mobile Action Buttons */
-    #mobile-buttons {
-      position: absolute;
-      bottom: 40px;
-      right: 20px;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 15px;
-      pointer-events: auto;
-      max-width: 180px;
-    }
-
-    /* Simple navigation pad for mobile driving */
-    #mobile-nav-buttons {
-      position: absolute;
-      bottom: 40px;
-      left: 50%;
-      transform: translateX(-50%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 8px;
-      pointer-events: auto;
-      z-index: 1100;
-    }
-
-    #mobile-nav-buttons .nav-row {
-      display: flex;
-      justify-content: center;
-      gap: 10px;
-    }
-
-    #mobile-nav-buttons .nav-btn {
-      width: 54px;
-      height: 54px;
-      border-radius: 12px;
-      border: 2px solid rgba(255, 107, 53, 0.7);
-      background: rgba(0, 0, 0, 0.55);
-      color: #ffffff;
-      font-size: 22px;
-      font-weight: bold;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: pointer;
-      box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
-      backdrop-filter: blur(8px);
-      transition: transform 0.08s ease, background 0.08s ease, box-shadow 0.08s ease;
-    }
-
-    #mobile-nav-buttons .nav-btn:active {
-      transform: scale(0.9);
-      background: rgba(255, 107, 53, 0.9);
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
-    }
-    
-    .mobile-btn {
-      width: 75px;
-      height: 75px;
-      background: rgba(0, 0, 0, 0.6);
-      color: white;
-      border: 3px solid rgba(255, 107, 53, 0.5);
-      border-radius: 50%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      font-size: 20px;
-      font-weight: bold;
-      cursor: pointer;
-      user-select: none;
-      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-      touch-action: manipulation;
-      backdrop-filter: blur(10px);
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-      position: relative;
-      overflow: hidden;
-    }
-    
-    .mobile-btn::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: linear-gradient(135deg, rgba(255, 107, 53, 0.1), rgba(255, 107, 53, 0.05));
-      border-radius: 50%;
-      opacity: 0;
-      transition: opacity 0.15s ease;
-      pointer-events: none;
-    }
-    
-    .mobile-btn:hover::before {
-      opacity: 1;
-    }
-    
-    .mobile-btn .btn-label {
-      font-size: 8px;
-      font-weight: bold;
-      letter-spacing: 0.5px;
-      margin-top: 2px;
-      opacity: 0.8;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-      transition: opacity 0.15s ease;
-    }
-    
-    .mobile-btn:active {
-      background: rgba(255, 107, 53, 0.9);
-      transform: scale(0.85);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-      border-color: rgba(255, 107, 53, 1);
-    }
-    
-    .mobile-btn:active .btn-label {
-      opacity: 1;
-    }
-    
-    .mobile-btn:hover {
-      background: rgba(255, 107, 53, 0.7);
-      border-color: rgba(255, 107, 53, 0.8);
-      transform: scale(1.05);
-    }
-    
-    /* Add a subtle pulsing animation for better visibility */
-    .mobile-btn {
-      animation: mobileBtnPulse 3s ease-in-out infinite;
-    }
-    
-    @keyframes mobileBtnPulse {
-      0%, 100% {
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-      }
-      50% {
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3), 0 0 20px rgba(255, 107, 53, 0.2);
-      }
-    }
     
     /* Touch Camera Controls */
     #touch-camera-area {
@@ -480,10 +344,11 @@
         z-index: 120 !important;
       }
       
-      #mobile-buttons {
-        bottom: 30px !important;
-        right: 20px !important;
-        z-index: 120 !important;
+      /* Hide non-essential UI on mobile */
+      #loading-tips,
+      #settings-toggle,
+      #device-info {
+        display: none !important;
       }
       
       /* Add space between mobile controls and HUD panels */
@@ -526,18 +391,6 @@
       #youtube-title {
         max-width: 80px;
         font-size: 9px;
-      }
-      
-      /* Larger mobile buttons for better touch */
-      .mobile-btn {
-        width: 75px;
-        height: 75px;
-        font-size: 24px;
-      }
-      
-      #mobile-buttons {
-        gap: 12px;
-        max-width: 170px;
       }
       
       #virtual-joystick {
@@ -681,37 +534,7 @@
       <div id="joystick-knob"></div>
     </div>
     
-    <!-- Mobile Action Buttons -->
-    <div id="mobile-buttons">
-      <button class="mobile-btn" id="mobile-sample-btn" title="Collect Sample">
-        💎
-        <span class="btn-label">SAMPLE</span>
-      </button>
-      <button class="mobile-btn" id="mobile-analyze-btn" title="Analyze Sample">
-        🔬
-        <span class="btn-label">ANALYZE</span>
-      </button>
-      <button class="mobile-btn" id="mobile-rocket-btn" title="Launch Rocket">
-        🚀
-        <span class="btn-label">ROCKET</span>
-      </button>
-      <button class="mobile-btn" id="mobile-camera-btn" title="Switch Camera">
-        📷
-        <span class="btn-label">CAMERA</span>
-      </button>
-    </div>
 
-    <!-- Simple Navigation Pad for Mobile Driving -->
-    <div id="mobile-nav-buttons">
-      <div class="nav-row nav-row-top">
-        <button class="nav-btn" data-key="w" aria-label="Move Forward">▲</button>
-      </div>
-      <div class="nav-row nav-row-bottom">
-        <button class="nav-btn" data-key="a" aria-label="Turn Left">◀</button>
-        <button class="nav-btn" data-key="s" aria-label="Move Backward">▼</button>
-        <button class="nav-btn" data-key="d" aria-label="Turn Right">▶</button>
-      </div>
-    </div>
   </div>
 
   <div class="controls">
@@ -1154,6 +977,7 @@
       
       // Show click-to-play notification
       showClickToPlayNotification() {
+        if (this.deviceSpecs.isMobile) return;
         const notification = document.createElement('div');
         notification.style.cssText = `
           position: fixed;
@@ -1698,60 +1522,79 @@
   </script>
 
   <script>
-    // Wire up simple mobile navigation buttons to the existing rover key controls
-    (function setupMobileNavigationPad() {
+    // Joystick driving controls — maps drag direction/magnitude to WASD keys
+    (function setupJoystickControls() {
       if (typeof isMobileDevice !== 'function' || !isMobileDevice()) return;
 
-      const navContainer = document.getElementById('mobile-nav-buttons');
-      if (!navContainer) return;
+      const joystick = document.getElementById('virtual-joystick');
+      const knob = document.getElementById('joystick-knob');
+      if (!joystick || !knob) return;
 
-      function bindNavButtons() {
-        if (!window.keys) {
-          // mars.js not loaded yet; try again shortly
-          setTimeout(bindNavButtons, 300);
-          return;
-        }
+      const RADIUS = 45;   // max knob travel (px) from center
+      const DEADZONE = 14; // minimum displacement before input registers
 
-        const buttons = navContainer.querySelectorAll('.nav-btn[data-key]');
-        const setKey = (key, value) => {
-          if (!window.keys) return;
-          window.keys[key] = value;
-        };
+      let active = false;
+      let centerX = 0, centerY = 0;
+      let prev = { w: false, s: false, a: false, d: false };
 
-        buttons.forEach(btn => {
-          const key = btn.getAttribute('data-key');
-          if (!key) return;
-
-          const handleDown = (e) => {
-            if (e) e.preventDefault();
-            setKey(key, true);
-          };
-
-          const handleUp = (e) => {
-            if (e) e.preventDefault();
-            setKey(key, false);
-          };
-
-          // Touch events for real mobile use
-          btn.addEventListener('touchstart', handleDown, { passive: false });
-          btn.addEventListener('touchend', handleUp, { passive: false });
-          btn.addEventListener('touchcancel', handleUp, { passive: false });
-
-          // Mouse events so it can be tested in emulators
-          btn.addEventListener('mousedown', handleDown);
-          btn.addEventListener('mouseup', handleUp);
-          btn.addEventListener('mouseleave', handleUp);
-        });
-
-        console.log('Mobile navigation pad bound to rover controls');
+      function applyKey(key, value) {
+        if (prev[key] === value) return;
+        prev[key] = value;
+        if (window.keys) window.keys[key] = value;
       }
 
-      // Start binding once DOM is ready; actual key map waits for mars.js
-      if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', bindNavButtons);
-      } else {
-        bindNavButtons();
+      function releaseAll() {
+        applyKey('w', false); applyKey('s', false);
+        applyKey('a', false); applyKey('d', false);
+        knob.style.transform = 'translate(-50%, -50%)';
       }
+
+      function onStart(e) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const rect = joystick.getBoundingClientRect();
+        centerX = rect.left + rect.width / 2;
+        centerY = rect.top + rect.height / 2;
+        active = true;
+        onMove(e);
+      }
+
+      function onMove(e) {
+        if (!active) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        let dx = touch.clientX - centerX;
+        let dy = touch.clientY - centerY;
+
+        // Clamp knob to circle boundary
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > RADIUS) { dx = dx / dist * RADIUS; dy = dy / dist * RADIUS; }
+
+        knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+
+        // Map each axis independently so diagonals work naturally
+        applyKey('w', dy < -DEADZONE);
+        applyKey('s', dy >  DEADZONE);
+        applyKey('a', dx < -DEADZONE);
+        applyKey('d', dx >  DEADZONE);
+      }
+
+      function onEnd(e) {
+        e.preventDefault();
+        active = false;
+        releaseAll();
+      }
+
+      joystick.addEventListener('touchstart',  onStart, { passive: false });
+      joystick.addEventListener('touchmove',   onMove,  { passive: false });
+      joystick.addEventListener('touchend',    onEnd,   { passive: false });
+      joystick.addEventListener('touchcancel', onEnd,   { passive: false });
+
+      // Retry until mars.js exposes window.keys
+      (function waitForKeys() {
+        if (window.keys) return;
+        setTimeout(waitForKeys, 200);
+      })();
     })();
   </script>
 </body>
