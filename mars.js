@@ -65,7 +65,7 @@ function updateGameHUD() {
     let degrees = (window.roverYaw * 180 / Math.PI) % 360;
     if (degrees < 0) degrees += 360;
     const idx = Math.round(degrees / 45) % 8;
-    hud.compass.textContent = `${_compassDirs[idx]} (${degrees.toFixed(0)}°)`;
+    hud.compass.textContent = `${_compassDirs[idx]} (${degrees.toFixed(0)}Â°)`;
   }
 
   // Update guided route HUD status
@@ -86,6 +86,7 @@ let dayNightCycleSpeed = 0.00001; // Speed of day/night cycle (smaller = slower)
 let isManualTransition = false;
 let manualTransitionTarget = null;
 let manualTransitionSpeed = 0.005;
+let isDaytime = false; // Start at night so the starry sky is visible
 
 function getPerformanceSettings() {
   // Return cached settings if available (settings don't change during session)
@@ -166,7 +167,7 @@ const pixelRatio = perfSettings.isMobile ? 1 :
                    Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1.5);
 renderer.setPixelRatio(pixelRatio);
 
-// Desktop: enable ACES filmic tone mapping and sRGB output for cinematic look
+// Desktop: Reinhard tone mapping works well for night scenes (ACES crushes cool blue to black)
 if (!perfSettings.isMobile) {
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.2;
@@ -303,11 +304,11 @@ document.addEventListener('visibilitychange', () => {
 });
 document.body.appendChild(renderer.domElement);
 
-// Pure black background behind everything — the skybox paints over this
+// Pure black background behind everything â€” the skybox paints over this
 renderer.setClearColor(0x000000, 1);
 scene.background = new THREE.Color(0x000000);
 
-// Night skybox — create immediately since the game starts at night
+// Night skybox â€” create immediately since the game starts at night
 let spaceSkybox = null;
 let _spaceSkyboxCreating = false;
 
@@ -319,7 +320,7 @@ function ensureSpaceSkybox() {
   console.log('Skybox created (night start)');
 }
 
-// Create skybox right away — night mode needs it visible from frame 1
+// Create skybox right away â€” night mode needs it visible from frame 1
 ensureSpaceSkybox();
 
 // Fog fades distant terrain to black, matching the void behind everything
@@ -330,7 +331,7 @@ scene.fog = new THREE.Fog(fogColor, perfSettings.fogDistance * 0.2 * fogDensity,
 // Endless terrain system with reduced complexity
 const terrainSystem = {
   chunkSize: 200, // Size of each terrain chunk
-  visibleRadius: 50, // Large radius — allow free exploration across the terrain
+  visibleRadius: 50, // Large radius â€” allow free exploration across the terrain
   chunks: new Map(), // Store active chunks
   currentChunk: { x: 0, z: 0 }, // Current chunk coordinates
   lastUpdateTime: 0, // Track last update time for throttling
@@ -724,7 +725,7 @@ function createSolarPanelTexture() {
   canvas.height = 256;
   const context = canvas.getContext('2d');
 
-  // Deep blue base — photovoltaic substrate
+  // Deep blue base â€” photovoltaic substrate
   context.fillStyle = '#112266';
   context.fillRect(0, 0, 256, 256);
 
@@ -738,7 +739,7 @@ function createSolarPanelTexture() {
     for (let y = 0; y < cellsY; y++) {
       const px = x * cellW;
       const py = y * cellH;
-      // Cell body — alternating shade for monocrystalline look
+      // Cell body â€” alternating shade for monocrystalline look
       const shade = (x + y) % 2 === 0 ? '#152d8a' : '#1a3580';
       context.fillStyle = shade;
       context.fillRect(px + 1, py + 1, cellW - 2, cellH - 2);
@@ -946,18 +947,19 @@ const createDustParticles = () => {
 
 const dustParticles = createDustParticles();
 
-// Night lighting — cool blue-grey moonlight from Phobos, no direct sun
-const ambientIntensity = perfSettings.samsungOptimized ? 0.22 * perfSettings.ambientLightBoost :
-                         perfSettings.isMobile ? 0.22 : 0.20;
-const ambientColor = perfSettings.samsungOptimized ? 0x3355aa : 0x4466bb;
+// Night lighting - dim, warm, and Mars-like instead of bright blue moonlight
+const ambientIntensity = perfSettings.samsungOptimized ? 0.34 * perfSettings.ambientLightBoost :
+                         perfSettings.isMobile ? 0.34 : 0.24;
+const ambientColor = perfSettings.samsungOptimized ? 0x5a3528 : 0x3a2018;
 const ambientLight = new THREE.AmbientLight(ambientColor, ambientIntensity);
 scene.add(ambientLight);
 
-// Directional light (sun) — off at night; kept at near-zero so toggle works later
-const sunIntensity = 0.0;
-const sunColor = 0xffc080; // warm peach-orange (inactive at night)
+// Low, weak reflected light gives terrain shape without making night feel like day
+const sunIntensity = perfSettings.samsungOptimized ? 0.16 * perfSettings.materialBrightness :
+                     perfSettings.isMobile ? 0.14 : 0.12;
+const sunColor = 0xb96a45;
 const sunLight = new THREE.DirectionalLight(sunColor, sunIntensity);
-// Low-angle Mars sun — long shadows, dramatic look
+// Low-angle Mars sun â€” long shadows, dramatic look
 sunLight.position.set(-120, 55, 80);
 if (!perfSettings.isMobile) {
   sunLight.castShadow = true;
@@ -974,19 +976,18 @@ if (!perfSettings.isMobile) {
 }
 scene.add(sunLight);
 
-// Secondary fill light — disabled at night (no warm sky bounce without a sun)
-// if (!perfSettings.isMobile) {
-//   const fillLight = new THREE.DirectionalLight(0xff8866, 0.25);
-//   fillLight.position.set(80, 40, -60);
-//   scene.add(fillLight);
-// }
+// Secondary fill light - barely lifts silhouettes at night
+if (!perfSettings.isMobile) {
+  const fillLight = new THREE.DirectionalLight(0x34180f, 0.05);
+  fillLight.position.set(80, 40, -60);
+  scene.add(fillLight);
+}
 
-// Hemisphere light — sky gradient from hazy orange to dark rust ground
-// Night hemisphere — dark starry sky above, near-black Mars ground below
-const hemisphereIntensity = perfSettings.samsungOptimized ? 0.12 * perfSettings.ambientLightBoost :
-                             perfSettings.isMobile ? 0.10 : 0.10;
-const hemisphereSkyColor = 0x0d1a30;   // deep midnight blue
-const hemisphereGroundColor = 0x100806; // near-black with faint rust tint
+// Night hemisphere - near-black sky above, dark rust bounce from the ground
+const hemisphereIntensity = perfSettings.samsungOptimized ? 0.24 * perfSettings.ambientLightBoost :
+                             perfSettings.isMobile ? 0.22 : 0.18;
+const hemisphereSkyColor = 0x070912;
+const hemisphereGroundColor = 0x2a0f06;
 const hemisphereLight = new THREE.HemisphereLight(hemisphereSkyColor, hemisphereGroundColor, hemisphereIntensity);
 scene.add(hemisphereLight);
 
@@ -1003,12 +1004,13 @@ controls.enabled = false; // Disable orbit controls since we're starting in thir
 // Movement Logic - Make keys globally accessible for mobile controls
 window.keys = { w: false, a: false, s: false, d: false };
 const keys = window.keys; // Keep local reference for backward compatibility
-const MAX_SPEED = 0.28;          // Top speed (feels like ~6 km/h for a Mars rover)
-const ACCELERATION = 0.012;      // How quickly the rover accelerates
-const DECELERATION = 0.016;      // How quickly the rover decelerates (braking)
-const COAST_DECEL = 0.006;       // Passive deceleration when no key held
-const MAX_ROTATION_SPEED = 0.016; // Maximum turn rate
-const ROTATION_ACCEL = 0.002;    // Turn rate ramps up gradually
+const MAX_SPEED = 0.46;          // Quicker top speed while keeping rover handling stable
+const REVERSE_SPEED_FACTOR = 0.55;
+const ACCELERATION = 0.020;      // Faster launch from rest for snappier gameplay
+const DECELERATION = 0.026;      // Braking stays responsive at the higher speed
+const COAST_DECEL = 0.009;       // Passive deceleration when no key held
+const MAX_ROTATION_SPEED = 0.020; // Slightly quicker turn rate
+const ROTATION_ACCEL = 0.003;    // Turn rate ramps up gradually
 let velocity = 0;                // Current velocity (-MAX_SPEED to +MAX_SPEED)
 let rotationVelocity = 0;        // Current turn rate
 let isMoving = false;
@@ -1960,12 +1962,12 @@ class MarsSceneManager {
     this.collidables = [];  // Objects the rover can collide with { position, radius }
 
     // Procedural settlement spawning system
-    this.settlementGrid = 400;          // Grid spacing — one potential site every 400 units
+    this.settlementGrid = 400;          // Grid spacing â€” one potential site every 400 units
     this.settlementSpawnDist = 800;     // Distance at which a settlement spawns
     this.settlementDespawnDist = 1500;  // Distance at which a settlement is removed
-    this.settlements = new Map();       // key "gx,gz" → { group, center, type, collidableStart }
+    this.settlements = new Map();       // key "gx,gz" â†’ { group, center, type, collidableStart }
     this.lastSettlementCheck = 0;       // Throttle timestamp
-    this.roads = new Map();             // key "from→to" → { group }
+    this.roads = new Map();             // key "fromâ†’to" â†’ { group }
     this.roadVehicles = [];             // Vehicles driving along roads
 
     // Get reference to the terrain mesh for proper ground placement
@@ -1992,9 +1994,9 @@ class MarsSceneManager {
       : Date.now();
     this.rocketCycleDuration = 60000; // one full launch+arrival cycle per minute
 
-    console.log('🏗️ MARS SCENE MANAGER: About to create colony infrastructure');
+    console.log('ðŸ—ï¸ MARS SCENE MANAGER: About to create colony infrastructure');
     this.createColonyInfrastructure();
-    console.log('🏗️ MARS SCENE MANAGER: About to initialize rocket launch system');
+    console.log('ðŸ—ï¸ MARS SCENE MANAGER: About to initialize rocket launch system');
     this.initializeRocketLaunchSystem();
 
     // Create an optional guided driving route using blinking beacons
@@ -2003,7 +2005,7 @@ class MarsSceneManager {
     // Initialize optional ground traffic system (AI vehicles)
     this.initializeTrafficSystem();
 
-    console.log('✅ ✅ ✅ MarsSceneManager constructed with terrainSize=', terrainSize);
+    console.log('âœ… âœ… âœ… MarsSceneManager constructed with terrainSize=', terrainSize);
     console.log('Colony and rockets should now be visible in the scene!');
   }
 
@@ -2044,7 +2046,7 @@ class MarsSceneManager {
     this.rockets = [];
 
     padPositions.forEach((padPos, index) => {
-      // For reliability, keep pads near nominal ground level; terrain is centered at y≈0
+      // For reliability, keep pads near nominal ground level; terrain is centered at yâ‰ˆ0
       const groundY = 0;
 
       // Simple hex pad
@@ -2257,7 +2259,7 @@ class MarsSceneManager {
     headlightRight.position.z = -1.2;
     group.add(headlightLeft, headlightRight);
 
-    // Emissive headlight meshes are sufficient — no PointLight needed
+    // Emissive headlight meshes are sufficient â€” no PointLight needed
     return group;
   }
 
@@ -2298,80 +2300,106 @@ class MarsSceneManager {
     accent.position.set(-3.5, 3.0, 0);
     group.add(accent);
 
-    // Emissive accent is sufficient — no PointLight needed
+    // Emissive accent is sufficient â€” no PointLight needed
     return group;
   }
 
-  // Low-poly cybertruck-inspired vehicle
+  // Low-poly Tesla Cybertruck-inspired vehicle
   createCybertruckVehicle() {
     const group = new THREE.Group();
-    // Main stainless body
-    const bodyGeom = new THREE.BoxGeometry(10.5, 2.6, 4.5);
-    const bodyMat = new THREE.MeshStandardMaterial({
-      color: 0xd0d0d0,
+
+    const stainlessMat = new THREE.MeshStandardMaterial({
+      color: 0xbfc4c7,
       metalness: 0.95,
-      roughness: 0.2
+      roughness: 0.18
     });
-    const body = new THREE.Mesh(bodyGeom, bodyMat);
-    body.position.y = 2.3;
+    const glassMat = new THREE.MeshStandardMaterial({
+      color: 0x101820,
+      metalness: 0.7,
+      roughness: 0.12,
+      transparent: true,
+      opacity: 0.88
+    });
+    const blackMat = new THREE.MeshStandardMaterial({
+      color: 0x080808,
+      metalness: 0.35,
+      roughness: 0.72
+    });
+
+    // Low stainless skateboard/body.
+    const bodyGeom = new THREE.BoxGeometry(10.5, 2.6, 4.5);
+    const body = new THREE.Mesh(bodyGeom, stainlessMat);
+    body.position.y = 1.75;
     group.add(body);
 
-    // Wedge roof / cabin
-    const roofGeom = new THREE.CylinderGeometry(0, 4.8, 3.0, 4, 1, false);
-    const roofMat = new THREE.MeshStandardMaterial({
-      color: 0x20232a,
-      metalness: 0.8,
-      roughness: 0.15,
-      opacity: 0.9,
-      transparent: true
-    });
-    const roof = new THREE.Mesh(roofGeom, roofMat);
-    roof.rotation.z = Math.PI / 2;
-    roof.position.set(-0.4, 4.0, 0);
+    // Faceted cabin slabs read more like a Cybertruck than a triangle roof.
+    const windshield = new THREE.Mesh(new THREE.BoxGeometry(3.9, 0.18, 4.25), glassMat);
+    windshield.position.set(1.15, 3.05, 0);
+    windshield.rotation.z = -0.45;
+    group.add(windshield);
+
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(4.15, 0.22, 4.15), stainlessMat);
+    roof.position.set(-1.05, 3.72, 0);
+    roof.rotation.z = 0.06;
     group.add(roof);
 
+    const rearSail = new THREE.Mesh(new THREE.BoxGeometry(3.85, 0.22, 4.25), stainlessMat);
+    rearSail.position.set(-3.0, 3.0, 0);
+    rearSail.rotation.z = 0.42;
+    group.add(rearSail);
+
+    const sideGlassGeom = new THREE.BoxGeometry(3.1, 0.9, 0.16);
+    const leftGlass = new THREE.Mesh(sideGlassGeom, glassMat);
+    leftGlass.position.set(-0.15, 3.0, 2.32);
+    group.add(leftGlass);
+    const rightGlass = leftGlass.clone();
+    rightGlass.position.z = -2.32;
+    group.add(rightGlass);
+
     // Front light bar
-    const stripGeom = new THREE.BoxGeometry(0.3, 0.4, 3.8);
+    const stripGeom = new THREE.BoxGeometry(0.18, 0.16, 4.05);
     const stripMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       emissive: 0xffffff,
-      emissiveIntensity: 1.4
+      emissiveIntensity: 1.2
     });
     const lightStrip = new THREE.Mesh(stripGeom, stripMat);
-    lightStrip.position.set(5.4, 2.4, 0);
+    lightStrip.position.set(5.4, 2.2, 0);
     group.add(lightStrip);
 
-    // Emissive light strip is sufficient — no PointLight needed for each cybertruck
+    const rearStrip = new THREE.Mesh(stripGeom, stripMat);
+    rearStrip.position.set(-5.4, 2.05, 0);
+    rearStrip.scale.z = 0.82;
+    group.add(rearStrip);
+
+    // Emissive light strip is sufficient â€” no PointLight needed for each cybertruck
 
     // Dark lower fascia
     const bumperGeom = new THREE.BoxGeometry(10.6, 1.0, 4.6);
-    const bumperMat = new THREE.MeshStandardMaterial({
-      color: 0x111111,
-      metalness: 0.4,
-      roughness: 0.8
-    });
-    const bumper = new THREE.Mesh(bumperGeom, bumperMat);
-    bumper.position.y = 1.2;
+    const bumper = new THREE.Mesh(bumperGeom, blackMat);
+    bumper.position.y = 0.92;
     group.add(bumper);
 
     // Wheels
-    const wheelGeom = new THREE.CylinderGeometry(1.25, 1.25, 0.9, 18);
-    const wheelMat = new THREE.MeshStandardMaterial({
-      color: 0x111111,
-      metalness: 0.4,
-      roughness: 0.8
-    });
+    const wheelGeom = new THREE.CylinderGeometry(1.25, 1.25, 0.9, 24);
+    const rimGeom = new THREE.CylinderGeometry(0.62, 0.62, 0.94, 18);
+    const rimMat = new THREE.MeshStandardMaterial({ color: 0x777b80, metalness: 0.8, roughness: 0.28 });
     const wheelOffsets = [
-      [3.9, 0, 2.1],
-      [-3.9, 0, 2.1],
-      [3.9, 0, -2.1],
-      [-3.9, 0, -2.1]
+      [3.65, 0, 2.18],
+      [-3.85, 0, 2.18],
+      [3.65, 0, -2.18],
+      [-3.85, 0, -2.18]
     ];
     wheelOffsets.forEach(([x, y, z]) => {
-      const wheel = new THREE.Mesh(wheelGeom, wheelMat);
+      const wheel = new THREE.Mesh(wheelGeom, blackMat);
       wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(x, 1.2, z);
+      wheel.position.set(x, 0.92, z);
       group.add(wheel);
+
+      const rim = new THREE.Mesh(rimGeom, rimMat);
+      rim.rotation.z = Math.PI / 2;
+      rim.position.copy(wheel.position);
+      group.add(rim);
     });
 
     return group;
@@ -2420,8 +2448,13 @@ class MarsSceneManager {
     for (const anim of this.animatedObjects) {
       if (!anim.mesh) continue;
       if (anim.type === 'blink') {
-        const on = Math.sin(time * 0.003 + anim.phase) > 0.3;
-        anim.mesh.visible = on;
+        anim.mesh.visible = true;
+        if (anim.mesh.isPointLight && anim.mesh.userData.steadyIntensity === undefined) {
+          anim.mesh.userData.steadyIntensity = anim.mesh.intensity;
+        }
+        if (anim.mesh.isPointLight) {
+          anim.mesh.intensity = anim.mesh.userData.steadyIntensity;
+        }
       } else if (anim.type === 'rotate') {
         anim.mesh.rotation.y += anim.speed;
       }
@@ -2705,7 +2738,7 @@ class MarsSceneManager {
         this.scene.add(pylonMesh);
       });
       
-      // Reactor glow handled by emissive materials above — no additional PointLight needed
+      // Reactor glow handled by emissive materials above â€” no additional PointLight needed
     }
     
     // === ADVANCED SOLAR FARM - Hexagonal mirror array ===
@@ -2823,7 +2856,7 @@ class MarsSceneManager {
     centralLight.position.set(colonyOffsetX, groundY + 150, colonyOffsetZ);
     this.scene.add(centralLight);
     
-    // Spotlight beams removed — emissive materials and central light provide sufficient effect
+    // Spotlight beams removed â€” emissive materials and central light provide sufficient effect
     
     
     // Perimeter lighting system (reduced for performance)
@@ -2862,7 +2895,7 @@ class MarsSceneManager {
       });
     }
     
-    console.log('✅ Ultra high-definition futuristic colony created:', structures.length, 'main structures');
+    console.log('âœ… Ultra high-definition futuristic colony created:', structures.length, 'main structures');
 
     // Register collidable bounding volumes for the primary colony
     // Command center levels (3 stacked cylinders at colony center, radius ~70-80)
@@ -2882,7 +2915,7 @@ class MarsSceneManager {
       }
     });
 
-    // Create a lightweight secondary colony (not a full deep-clone — saves hundreds of objects)
+    // Create a lightweight secondary colony (not a full deep-clone â€” saves hundreds of objects)
     try {
       const perfSettings = getPerformanceSettings();
       if (!perfSettings.isMobile) {
@@ -2899,13 +2932,13 @@ class MarsSceneManager {
         });
         mainStructures.forEach(original => {
           if (!original) return;
-          const clone = original.clone(false); // shallow clone — no children (skips windows/beams)
+          const clone = original.clone(false); // shallow clone â€” no children (skips windows/beams)
           clone.position.x += replicaOffset.x;
           clone.position.z += replicaOffset.z;
           this.scene.add(clone);
         });
 
-        console.log('✅ Lightweight secondary colony created at', this.secondaryColonyCenter.x, this.secondaryColonyCenter.z);
+        console.log('âœ… Lightweight secondary colony created at', this.secondaryColonyCenter.x, this.secondaryColonyCenter.z);
 
         // Register secondary colony as collidable (mirror the primary colony center)
         this.registerCollidable(this.secondaryColonyCenter, 80);
@@ -2968,7 +3001,7 @@ class MarsSceneManager {
 
     // Try to find terrain mesh if not already set (one-time search)
     if (!this.terrainMesh) {
-      // Use the global marsSurface directly — fastest fallback
+      // Use the global marsSurface directly â€” fastest fallback
       if (typeof marsSurface !== 'undefined' && marsSurface) {
         this.terrainMesh = marsSurface;
       } else {
@@ -3023,7 +3056,7 @@ class MarsSceneManager {
       const center = new THREE.Vector3(roughPos.x, groundY, roughPos.z);
       this.futureCityCenter = center;
 
-      console.log('🏙️ Creating third futuristic city node at', center.x, center.z);
+      console.log('ðŸ™ï¸ Creating third futuristic city node at', center.x, center.z);
 
       this.createFuturisticCity(center);
       this.createCityBulletTrainSystem(center);
@@ -3047,7 +3080,7 @@ class MarsSceneManager {
     const colonyTallTowerHeight = 170; // based on residential towers near the main colony
     const flagshipHeight = colonyTallTowerHeight * 5; // ultra-tall centerpiece
 
-    // Compact skyline — reduced object count for performance
+    // Compact skyline â€” reduced object count for performance
     let skyscraperCount = 25;
     if (perfSettings.detailLevel === 'normal') {
       skyscraperCount = 18;
@@ -3108,7 +3141,7 @@ class MarsSceneManager {
       beacon.position.set(0, baseHeight / 2 + 3, 0);
       tower.add(beacon);
 
-      // Emissive beacon mesh — no PointLight needed per building
+      // Emissive beacon mesh â€” no PointLight needed per building
       this.animatedObjects.push({
         mesh: beacon,
         type: 'blink',
@@ -3155,14 +3188,14 @@ class MarsSceneManager {
       speed: 0.02
     });
 
-    // Flagship emissive glow is sufficient — SpotLights removed for performance
+    // Flagship emissive glow is sufficient â€” SpotLights removed for performance
 
     // Single city-wide ambient glow (reduced intensity)
     const cityLight = new THREE.PointLight(0x88aaff, 2.0, 1200);
     cityLight.position.set(center.x, center.y + 260, center.z);
     this.scene.add(cityLight);
 
-    console.log('✅ Futuristic third-city skyline created with', structures.length, 'skyscraper structures');
+    console.log('âœ… Futuristic third-city skyline created with', structures.length, 'skyscraper structures');
   }
 
   // Elevated rail and bullet train between the secondary colony and the new city
@@ -3249,7 +3282,7 @@ class MarsSceneManager {
         lastTime: null
       });
 
-      console.log('🚄 City bullet train system created between secondary colony and third city');
+      console.log('ðŸš„ City bullet train system created between secondary colony and third city');
     } catch (e) {
       console.warn('Failed to create city bullet train system:', e);
     }
@@ -3337,7 +3370,7 @@ class MarsSceneManager {
   // PROCEDURAL SETTLEMENT SPAWNING
   // ================================================================
 
-  // Deterministic hash for a grid cell — decides if a settlement exists there and its type
+  // Deterministic hash for a grid cell â€” decides if a settlement exists there and its type
   _settlementHash(gx, gz) {
     // Simple but effective integer hash
     let h = (gx * 374761393 + gz * 668265263) ^ 0x5bd1e995;
@@ -3393,7 +3426,7 @@ class MarsSceneManager {
       }
     }
 
-    // Scan grid cells around the player — spawn new settlements
+    // Scan grid cells around the player â€” spawn new settlements
     for (let gx = playerGX - scanRadius; gx <= playerGX + scanRadius; gx++) {
       for (let gz = playerGZ - scanRadius; gz <= playerGZ + scanRadius; gz++) {
         const key = `${gx},${gz}`;
@@ -3405,7 +3438,7 @@ class MarsSceneManager {
         const hash = this._settlementHash(gx, gz);
 
         // ~60% of grid cells have a settlement
-        if ((hash & 0xff) > 153) continue; // 154/256 ≈ 60%
+        if ((hash & 0xff) > 153) continue; // 154/256 â‰ˆ 60%
 
         const cx = gx * grid + ((hash >>> 8) & 0xff) / 256 * grid * 0.6;
         const cz = gz * grid + ((hash >>> 16) & 0xff) / 256 * grid * 0.6;
@@ -3418,14 +3451,14 @@ class MarsSceneManager {
         // Determine settlement type from hash bits
         const typeBits = (hash >>> 24) & 0xff;
         let type;
-        if (typeBits < 100) type = 'outpost';       // ~39% — small
-        else if (typeBits < 200) type = 'base';      // ~39% — medium
-        else type = 'city';                           // ~22% — large
+        if (typeBits < 100) type = 'outpost';       // ~39% â€” small
+        else if (typeBits < 200) type = 'base';      // ~39% â€” medium
+        else type = 'city';                           // ~22% â€” large
 
         const groundY = this.getTerrainHeight(cx, cz);
         const center = new THREE.Vector3(cx, groundY, cz);
 
-        console.log(`🏗️ Spawning procedural ${type} at (${Math.round(cx)}, ${Math.round(cz)})`);
+        console.log(`ðŸ—ï¸ Spawning procedural ${type} at (${Math.round(cx)}, ${Math.round(cz)})`);
 
         const collidableStart = this.collidables.length;
         const group = this._buildSettlement(type, center, hash);
@@ -3488,7 +3521,7 @@ class MarsSceneManager {
       for (let j = i + 1; j < entries.length; j++) {
         const [keyA, a] = entries[i];
         const [keyB, b] = entries[j];
-        const roadKey = keyA < keyB ? `${keyA}→${keyB}` : `${keyB}→${keyA}`;
+        const roadKey = keyA < keyB ? `${keyA}â†’${keyB}` : `${keyB}â†’${keyA}`;
         if (this.roads.has(roadKey)) continue;
 
         const dx = a.center.x - b.center.x;
@@ -3505,7 +3538,7 @@ class MarsSceneManager {
 
         const roadGroup = new THREE.Group();
 
-        // Road surface — flat plane stretched between the two settlements
+        // Road surface â€” flat plane stretched between the two settlements
         const roadWidth = 6;
         const roadGeom = new THREE.PlaneGeometry(dist, roadWidth, 1, 1);
         roadGeom.rotateX(-Math.PI / 2);
@@ -3549,8 +3582,13 @@ class MarsSceneManager {
       const dz = v.mesh.position.z - pz;
       if (dx * dx + dz * dz > this.settlementDespawnDist * this.settlementDespawnDist) {
         this.scene.remove(v.mesh);
-        v.mesh.geometry.dispose();
-        v.mesh.material.dispose();
+        v.mesh.traverse(obj => {
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) {
+            if (Array.isArray(obj.material)) obj.material.forEach(mat => mat.dispose());
+            else obj.material.dispose();
+          }
+        });
         this.roadVehicles.splice(i, 1);
       }
     }
@@ -3566,19 +3604,10 @@ class MarsSceneManager {
         const x = road.startX + (road.endX - road.startX) * t;
         const z = road.startZ + (road.endZ - road.startZ) * t;
 
-        // Small vehicle mesh
-        const w = 1.5 + Math.random() * 1.5;
-        const h = 1 + Math.random() * 0.8;
-        const d = 2.5 + Math.random() * 2;
-        const vehGeom = new THREE.BoxGeometry(w, h, d);
-        const colors = [0xcc3333, 0x3366cc, 0xcccc33, 0x33cc66, 0xcc6633, 0xeeeeee];
-        const vehMat = new THREE.MeshStandardMaterial({
-          color: colors[Math.floor(Math.random() * colors.length)],
-          metalness: 0.6,
-          roughness: 0.3
-        });
-        const veh = new THREE.Mesh(vehGeom, vehMat);
-        veh.position.set(x, road.groundY + h / 2 + 0.3, z);
+        const veh = this.createCybertruckVehicle();
+        const scale = 0.45 + Math.random() * 0.18;
+        veh.scale.set(scale, scale, scale);
+        veh.position.set(x, road.groundY + 0.3, z);
         veh.rotation.y = road.angle + (Math.random() < 0.5 ? 0 : Math.PI); // face either direction
 
         this.scene.add(veh);
@@ -3787,7 +3816,7 @@ class MarsSceneManager {
         addAntennaArray(cx + 35, cz, 3);
 
       } else if (variant === 1) {
-        // Spire outpost — a cluster of pointed towers
+        // Spire outpost â€” a cluster of pointed towers
         const count = 3 + Math.floor(rand() * 4);
         for (let i = 0; i < count; i++) {
           const angle = (i / count) * Math.PI * 2 + rand() * 0.5;
@@ -3886,7 +3915,7 @@ class MarsSceneManager {
         }
 
       } else if (variant === 1) {
-        // Reactor core base — central glowing cylinder with orbiting modules
+        // Reactor core base â€” central glowing cylinder with orbiting modules
         const coreR = 15 + rand() * 10;
         const coreH = 40 + rand() * 30;
         const coreGeom = new THREE.CylinderGeometry(coreR, coreR, coreH, 24);
@@ -3928,7 +3957,7 @@ class MarsSceneManager {
         }
 
       } else if (variant === 2) {
-        // Bio-dome research base — large transparent domes with greenhouses
+        // Bio-dome research base â€” large transparent domes with greenhouses
         const mainR = 30 + rand() * 15;
         const mainGeom = new THREE.SphereGeometry(mainR, 24, 16);
         const mainDome = new THREE.Mesh(mainGeom, glassMat);
@@ -3961,7 +3990,7 @@ class MarsSceneManager {
         addAntennaArray(cx + mainR + 20, cz - 15, 4);
 
       } else {
-        // Industrial base — tall chimneys, storage tanks, cranes
+        // Industrial base â€” tall chimneys, storage tanks, cranes
         const centralH = 25 + rand() * 15;
         const centralR = 20 + rand() * 10;
         const centralGeom = new THREE.CylinderGeometry(centralR, centralR + 5, centralH, 16);
@@ -4021,7 +4050,7 @@ class MarsSceneManager {
       }
 
     } else {
-      // ==== CITY — the wildest part ====
+      // ==== CITY â€” the wildest part ====
       const cityRadius = 150 + rand() * 120;
       const towerCount = 10 + Math.floor(rand() * 12);
 
@@ -4062,7 +4091,7 @@ class MarsSceneManager {
             addFloatingRing(x, gy + rY, z, rR + 3, 0.8);
           }
         } else if (towerShape === 2) {
-          // Crystal shard — tilted octahedron
+          // Crystal shard â€” tilted octahedron
           const crystalGeom = new THREE.OctahedronGeometry(w * 0.7, 0);
           const crystalMat = new THREE.MeshStandardMaterial({ color: pal.accent, metalness: 0.95, roughness: 0.05, transparent: true, opacity: 0.7 });
           const crystal = new THREE.Mesh(crystalGeom, crystalMat);
@@ -4122,7 +4151,7 @@ class MarsSceneManager {
           tower.position.set(x, gy + h / 2, z);
           group.add(tower);
           this.registerCollidable({ x, z }, Math.max(w, d) / 2 + 2);
-          // Neon edges — random accent
+          // Neon edges â€” random accent
           for (let e = 0; e < 4; e++) {
             const eGeom = new THREE.BoxGeometry(0.6, h, 0.6);
             const edge = new THREE.Mesh(eGeom, rand() > 0.5 ? glowMat : glow2Mat);
@@ -4169,12 +4198,12 @@ class MarsSceneManager {
       if (flagStyle === 0) {
         // Twisted flagship
         makeTwistedTower(cx, cz, flagW, flagH, flagW, 0.06 + rand() * 0.08);
-        // Override material on flagship segments — re-add glow
+        // Override material on flagship segments â€” re-add glow
         addFloatingRing(cx, gy + flagH * 0.5, cz, flagW + 10, 2);
         addFloatingRing(cx, gy + flagH * 0.75, cz, flagW + 6, 1.5);
         addFloatingRing(cx, gy + flagH * 0.95, cz, flagW + 3, 1.2);
       } else if (flagStyle === 1) {
-        // Obelisk — tapered with a pointed crown
+        // Obelisk â€” tapered with a pointed crown
         const obGeom = new THREE.CylinderGeometry(flagW * 0.15, flagW * 0.55, flagH, 6);
         const ob = new THREE.Mesh(obGeom, flagMat);
         ob.position.set(cx, gy + flagH / 2, cz);
@@ -4293,7 +4322,7 @@ class MarsSceneManager {
     // High-speed bullet train between the two colonies
     this.updateBulletTrain(now);
 
-    // Procedural settlements — spawn/despawn based on proximity
+    // Procedural settlements â€” spawn/despawn based on proximity
     this.updateSettlements(playerPosition);
   }
 
@@ -4489,13 +4518,84 @@ class MarsSceneManager {
         lastTime: null
       });
 
-      console.log('🚄 Bullet train system created between colonies');
+      console.log('ðŸš„ Bullet train system created between colonies');
     } catch (e) {
       console.warn('Failed to create bullet train system:', e);
     }
   }
 
-  // Build a 4-car high-speed train that carries glowing Optimus-style robot pods
+  createOptimusRobot(scale = 1) {
+    const robot = new THREE.Group();
+    const whiteMat = new THREE.MeshStandardMaterial({ color: 0xe8edf2, metalness: 0.65, roughness: 0.25 });
+    const blackMat = new THREE.MeshStandardMaterial({ color: 0x11151a, metalness: 0.6, roughness: 0.35 });
+    const blueMat = new THREE.MeshStandardMaterial({
+      color: 0x66bbff,
+      emissive: 0x1166cc,
+      emissiveIntensity: 0.7,
+      metalness: 0.35,
+      roughness: 0.25
+    });
+
+    const pelvis = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.24, 0.28), blackMat);
+    pelvis.position.y = 0.74;
+    robot.add(pelvis);
+
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.72, 0.30), whiteMat);
+    torso.position.y = 1.20;
+    robot.add(torso);
+
+    const chest = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.18, 0.035), blueMat);
+    chest.position.set(0, 1.34, 0.17);
+    robot.add(chest);
+
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.30, 0.28), whiteMat);
+    head.position.y = 1.72;
+    robot.add(head);
+
+    const face = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.12, 0.035), blackMat);
+    face.position.set(0, 1.72, 0.16);
+    robot.add(face);
+
+    const antennaGeom = new THREE.BoxGeometry(0.035, 0.18, 0.035);
+    const leftAntenna = new THREE.Mesh(antennaGeom, whiteMat);
+    leftAntenna.position.set(-0.14, 1.96, 0);
+    robot.add(leftAntenna);
+    const rightAntenna = leftAntenna.clone();
+    rightAntenna.position.x = 0.14;
+    robot.add(rightAntenna);
+
+    const limbMat = whiteMat;
+    const armGeom = new THREE.BoxGeometry(0.16, 0.58, 0.18);
+    const leftArm = new THREE.Mesh(armGeom, limbMat);
+    leftArm.position.set(-0.46, 1.13, 0);
+    leftArm.rotation.z = -0.16;
+    robot.add(leftArm);
+    const rightArm = leftArm.clone();
+    rightArm.position.x = 0.46;
+    rightArm.rotation.z = 0.16;
+    robot.add(rightArm);
+
+    const legGeom = new THREE.BoxGeometry(0.18, 0.70, 0.20);
+    const leftLeg = new THREE.Mesh(legGeom, limbMat);
+    leftLeg.position.set(-0.17, 0.36, 0);
+    robot.add(leftLeg);
+    const rightLeg = leftLeg.clone();
+    rightLeg.position.x = 0.17;
+    robot.add(rightLeg);
+
+    const footGeom = new THREE.BoxGeometry(0.24, 0.12, 0.36);
+    const leftFoot = new THREE.Mesh(footGeom, blackMat);
+    leftFoot.position.set(-0.17, -0.03, 0.06);
+    robot.add(leftFoot);
+    const rightFoot = leftFoot.clone();
+    rightFoot.position.x = 0.17;
+    robot.add(rightFoot);
+
+    robot.scale.set(scale, scale, scale);
+    return robot;
+  }
+
+  // Build a 4-car high-speed train that carries Optimus-style robots
   createBulletTrainMesh() {
     const train = new THREE.Group();
 
@@ -4530,15 +4630,6 @@ class MarsSceneManager {
       emissive: 0xffffff,
       emissiveIntensity: 1.35
     });
-    const robotPodGeom = new THREE.BoxGeometry(0.35, 1.4, 0.6);
-    const robotPodMat = new THREE.MeshStandardMaterial({
-      color: 0x88ccff,
-      emissive: 0x66bbff,
-      emissiveIntensity: 0.9,
-      metalness: 0.4,
-      roughness: 0.35
-    });
-
     const totalTrainLength = carCount * carLength + (carCount - 1) * carGap;
     const trainOriginOffset = -totalTrainLength / 2 + carLength / 2;
 
@@ -4560,14 +4651,15 @@ class MarsSceneManager {
       windowsBackSide.position.x = -windowsFrontSide.position.x;
       car.add(windowsBackSide);
 
-      // Interior "Optimus" robot pods as glowing silhouettes
-      const podsPerCar = 3;
-      for (let j = 0; j < podsPerCar; j++) {
-        const pod = new THREE.Mesh(robotPodGeom, robotPodMat);
+      // Interior Optimus robots as small humanoid silhouettes.
+      const robotsPerCar = 3;
+      for (let j = 0; j < robotsPerCar; j++) {
+        const optimus = this.createOptimusRobot(0.72);
         const zSpan = carLength * 0.6;
-        const localZ = -zSpan / 2 + (zSpan / (podsPerCar - 1 || 1)) * j;
-        pod.position.set(0, 2.0, localZ);
-        car.add(pod);
+        const localZ = -zSpan / 2 + (zSpan / (robotsPerCar - 1 || 1)) * j;
+        optimus.position.set(0, 1.36, localZ);
+        optimus.rotation.y = j % 2 === 0 ? 0.15 : -0.15;
+        car.add(optimus);
       }
 
       if (isEngine) {
@@ -5053,8 +5145,7 @@ class MarsSceneManager {
   // }
 }
 
-// Add a day/night toggle and cycle
-let isDaytime = false; // Start at night so the starry sky is visible
+// Add a day/night toggle and cycle (isDaytime declared at top of file)
 console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
 
 // Scene manager is created via loadNonEssentialComponents / initializeScene - no duplicate needed here
@@ -5145,6 +5236,7 @@ function animate(time) {
 
   // Skip frames if browser tab is inactive or delta is too large (indicating lag)
   if (delta > 100) return;
+  const frameScale = Math.min(delta / 16.67, 2.5);
 
   // Mobile performance monitoring with adaptive throttling  
   if (currentPerfSettings.isMobile) {
@@ -5232,28 +5324,31 @@ function animate(time) {
 
   // Smooth acceleration/deceleration physics
   if (keys.w) {
-    velocity = Math.min(velocity + ACCELERATION, MAX_SPEED);
+    const accel = velocity < 0 ? DECELERATION : ACCELERATION;
+    velocity = Math.min(velocity + accel * frameScale, MAX_SPEED);
   } else if (keys.s) {
-    velocity = Math.max(velocity - ACCELERATION, -MAX_SPEED * 0.7); // reverse slower
+    const accel = velocity > 0 ? DECELERATION : ACCELERATION;
+    velocity = Math.max(velocity - accel * frameScale, -MAX_SPEED * REVERSE_SPEED_FACTOR);
   } else {
     // Coast to a stop when no key held
     if (velocity > 0) {
-      velocity = Math.max(velocity - COAST_DECEL, 0);
+      velocity = Math.max(velocity - COAST_DECEL * frameScale, 0);
     } else if (velocity < 0) {
-      velocity = Math.min(velocity + COAST_DECEL, 0);
+      velocity = Math.min(velocity + COAST_DECEL * frameScale, 0);
     }
   }
 
   if (Math.abs(velocity) > 0.0005) {
     isMoving = true;
-    // Forward is negative Z in Three.js — negate velocity to match original convention
-    const moveX = Math.sin(roverYaw) * (-velocity);
-    const moveZ = Math.cos(roverYaw) * (-velocity);
+    // Forward is negative Z in Three.js â€” negate velocity to match original convention
+    const frameVelocity = velocity * frameScale;
+    const moveX = Math.sin(roverYaw) * (-frameVelocity);
+    const moveZ = Math.cos(roverYaw) * (-frameVelocity);
 
     rover.position.x += moveX;
     rover.position.z += moveZ;
 
-    // Collision detection — revert if the rover hits a structure
+    // Collision detection â€” revert if the rover hits a structure
     if (window.marsSceneManager &&
         window.marsSceneManager.checkCollision(rover.position.x, rover.position.z, 2.5)) {
       rover.position.x = previousPosition.x;
@@ -5290,7 +5385,7 @@ function animate(time) {
   );
 
   // If we're too far from the current chunk center, update the chunk tracking
-  // (no longer blocks movement — the rover can explore freely)
+  // (no longer blocks movement â€” the rover can explore freely)
   if (chunkDistance > 2) {
     terrainSystem.currentChunk = { ...currentChunk };
   }
@@ -5300,20 +5395,20 @@ function animate(time) {
   if (keys.a || keys.d) {
     const turnDir = keys.a ? 1 : -1;
     rotationVelocity = Math.min(
-      Math.abs(rotationVelocity) + ROTATION_ACCEL,
+      Math.abs(rotationVelocity) + ROTATION_ACCEL * frameScale,
       MAX_ROTATION_SPEED
     ) * turnDir;
   } else {
     // Dampen rotation when key released
-    rotationVelocity *= 0.6;
+    rotationVelocity *= Math.pow(0.6, frameScale);
     if (Math.abs(rotationVelocity) < 0.0001) rotationVelocity = 0;
   }
 
   if (rotationVelocity !== 0) {
-    const effectiveRotation = rotationVelocity * speedFactor;
+    const effectiveRotation = rotationVelocity * speedFactor * frameScale;
     roverYaw += effectiveRotation;
 
-    // Normalize roverYaw to keep it within 0-2π range
+    // Normalize roverYaw to keep it within 0-2Ï€ range
     roverYaw = roverYaw % (Math.PI * 2);
     if (roverYaw < 0) roverYaw += Math.PI * 2;
 
@@ -5323,13 +5418,13 @@ function animate(time) {
     // Differential wheel rotation for turning - only update if moving
     if (isMoving) {
       const turnDirection = rotationVelocity > 0 ? 1 : -1;
-      updateWheelRotation(wheels, currentSpeed, turnDirection);
+      updateWheelRotation(wheels, currentSpeed * frameScale, turnDirection);
     }
   } else if (isMoving) {
     // Straight movement, all wheels rotate at the same speed
     if (frameCount % 2 === 0) {
       wheels.forEach(wheel => {
-        wheel.rotation.x += currentSpeed * 0.3;
+        wheel.rotation.x += currentSpeed * frameScale * 0.3;
       });
     }
   }
@@ -5626,7 +5721,7 @@ function updateCamera() {
       camera.lookAt(
         vectors.head.x + vectors.forward.x * 10,
         vectors.head.y,
-        vectors.forward.z * 10
+        vectors.head.z + vectors.forward.z * 10
       );
       break;
 
@@ -5980,7 +6075,7 @@ function createRealisticMarsTerrain() {
     // 4.5 Add occasional very high mountains (deterministic selection)
     // Instead of looping 30 mountains and rolling Math.random() per vertex,
     // pre-select only ~3 mountains using a deterministic filter.
-    const highMountainCount = 3; // only 3 actual mountains (was 30 × 10% = ~3 anyway)
+    const highMountainCount = 3; // only 3 actual mountains (was 30 Ã— 10% = ~3 anyway)
     const highMountainSeeds = [2, 7, 19]; // fixed indices from the old 0-29 range
     for (let hi = 0; hi < highMountainCount; hi++) {
       const hm = highMountainSeeds[hi];
@@ -6084,15 +6179,15 @@ function createRealisticMarsTerrain() {
   let material;
   
   if (terrainPerfSettings.isMobile) {
-    // Mobile: basic material — warm Mars red, no vertex colors needed
+    // Mobile: basic material - deep Mars red, with vertex colors for variation
     material = new THREE.MeshBasicMaterial({
-      color: 0xcc4411,
+      color: 0xb33112,
       vertexColors: true,
       side: THREE.DoubleSide,
       fog: true
     });
   } else {
-    // Desktop: Lambert — simple, predictable lighting, vertex colors show correctly
+    // Desktop: Lambert â€” simple, predictable lighting, vertex colors show correctly
     // (avoids PBR colour darkening under ACES tone mapping)
     material = new THREE.MeshLambertMaterial({
       color: 0xffffff, // white base so vertex colours are the sole tint
@@ -6115,41 +6210,41 @@ function createRealisticMarsTerrain() {
     const px = positionArray[i * 3];
     const pz = positionArray[i * 3 + 2];
 
-    // Base: vivid Mars iron-oxide red — vertex colours are the sole tint
-    let r = 0.82;
-    let g = 0.34;
-    let b = 0.12;
+    // Base: dark iron-oxide red, closer to Mars regolith under night lighting
+    let r = 0.66;
+    let g = 0.20;
+    let b = 0.08;
 
-    // High terrain → pale dusty pink (wind-eroded highlands)
+    // High terrain -> dusty red-orange highlands, not pale sand
     if (elevation > 8) {
       const t = Math.min((elevation - 8) / 20, 1.0);
-      r = r + (0.82 - r) * t;
-      g = g + (0.62 - g) * t;
-      b = b + (0.50 - b) * t;
+      r = r + (0.78 - r) * t;
+      g = g + (0.31 - g) * t;
+      b = b + (0.15 - b) * t;
     }
 
-    // Very high → light buff/cream rock (exposed bedrock)
+    // Very high -> muted rusty bedrock, avoiding cream-colored sand
     if (elevation > 20) {
       const t = Math.min((elevation - 20) / 15, 1.0);
-      r = r + (0.88 - r) * t;
-      g = g + (0.76 - g) * t;
-      b = b + (0.60 - b) * t;
+      r = r + (0.58 - r) * t;
+      g = g + (0.27 - g) * t;
+      b = b + (0.16 - b) * t;
     }
 
-    // Low/crater floors → dark iron grey (basalt, compacted soil)
+    // Low/crater floors -> dark basaltic red-brown
     if (elevation < -3) {
       const t = Math.min((-elevation - 3) / 8, 0.6);
-      r = r * (1 - t) + 0.38 * t;
-      g = g * (1 - t) + 0.22 * t;
-      b = b * (1 - t) + 0.12 * t;
+      r = r * (1 - t) + 0.28 * t;
+      g = g * (1 - t) + 0.10 * t;
+      b = b * (1 - t) + 0.06 * t;
     }
 
     // Subtle geological variation (streaks, veins)
     const vein = (Math.sin(px * 0.73 + pz * 1.17) * Math.cos(px * 1.53 - pz * 0.89)) * 0.04;
     const ochre = (Math.sin(px * 0.19 - pz * 0.27) * Math.cos(px * 0.34 + pz * 0.11)) * 0.03;
-    r = Math.max(0, Math.min(1, r + vein + ochre * 0.5));
-    g = Math.max(0, Math.min(1, g + vein * 0.6 + ochre * 0.3));
-    b = Math.max(0, Math.min(1, b + vein * 0.3));
+    r = Math.max(0, Math.min(1, r + vein + ochre * 0.35));
+    g = Math.max(0, Math.min(1, g + vein * 0.35 + ochre * 0.12));
+    b = Math.max(0, Math.min(1, b + vein * 0.16));
 
     colors[i * 3]     = r;
     colors[i * 3 + 1] = g;
@@ -6387,32 +6482,178 @@ function createMarsRoughnessMap() {
   return new THREE.CanvasTexture(canvas);
 }
 
-// Create a skybox with Milky Way and planets - optimized smooth version
+// Create a skybox with procedural shader sky, Milky Way, and planets
 function createSpaceSkybox() {
-  console.log("Creating smooth night sky...");
+  console.log("Creating shader-based night sky...");
 
-  const perfSettings = getPerformanceSettings();
   const skyboxGroup = new THREE.Group();
   skyboxGroup.renderOrder = -1000;
 
-  // === LAYER 1: Static background sphere (smooth, high-quality) ===
-  // Increased segments for smoother appearance (no triangles visible)
-  const skyboxGeometry = new THREE.SphereGeometry(5900, 64, 48); // Balanced: smooth enough at distance, fewer triangles
-  const texture = createSphericalSkyTexture(perfSettings.isMobile ? 1024 : 2048); // Reduced from 4096 to prevent hanging
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-  texture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 4); // Cap anisotropy
-  texture.generateMipmaps = true;
+  // === LAYER 1: Procedural shader sky sphere ===
+  const skyboxGeometry = new THREE.SphereGeometry(5900, 64, 48);
 
-  const skyboxMaterial = new THREE.MeshBasicMaterial({
-    map: texture, side: THREE.BackSide, fog: false,
+  const skyboxMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0.0 }
+    },
+    vertexShader: `
+      varying vec3 vWorldPos;
+      void main() {
+        vWorldPos = normalize(position);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      varying vec3 vWorldPos;
+
+      // --- Hash / noise helpers (GPU-friendly) ---
+      float hash(vec2 p) {
+        p = fract(p * vec2(443.897, 441.423));
+        p += dot(p, p.yx + 19.19);
+        return fract((p.x + p.y) * p.x);
+      }
+      float hash3(vec3 p) {
+        p = fract(p * vec3(443.897, 441.423, 437.195));
+        p += dot(p, p.yzx + 19.19);
+        return fract((p.x + p.y + p.z) * p.x);
+      }
+
+      // Smooth 3D value noise for the Milky Way
+      float noise3(vec3 p) {
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float n = mix(
+          mix(mix(hash3(i), hash3(i + vec3(1,0,0)), f.x),
+              mix(hash3(i + vec3(0,1,0)), hash3(i + vec3(1,1,0)), f.x), f.y),
+          mix(mix(hash3(i + vec3(0,0,1)), hash3(i + vec3(1,0,1)), f.x),
+              mix(hash3(i + vec3(0,1,1)), hash3(i + vec3(1,1,1)), f.x), f.y), f.z);
+        return n;
+      }
+
+      // fBm (fractal Brownian motion) for richer Milky Way detail
+      float fbm(vec3 p) {
+        float v = 0.0, a = 0.5;
+        for (int i = 0; i < 5; i++) {
+          v += a * noise3(p);
+          p *= 2.1;
+          a *= 0.48;
+        }
+        return v;
+      }
+
+      // --- Stars ---
+      // Returns brightness of the nearest star in a grid cell
+      float starField(vec3 dir, float scale, float threshold) {
+        vec3 p = dir * scale;
+        vec3 cell = floor(p);
+        float bright = 0.0;
+        // Check this cell and neighbors for closest star
+        for (int dx = -1; dx <= 1; dx++)
+        for (int dy = -1; dy <= 1; dy++)
+        for (int dz = -1; dz <= 1; dz++) {
+          vec3 c = cell + vec3(float(dx), float(dy), float(dz));
+          float h = hash3(c);
+          if (h > threshold) {
+            vec3 starPos = c + vec3(hash3(c + 0.1), hash3(c + 0.2), hash3(c + 0.3));
+            float d = length(p - starPos);
+            float size = 0.02 + 0.04 * hash3(c + 0.5);
+            float b = smoothstep(size, 0.0, d);
+            // Twinkle
+            float twinkle = 0.7 + 0.3 * sin(uTime * 0.0008 * (hash3(c + 0.7) * 4.0 + 1.0) + hash3(c + 0.9) * 6.28);
+            bright = max(bright, b * twinkle);
+          }
+        }
+        return bright;
+      }
+
+      void main() {
+        vec3 dir = normalize(vWorldPos);
+        float elevation = dir.y; // -1 bottom, +1 top
+
+        // --- Sky gradient: deep space colors for Mars night ---
+        vec3 zenith  = vec3(0.014, 0.020, 0.050); // blue-tinted deep space overhead
+        vec3 horizon = vec3(0.044, 0.022, 0.020); // rusty horizon with a cool blue lift
+        vec3 nadir   = vec3(0.0, 0.0, 0.0);      // black below
+
+        float t = elevation * 0.5 + 0.5; // remap to 0..1
+        vec3 sky = mix(nadir, horizon, smoothstep(0.0, 0.45, t));
+        sky = mix(sky, zenith, smoothstep(0.45, 1.0, t));
+        sky += vec3(0.015, 0.026, 0.060) * smoothstep(0.08, 0.95, t);
+
+        // Subtle warm Mars dust glow near the horizon
+        float horizonGlow = exp(-abs(elevation) * 8.0);
+        sky += vec3(0.10, 0.032, 0.020) * horizonGlow * 0.22;
+
+        // --- Milky Way band ---
+        // Rotate direction so the band runs diagonally across the sky
+        float angle = -0.55;
+        float ca = cos(angle), sa = sin(angle);
+        vec3 rd = vec3(
+          dir.x * ca - dir.z * sa,
+          dir.y,
+          dir.x * sa + dir.z * ca
+        );
+        float bandDist = abs(rd.y);
+        float bandMask = smoothstep(0.28, 0.0, bandDist);
+
+        if (bandMask > 0.01) {
+          // Multi-octave noise cloud along the band
+          vec3 nCoord = rd * 6.0 + vec3(0.0, 0.0, uTime * 0.000002);
+          float n = fbm(nCoord);
+          float detail = fbm(nCoord * 3.0 + 1.5);
+
+          float milky = bandMask * smoothstep(0.32, 0.65, n);
+          milky += bandMask * 0.4 * smoothstep(0.35, 0.7, detail);
+
+          // Core brightness
+          float core = smoothstep(0.12, 0.0, bandDist) * smoothstep(0.38, 0.65, n) * 0.6;
+          milky += core;
+
+          // Color: blue-white with slight warmth in the core
+          vec3 milkyColor = mix(
+            vec3(0.35, 0.45, 0.7),   // blue-white outer
+            vec3(0.7, 0.65, 0.85),   // pale lavender core
+            core
+          );
+          // Add faint pink/magenta knots
+          float knots = smoothstep(0.62, 0.75, detail) * bandMask * 0.3;
+          milkyColor += vec3(0.25, 0.05, 0.15) * knots;
+
+          sky += milkyColor * milky * 0.70;
+        }
+
+        // --- Static star layers (painted by shader, no canvas) ---
+        float s1 = starField(dir, 80.0, 0.925);  // sparse bright stars
+        float s2 = starField(dir, 200.0, 0.885);  // medium density
+        float s3 = starField(dir, 500.0, 0.835);  // dense dim stars
+
+        // Star colors: mostly white-blue, some warm
+        vec3 starCol1 = mix(vec3(0.8, 0.85, 1.0), vec3(1.0, 0.9, 0.7), hash(dir.xz * 80.0));
+        vec3 starCol2 = mix(vec3(0.85, 0.9, 1.0), vec3(1.0, 0.85, 0.65), hash(dir.xz * 200.0));
+
+        sky += starCol1 * s1 * 0.95;
+        sky += starCol2 * s2 * 0.48;
+        sky += vec3(0.7, 0.75, 0.9) * s3 * 0.18;
+
+        // Fade stars near horizon (atmospheric extinction)
+        float extinction = smoothstep(0.0, 0.15, abs(elevation));
+        sky = mix(sky * vec3(1.0, 0.7, 0.5) * 0.3, sky, extinction);
+
+        gl_FragColor = vec4(sky, 1.0);
+      }
+    `,
+    side: THREE.BackSide,
+    fog: false,
     depthWrite: false
   });
+
   const skyboxMesh = new THREE.Mesh(skyboxGeometry, skyboxMaterial);
   skyboxMesh.frustumCulled = false;
   skyboxGroup.add(skyboxMesh);
 
-  // === LAYER 2: Twinkling star particles (reduced count for performance) ===
+  // === LAYER 2: Twinkling star particles for extra sparkle ===
   const starSystem = createTwinklingStars();
   skyboxGroup.add(starSystem.points);
   skyboxGroup.userData.starSystem = starSystem;
@@ -6422,16 +6663,32 @@ function createSpaceSkybox() {
   skyboxGroup.add(shootingStarSystem.group);
   skyboxGroup.userData.shootingStars = shootingStarSystem;
 
+  // === LAYER 4: Distant asteroid silhouettes ===
+  const asteroidSystem = createAsteroidSkyLayer();
+  skyboxGroup.add(asteroidSystem.group);
+  skyboxGroup.userData.asteroids = asteroidSystem;
+
+  // === LAYER 5: Small distant planets ===
+  const planetSystem = createDistantPlanetLayer();
+  skyboxGroup.add(planetSystem.group);
+  skyboxGroup.userData.planets = planetSystem;
+
   // Store update function for animation loop
   skyboxGroup.userData.update = function(time) {
+    // Update shader time uniform
+    skyboxMaterial.uniforms.uTime.value = time;
     // Twinkle stars
     if (starSystem && starSystem.update) starSystem.update(time);
     // Shooting stars
     if (shootingStarSystem && shootingStarSystem.update) shootingStarSystem.update(time);
+    // Distant asteroids
+    if (asteroidSystem && asteroidSystem.update) asteroidSystem.update(time);
+    // Small planets
+    if (planetSystem && planetSystem.update) planetSystem.update(time);
   };
 
   skyboxGroup.frustumCulled = false;
-  console.log("Smooth night sky created successfully");
+  console.log("Shader night sky created successfully");
   return skyboxGroup;
 }
 
@@ -6440,8 +6697,8 @@ function createSpaceSkybox() {
 // ============================================================
 function createTwinklingStars() {
   const perfSettings = getPerformanceSettings();
-  // Higher star count for denser field, still performance-aware
-  const starCount = perfSettings.isMobile ? 6500 : 20000;
+  // Dense star field for a brighter, deeper Mars night sky
+  const starCount = perfSettings.isMobile ? 7200 : 26000;
   const skyRadius = 5500;
 
   const positions = new Float32Array(starCount * 3);
@@ -6491,12 +6748,12 @@ function createTwinklingStars() {
       colors[i * 3 + 2] = 1.0;
     }
 
-    // Star sizes — boosted across all tiers for a bright, spangled sky
+    // Small stars with occasional brighter points for a richer sky
     const sizeRoll = Math.random();
-    if (sizeRoll < 0.60) sizes[i] = 2.5 + Math.random() * 2.5;       // Common dim
-    else if (sizeRoll < 0.88) sizes[i] = 4.5 + Math.random() * 3.0;  // Medium
-    else if (sizeRoll < 0.97) sizes[i] = 7.0 + Math.random() * 4.0;  // Bright
-    else sizes[i] = 11.0 + Math.random() * 6.0;                       // Rare brilliant
+    if (sizeRoll < 0.58) sizes[i] = 1.5 + Math.random() * 1.4;
+    else if (sizeRoll < 0.86) sizes[i] = 2.5 + Math.random() * 1.8;
+    else if (sizeRoll < 0.975) sizes[i] = 4.2 + Math.random() * 2.6;
+    else sizes[i] = 7.0 + Math.random() * 3.0;
 
     phases[i] = Math.random() * Math.PI * 2;
     speeds[i] = 0.3 + Math.random() * 2.5; // Various twinkle speeds
@@ -6511,11 +6768,11 @@ function createTwinklingStars() {
   const starTexture = createStarTexture();
 
   const material = new THREE.PointsMaterial({
-    size: 10, // Larger base size so stars are clearly visible
+    size: 8,
     map: starTexture,
     vertexColors: true,
     transparent: true,
-    opacity: 1.0,
+    opacity: 0.95,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
     sizeAttenuation: true,
@@ -6543,7 +6800,7 @@ function createTwinklingStars() {
       const end = Math.min(start + batchSize, starCount);
       for (let i = start; i < end; i++) {
         // Smooth sinusoidal twinkling with harmonics for natural look
-        const twinkle = 0.55 + 0.45 * (
+        const twinkle = 0.60 + 0.28 * (
           Math.sin(t * speeds[i] + phases[i]) * 0.5 +
           Math.sin(t * speeds[i] * 1.7 + phases[i] * 2.3) * 0.3 +
           Math.sin(t * speeds[i] * 0.4 + phases[i] * 0.7) * 0.2
@@ -6557,7 +6814,7 @@ function createTwinklingStars() {
 }
 
 function createStarTexture() {
-  // 64px is enough — stars are tiny points; higher res adds no benefit
+  // 64px is enough â€” stars are tiny points; higher res adds no benefit
   const canvas = document.createElement('canvas');
   canvas.width = 64;
   canvas.height = 64;
@@ -6567,12 +6824,12 @@ function createStarTexture() {
   // Sharp bright core (inner 8%) fading to a very soft halo
   // This gives crisp point-of-light look, not a blurry blob
   const gradient = ctx.createRadialGradient(c, c, 0, c, c, c);
-  gradient.addColorStop(0,    'rgba(255,255,255,1.0)');
-  gradient.addColorStop(0.08, 'rgba(255,255,255,1.0)');
-  gradient.addColorStop(0.18, 'rgba(255,255,255,0.85)');
-  gradient.addColorStop(0.35, 'rgba(255,255,255,0.40)');
-  gradient.addColorStop(0.55, 'rgba(255,255,255,0.10)');
-  gradient.addColorStop(0.80, 'rgba(255,255,255,0.02)');
+  gradient.addColorStop(0,    'rgba(255,255,255,0.92)');
+  gradient.addColorStop(0.08, 'rgba(255,255,255,0.82)');
+  gradient.addColorStop(0.18, 'rgba(255,255,255,0.58)');
+  gradient.addColorStop(0.35, 'rgba(255,255,255,0.25)');
+  gradient.addColorStop(0.55, 'rgba(255,255,255,0.08)');
+  gradient.addColorStop(0.80, 'rgba(255,255,255,0.018)');
   gradient.addColorStop(1.0,  'rgba(255,255,255,0.0)');
 
   ctx.fillStyle = gradient;
@@ -6590,7 +6847,7 @@ function createStarTexture() {
 function createShootingStarSystem() {
   const group = new THREE.Group();
   const skyRadius = 5000;
-  // Keep only a few visible shooting stars at once
+  // Keep several shooting stars visible without becoming a full meteor shower
   const maxTrails = 3;
   const trails = [];
 
@@ -6619,10 +6876,10 @@ function createShootingStarSystem() {
     direction.normalize();
 
     // Trail length
-    const trailLen = 150 + Math.random() * 250;
+    const trailLen = 230 + Math.random() * 340;
 
     // Create trail geometry (thin stretched plane)
-    const trailGeo = new THREE.PlaneGeometry(trailLen, 3 + Math.random() * 4);
+    const trailGeo = new THREE.PlaneGeometry(trailLen, 4 + Math.random() * 5);
     const trailMat = new THREE.MeshBasicMaterial({
       map: trailTexture,
       transparent: true,
@@ -6634,7 +6891,7 @@ function createShootingStarSystem() {
     const trail = new THREE.Mesh(trailGeo, trailMat);
     trail.frustumCulled = false;
 
-    // Bright head glow (no PointLight — too expensive for transient effects)
+    // Bright head glow (no PointLight â€” too expensive for transient effects)
     const headGeo = new THREE.SphereGeometry(4, 6, 6);
     const headMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
@@ -6648,10 +6905,9 @@ function createShootingStarSystem() {
     group.add(trail);
     group.add(head);
 
-    const speed = 1500 + Math.random() * 2000;
+    const speed = 1900 + Math.random() * 2600;
     const lifetime = length / speed;
-    // Slightly brighter so the few stars are clearly visible
-    const brightness = 0.8 + Math.random() * 0.3;
+    const brightness = 0.55 + Math.random() * 0.35;
 
     return {
       trail, head, trailMat, headMat,
@@ -6691,12 +6947,12 @@ function createShootingStarSystem() {
       alpha *= 1 - (t.progress - t.fadeOut) / (1 - t.fadeOut);
     }
 
-    t.trailMat.opacity = alpha * 0.8;
-    t.headMat.opacity = alpha;
+    t.trailMat.opacity = alpha * 0.75;
+    t.headMat.opacity = alpha * 0.90;
   }
 
   // Spawn timer
-  let nextSpawn = 2 + Math.random() * 4;
+  let nextSpawn = 1.5 + Math.random() * 3;
   let elapsed = 0;
 
   return {
@@ -6708,7 +6964,7 @@ function createShootingStarSystem() {
       // Spawn new shooting stars periodically (a few, not a shower)
       if (elapsed >= nextSpawn && trails.filter(t => t.active).length < maxTrails) {
         trails.push(spawnShootingStar());
-        nextSpawn = elapsed + 1.5 + Math.random() * 6; // 1.5-7.5s between stars
+        nextSpawn = elapsed + 3 + Math.random() * 6;
       }
 
       // Update active trails
@@ -6764,567 +7020,136 @@ function createTrailTexture() {
   return texture;
 }
 
-// Create a single spherical texture for the dome-like skybox
-function createSphericalSkyTexture(size = null) {
-  // Use performance-appropriate size
+function createAsteroidSkyLayer() {
   const perfSettings = getPerformanceSettings();
-  if (!size) {
-    size = perfSettings.skyboxResolution || 2048;
+  const group = new THREE.Group();
+  const count = perfSettings.isMobile ? 8 : 22;
+  const radius = 4300;
+  const geometry = new THREE.DodecahedronGeometry(1, 0);
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x8b6a58,
+    transparent: true,
+    opacity: 0.58,
+    depthWrite: false,
+    fog: false
+  });
+  const asteroids = [];
+
+  for (let i = 0; i < count; i++) {
+    const mesh = new THREE.Mesh(geometry, material.clone());
+    const theta = Math.random() * Math.PI * 2;
+    const phi = 0.18 + Math.random() * 0.72; // upper sky only
+    const distance = radius + Math.random() * 700;
+    const size = 8 + Math.random() * 22;
+
+    mesh.position.set(
+      distance * Math.sin(phi) * Math.cos(theta),
+      distance * Math.cos(phi),
+      distance * Math.sin(phi) * Math.sin(theta)
+    );
+    mesh.scale.set(
+      size * (0.75 + Math.random() * 0.8),
+      size * (0.5 + Math.random() * 0.7),
+      size * (0.8 + Math.random() * 1.1)
+    );
+    mesh.rotation.set(
+      Math.random() * Math.PI,
+      Math.random() * Math.PI,
+      Math.random() * Math.PI
+    );
+    mesh.material.color.setHSL(0.05 + Math.random() * 0.05, 0.25, 0.34 + Math.random() * 0.16);
+    mesh.material.opacity = 0.38 + Math.random() * 0.25;
+    mesh.frustumCulled = false;
+    group.add(mesh);
+    asteroids.push({
+      mesh,
+      spinX: 0.00003 + Math.random() * 0.00008,
+      spinY: 0.00004 + Math.random() * 0.00010
+    });
   }
-  
-  // Create a performance-appropriate canvas
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext('2d');
 
-  // Deep midnight blue base — gives the sky luminous depth instead of void black
-  context.fillStyle = '#07091a';
-  context.fillRect(0, 0, canvas.width, canvas.height);
+  group.frustumCulled = false;
 
-  // Strong vertical blue-indigo wash — makes the whole sky feel bright and open
-  context.globalCompositeOperation = 'screen';
-  const colorWash = context.createLinearGradient(0, 0, 0, size);
-  colorWash.addColorStop(0,    'rgba(30,25,90,0.55)');
-  colorWash.addColorStop(0.30, 'rgba(55,75,180,0.48)');
-  colorWash.addColorStop(0.60, 'rgba(80,105,220,0.40)');
-  colorWash.addColorStop(1,    'rgba(40,50,130,0.30)');
-  context.fillStyle = colorWash;
-  context.fillRect(0, 0, size, size);
-
-  // Note: background star speckle replaced by smooth gradient stars in addBrighterBackgroundStars
-
-  // Gentle horizontal brightening around the horizon to fully eliminate any dim strip
-  context.globalCompositeOperation = 'screen';
-  const horizonBrighten = context.createLinearGradient(0, size * 0.6, 0, size * 0.9);
-  horizonBrighten.addColorStop(0, 'rgba(40, 50, 110, 0.0)');
-  horizonBrighten.addColorStop(0.5, 'rgba(80, 90, 170, 0.22)');
-  horizonBrighten.addColorStop(1, 'rgba(40, 50, 110, 0.05)');
-  context.fillStyle = horizonBrighten;
-  context.fillRect(0, size * 0.6, size, size * 0.3);
-
-  // For this Milky Way style, keep the background simple and let the main band dominate.
-  // (Previously added larger nebulae and distant galaxies here; these are disabled
-  // to better match a clean long-exposure Milky Way photograph.)
-  
-  // Add dimmer background stars (the 3D twinkling particles handle the bright ones)
-  addBrighterBackgroundStars(context, size);
-  addBrighterMilkyWay(context, size);
-  addBrighterForegroundStars(context, size);
-
-  // Add atmospheric glow for realism
-  addAtmosphericGlow(context, size);
-
-  // Add Mars moons with higher definition (replace distant planets)
-  // Phobos (larger, closer moon)
-  addMoonToCanvas(context, size * 0.78, size * 0.22, size * 0.022);
-  // Deimos (smaller, more distant moon)
-  addMoonToCanvas(context, size * 0.83, size * 0.18, size * 0.014);
-
-  // Add a single large, high-definition planet for visual impact
-  addLargePlanetToCanvas(context, size);
-
-  // === HORIZONTAL SEAM BLENDING ===
-  // The left and right edges of this canvas meet on the sphere at a vertical
-  // seam line. Crossfade a strip on each side so the two edges match smoothly.
-  context.globalCompositeOperation = 'source-over';
-  context.globalAlpha = 1;
-  const blendWidth = Math.floor(size * 0.12);
-
-  // Snapshot the finished canvas before we touch the edges
-  const seamSnap = document.createElement('canvas');
-  seamSnap.width = size;
-  seamSnap.height = size;
-  seamSnap.getContext('2d').drawImage(canvas, 0, 0);
-
-  // --- Left edge: overlay right-side content fading from full at x=0 to zero ---
-  const leftStrip = document.createElement('canvas');
-  leftStrip.width = blendWidth;
-  leftStrip.height = size;
-  const leftCtx = leftStrip.getContext('2d');
-  leftCtx.drawImage(seamSnap, size - blendWidth, 0, blendWidth, size, 0, 0, blendWidth, size);
-  leftCtx.globalCompositeOperation = 'destination-in';
-  const leftMask = leftCtx.createLinearGradient(0, 0, blendWidth, 0);
-  leftMask.addColorStop(0, 'rgba(0,0,0,1)');
-  leftMask.addColorStop(1, 'rgba(0,0,0,0)');
-  leftCtx.fillStyle = leftMask;
-  leftCtx.fillRect(0, 0, blendWidth, size);
-  context.drawImage(leftStrip, 0, 0);
-
-  // --- Right edge: overlay left-side content fading from zero to full at x=size ---
-  const rightStrip = document.createElement('canvas');
-  rightStrip.width = blendWidth;
-  rightStrip.height = size;
-  const rightCtx = rightStrip.getContext('2d');
-  rightCtx.drawImage(seamSnap, 0, 0, blendWidth, size, 0, 0, blendWidth, size);
-  rightCtx.globalCompositeOperation = 'destination-in';
-  const rightMask = rightCtx.createLinearGradient(0, 0, blendWidth, 0);
-  rightMask.addColorStop(0, 'rgba(0,0,0,0)');
-  rightMask.addColorStop(1, 'rgba(0,0,0,1)');
-  rightCtx.fillStyle = rightMask;
-  rightCtx.fillRect(0, 0, blendWidth, size);
-  context.drawImage(rightStrip, size - blendWidth, 0);
-
-  // Create texture with proper settings
-  const texture = new THREE.CanvasTexture(canvas);
-
-  return texture;
-}
-
-// Add smooth background stars — each one is a radial gradient, never a hard pixel
-function addBrighterBackgroundStars(context, size) {
-  const perfSettings = getPerformanceSettings();
-  const densityMultiplier = perfSettings.detailLevel === 'high' ? 0.55 :
-                            perfSettings.detailLevel === 'normal' ? 0.40 : 0.22;
-  const starCount = Math.min(Math.floor(size * size / 900 * densityMultiplier), 12000);
-
-  context.save();
-  context.globalCompositeOperation = 'lighter';
-
-  for (let i = 0; i < starCount; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
-
-    // Core radius: sub-pixel to 1.2px — keeps stars crisp, not blocky
-    const coreR = 0.25 + Math.random() * 0.95;
-    // Soft glow halo: 2–4× the core
-    const glowR = coreR * (2.2 + Math.random() * 1.8);
-
-    // Star colour — white-blue majority, warm minority, rare reds
-    const cv = Math.random();
-    let rc, gc, bc;
-    if (cv < 0.60) {
-      // Cool white-blue
-      rc = 210 + Math.floor(Math.random() * 40);
-      gc = 215 + Math.floor(Math.random() * 35);
-      bc = 255;
-    } else if (cv < 0.80) {
-      // Warm white / yellow dwarf
-      rc = 255;
-      gc = 240 + Math.floor(Math.random() * 15);
-      bc = 195 + Math.floor(Math.random() * 40);
-    } else if (cv < 0.93) {
-      // Pure white
-      rc = gc = bc = 230 + Math.floor(Math.random() * 25);
-    } else {
-      // Orange/red giant
-      rc = 255;
-      gc = 160 + Math.floor(Math.random() * 50);
-      bc = 100 + Math.floor(Math.random() * 60);
+  return {
+    group,
+    update(time) {
+      const t = time || 0;
+      group.rotation.y = t * 0.000006;
+      group.rotation.x = Math.sin(t * 0.00004) * 0.015;
+      for (const asteroid of asteroids) {
+        asteroid.mesh.rotation.x += asteroid.spinX;
+        asteroid.mesh.rotation.y += asteroid.spinY;
+      }
     }
-
-    const brightness = 0.80 + Math.random() * 0.20; // full brightness — lighter compositing handles the blend
-
-    // Draw: soft glow halo → crisp bright core
-    const grad = context.createRadialGradient(x, y, 0, x, y, glowR);
-    grad.addColorStop(0,    `rgba(${rc},${gc},${bc},${brightness.toFixed(2)})`);
-    grad.addColorStop(0.20, `rgba(${rc},${gc},${bc},${(brightness * 0.70).toFixed(2)})`);
-    grad.addColorStop(0.55, `rgba(${rc},${gc},${bc},${(brightness * 0.22).toFixed(2)})`);
-    grad.addColorStop(1,    'rgba(0,0,0,0)');
-
-    context.beginPath();
-    context.arc(x, y, glowR, 0, Math.PI * 2);
-    context.fillStyle = grad;
-    context.fill();
-  }
-
-  context.restore();
+  };
 }
 
-// Add brighter mid-layer stars
-// Add brighter foreground stars (small, crisp, and sparse — no big spikes)
-function addBrighterForegroundStars(context, size) {
-  const perfSettings = getPerformanceSettings();
-  const densityMultiplier = perfSettings.detailLevel === 'high' ? 1.6 :
-                            perfSettings.detailLevel === 'normal' ? 1.1 : 0.65;
+function createDistantPlanetLayer() {
+  const group = new THREE.Group();
+  const planetGeometry = new THREE.SphereGeometry(1, 32, 16);
 
-  // Slightly more foreground stars while keeping the Milky Way as the focus
-  const brightStarCount = Math.floor(size * size / 9000 * densityMultiplier);
-
-  for (let i = 0; i < brightStarCount; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
-
-    const radius = Math.random() * 0.9 + 0.3;
-
-    const colorVariation = Math.random();
-    let coreColor, glowColor;
-    if (colorVariation < 0.8) {
-      coreColor = 'rgba(245, 248, 255, 1.0)';
-      glowColor = 'rgba(210, 225, 255, 0.75)';
-    } else {
-      coreColor = 'rgba(255, 240, 210, 1.0)';
-      glowColor = 'rgba(255, 220, 170, 0.65)';
+  const planets = [
+    {
+      position: new THREE.Vector3(-2850, 2100, -3400),
+      scale: new THREE.Vector3(68, 68, 68),
+      color: 0x8aa7d9,
+      opacity: 0.72,
+      drift: 0.000003
+    },
+    {
+      position: new THREE.Vector3(2500, 1750, -3900),
+      scale: new THREE.Vector3(42, 42, 42),
+      color: 0xd0a070,
+      opacity: 0.58,
+      drift: -0.000004
     }
+  ];
 
-    const glowRadius = radius * 3.5; // wider halo for more impact
-    const gradient = context.createRadialGradient(x, y, 0, x, y, glowRadius);
-    gradient.addColorStop(0,    coreColor);
-    gradient.addColorStop(0.25, glowColor);
-    gradient.addColorStop(0.65, 'rgba(180, 200, 255, 0.20)');
-    gradient.addColorStop(1,    'rgba(0, 0, 0, 0)');
+  const meshes = planets.map(config => {
+    const material = new THREE.MeshBasicMaterial({
+      color: config.color,
+      transparent: true,
+      opacity: config.opacity,
+      depthWrite: false,
+      fog: false
+    });
+    const mesh = new THREE.Mesh(planetGeometry, material);
+    mesh.position.copy(config.position);
+    mesh.scale.copy(config.scale);
+    mesh.frustumCulled = false;
+    mesh.userData.drift = config.drift;
+    group.add(mesh);
+    return mesh;
+  });
 
-    context.beginPath();
-    context.arc(x, y, glowRadius, 0, Math.PI * 2);
-    context.fillStyle = gradient;
-    context.fill();
+  // A very thin ring makes the smaller planet legible without adding a big bright disk.
+  const ringGeometry = new THREE.RingGeometry(54, 72, 64);
+  const ringMaterial = new THREE.MeshBasicMaterial({
+    color: 0xc6a98a,
+    transparent: true,
+    opacity: 0.22,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    fog: false
+  });
+  const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+  ring.position.copy(meshes[1].position);
+  ring.rotation.set(Math.PI * 0.58, 0.18, -0.35);
+  ring.frustumCulled = false;
+  group.add(ring);
 
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fillStyle = coreColor;
-    context.fill();
-  }
-}
+  group.frustumCulled = false;
 
-// Add a brighter Milky Way that matches a long, thin, bluish diagonal band
-function addBrighterMilkyWay(context, size) {
-  const prevComposite = context.globalCompositeOperation;
-  context.globalCompositeOperation = 'screen';
-
-  const centerX = size / 2;
-  const centerY = size / 2;
-
-  // Draw in a rotated coordinate system so the band runs diagonally
-  const bandAngle = -0.6; // approx bottom-left to top-right
-  const bandLength = size * 1.4;
-  const bandThickness = size * 0.22;
-
-  context.save();
-  context.translate(centerX, centerY);
-  context.rotate(bandAngle);
-
-  // Bright Milky Way core band
-  const baseGradient = context.createLinearGradient(0, -bandThickness / 2, 0, bandThickness / 2);
-  baseGradient.addColorStop(0,    'rgba(8, 12, 30, 0)');
-  baseGradient.addColorStop(0.20, 'rgba(90, 110, 190, 0.45)');
-  baseGradient.addColorStop(0.50, 'rgba(160, 185, 255, 0.72)');
-  baseGradient.addColorStop(0.80, 'rgba(90, 110, 190, 0.45)');
-  baseGradient.addColorStop(1,    'rgba(8, 12, 30, 0)');
-
-  context.fillStyle = baseGradient;
-  context.beginPath();
-  context.ellipse(0, 0, bandLength / 2, bandThickness / 2, 0, 0, Math.PI * 2);
-  context.fill();
-
-  // Smooth nebula-like luminosity blobs along the band (replaces grainy speckle)
-  // Use large, very soft radial gradients — they blend into a silky "milky" wash
-  const blobCount = 60;
-  for (let i = 0; i < blobCount; i++) {
-    const t = (Math.random() - 0.5) * bandLength * 0.95;
-    const offset = (Math.random() - 0.5) * bandThickness * 0.55;
-    const blobR = size * (0.022 + Math.random() * 0.065); // large soft blobs
-    const a = 0.18 + Math.random() * 0.38; // bright enough to see clearly
-    const blue = 200 + Math.floor(Math.random() * 55);
-    const green = 190 + Math.floor(Math.random() * 45);
-    const red = 175 + Math.floor(Math.random() * 40);
-
-    const blob = context.createRadialGradient(t, offset, 0, t, offset, blobR);
-    blob.addColorStop(0,   `rgba(${red},${green},${blue},${a.toFixed(3)})`);
-    blob.addColorStop(0.45, `rgba(${red},${green},${blue},${(a * 0.4).toFixed(3)})`);
-    blob.addColorStop(1,   'rgba(0,0,0,0)');
-
-    context.beginPath();
-    context.arc(t, offset, blobR, 0, Math.PI * 2);
-    context.fillStyle = blob;
-    context.fill();
-  }
-
-  // Brighter knots along the band (the slightly pinkish regions)
-  const knotCount = 10;
-  for (let i = 0; i < knotCount; i++) {
-    const t = (Math.random() - 0.1) * bandLength * 0.9; // bias nearer to one side
-    const y = (Math.random() - 0.5) * bandThickness * 0.4;
-    const x = t;
-
-    const knotRadius = size * (0.02 + Math.random() * 0.02);
-    const knotGrad = context.createRadialGradient(x, y, 0, x, y, knotRadius);
-
-    // cool white-blue core with faint magenta tint
-    knotGrad.addColorStop(0, 'rgba(245, 250, 255, 0.95)');
-    knotGrad.addColorStop(0.4, 'rgba(210, 220, 255, 0.65)');
-    knotGrad.addColorStop(0.8, 'rgba(150, 170, 235, 0.25)');
-    knotGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-
-    context.beginPath();
-    context.arc(x, y, knotRadius, 0, Math.PI * 2);
-    context.fillStyle = knotGrad;
-    context.fill();
-  }
-
-  // Dark dust lane and irregular patches removed to avoid shadow-like artifacts
-
-  context.restore();
-
-  // Restore normal blending
-  context.globalCompositeOperation = prevComposite;
-}
-
-// Add atmospheric glow at the horizon
-function addAtmosphericGlow(context, size) {
-  // Create a subtle atmospheric glow at the bottom of the sky
-  context.save();
-
-  // Bottom atmospheric glow (cool blue) with very low contrast to avoid banding
-  const bottomGradient = context.createLinearGradient(0, size * 0.82, 0, size);
-  bottomGradient.addColorStop(0, 'rgba(40, 60, 140, 0.0)');
-  bottomGradient.addColorStop(0.6, 'rgba(60, 90, 190, 0.08)');
-  bottomGradient.addColorStop(1, 'rgba(35, 55, 130, 0.14)');
-
-  context.globalCompositeOperation = 'screen';
-  context.fillStyle = bottomGradient;
-  context.fillRect(0, size * 0.8, size, size * 0.22);
-
-  // Very light atmospheric haze, greatly reduced to avoid visible layers
-  // Horizon haze replaced by smooth gradient only — no hard-edged arc speckles
-
-  // Reset blend mode
-  context.globalCompositeOperation = 'source-over';
-  context.restore();
-}
-
-// Add a planet to the canvas - optimized version
-function addPlanetToCanvas(context, x, y, radius, color, hasRings = false) {
-  // Planet base
-  const planetGradient = context.createRadialGradient(
-    x - radius * 0.3, y - radius * 0.3, 0,
-    x, y, radius
-  );
-  planetGradient.addColorStop(0, lightenColor(color, 50));
-  planetGradient.addColorStop(0.7, color);
-  planetGradient.addColorStop(1, darkenColor(color, 30));
-
-  context.fillStyle = planetGradient;
-  context.beginPath();
-  context.arc(x, y, radius, 0, Math.PI * 2);
-  context.fill();
-
-  // If it's the Saturn-like planet and hasRings is true, add rings
-  if (hasRings) {
-    // Draw rings
-    context.save();
-    context.translate(x, y);
-    context.rotate(Math.PI / 6); // Tilt the rings
-    context.scale(1, 0.2); // Flatten to create ellipse
-
-    // Outer ring - simplified
-    context.fillStyle = 'rgba(210, 180, 140, 0.7)';
-    context.beginPath();
-    context.arc(0, 0, radius * 2.2, 0, Math.PI * 2);
-    context.arc(0, 0, radius * 1.2, 0, Math.PI * 2, true); // Inner circle (counterclockwise)
-    context.fill();
-
-    context.restore();
-  }
-}
-
-// Add a higher-definition moon to the canvas
-function addMoonToCanvas(context, x, y, radius) {
-  context.save();
-
-  // Base moon body with softer contrast to avoid harsh glare
-  const bodyGradient = context.createRadialGradient(
-    x - radius * 0.35, y - radius * 0.35, 0,
-    x, y, radius
-  );
-  bodyGradient.addColorStop(0, 'rgba(235, 235, 235, 0.9)');
-  bodyGradient.addColorStop(0.5, 'rgba(200, 200, 200, 0.9)');
-  bodyGradient.addColorStop(1, 'rgba(120, 120, 120, 0.9)');
-
-  context.fillStyle = bodyGradient;
-  context.beginPath();
-  context.arc(x, y, radius, 0, Math.PI * 2);
-  context.fill();
-
-  // Subtle terminator shadow to avoid "flat" round disk look,
-  // kept gentle so the moon doesn't appear as a harsh dark disk.
-  const terminatorGradient = context.createRadialGradient(
-    x + radius * 0.3, y + radius * 0.1, 0,
-    x + radius * 0.4, y + radius * 0.2, radius * 1.3
-  );
-  terminatorGradient.addColorStop(0, 'rgba(0, 0, 0, 0.0)');
-  terminatorGradient.addColorStop(0.4, 'rgba(0, 0, 0, 0.08)');
-  terminatorGradient.addColorStop(1, 'rgba(0, 0, 0, 0.22)');
-
-  context.globalCompositeOperation = 'multiply';
-  context.fillStyle = terminatorGradient;
-  context.beginPath();
-  context.arc(x, y, radius * 1.05, 0, Math.PI * 2);
-  context.fill();
-
-  // Restore to normal blending for craters
-  context.globalCompositeOperation = 'source-over';
-
-  // Add a few small craters for surface detail
-  const craterCount = 4;
-  for (let i = 0; i < craterCount; i++) {
-    const angle = (Math.PI * 2 * i) / craterCount + Math.random() * 0.4;
-    const dist = radius * (0.25 + Math.random() * 0.4);
-    const cx = x + Math.cos(angle) * dist;
-    const cy = y + Math.sin(angle) * dist;
-    const cr = radius * (0.15 + Math.random() * 0.12);
-
-    const craterGradient = context.createRadialGradient(
-      cx - cr * 0.3, cy - cr * 0.3, 0,
-      cx, cy, cr
-    );
-    craterGradient.addColorStop(0, 'rgba(230, 230, 230, 0.7)');
-    craterGradient.addColorStop(0.5, 'rgba(150, 150, 150, 0.7)');
-    craterGradient.addColorStop(1, 'rgba(60, 60, 60, 0.0)');
-
-    context.fillStyle = craterGradient;
-    context.beginPath();
-    context.arc(cx, cy, cr, 0, Math.PI * 2);
-    context.fill();
-  }
-
-  context.restore();
-}
-
-// Add a large, high-definition planet to the sky
-function addLargePlanetToCanvas(context, size) {
-  // Position the planet near the central upper sky so it's easy to see
-  const x = size * 0.5;
-  const y = size * 0.4;
-  const radius = size * 0.034;
-
-  context.save();
-
-  // Base planet body (Jupiter-like, warm with subtle depth)
-  const baseColor = '#a46c38';
-  const planetGradient = context.createRadialGradient(
-    x - radius * 0.35, y - radius * 0.4, 0,
-    x, y, radius * 1.1
-  );
-  planetGradient.addColorStop(0, lightenColor(baseColor, 16));
-  planetGradient.addColorStop(0.5, baseColor);
-  planetGradient.addColorStop(1, darkenColor(baseColor, 18));
-
-  context.fillStyle = planetGradient;
-  context.beginPath();
-  context.arc(x, y, radius, 0, Math.PI * 2);
-  context.fill();
-
-  // Clip to planet disk so bands and storms stay inside the silhouette
-  context.save();
-  context.beginPath();
-  context.arc(x, y, radius, 0, Math.PI * 2);
-  context.clip();
-
-  // Add a few soft storm systems / ovals for surface interest
-  const stormCount = 3;
-  for (let i = 0; i < stormCount; i++) {
-    const angle = (Math.PI * 2 * i) / stormCount + Math.random() * 0.4;
-    const dist = radius * (0.35 + Math.random() * 0.35);
-    const sx = x + Math.cos(angle) * dist;
-    const sy = y + Math.sin(angle) * dist * 0.6;
-    const srX = radius * (0.16 + Math.random() * 0.05);
-    const srY = srX * (0.65 + Math.random() * 0.2);
-
-    const stormGradient = context.createRadialGradient(
-      sx - srX * 0.4, sy - srY * 0.4, 0,
-      sx, sy, srX
-    );
-    stormGradient.addColorStop(0, 'rgba(255, 230, 210, 0.65)');
-    stormGradient.addColorStop(0.4, 'rgba(230, 180, 150, 0.55)');
-    stormGradient.addColorStop(1, 'rgba(40, 20, 10, 0.0)');
-
-    context.save();
-    context.translate(sx, sy);
-    context.rotate(Math.random() * Math.PI * 2);
-    context.scale(1.6, 1.0);
-    context.fillStyle = stormGradient;
-    context.beginPath();
-    context.arc(0, 0, srX, 0, Math.PI * 2);
-    context.fill();
-    context.restore();
-  }
-
-  // Subtle surface mottling for texture
-  const patchCount = 20;
-  for (let i = 0; i < patchCount; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const dist = radius * (0.0 + Math.random() * 0.85);
-    const px = x + Math.cos(angle) * dist;
-    const py = y + Math.sin(angle) * dist * 0.85;
-    const pr = radius * (0.05 + Math.random() * 0.055);
-
-    const patchGrad = context.createRadialGradient(
-      px - pr * 0.3, py - pr * 0.3, 0,
-      px, py, pr
-    );
-    const tone = Math.random() < 0.5
-      ? lightenColor(baseColor, 8 + Math.random() * 10)
-      : darkenColor(baseColor, 6 + Math.random() * 10);
-    patchGrad.addColorStop(0, `${tone}ee`); // will be overridden by rgba below if hex, but keeps tone consistent
-    patchGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-
-    // Convert tone hex to rgba-ish by blending via globalAlpha
-    context.globalAlpha = 0.07;
-    context.fillStyle = patchGrad;
-    context.beginPath();
-    context.arc(px, py, pr, 0, Math.PI * 2);
-    context.fill();
-  }
-
-  context.restore(); // end clip and restore alpha
-
-  // Very soft terminator shadow for depth (contained within planet boundary to avoid sky shadows)
-  context.save();
-  context.beginPath();
-  context.arc(x, y, radius, 0, Math.PI * 2);
-  context.clip();
-  
-  const terminatorGradient = context.createRadialGradient(
-    x + radius * 0.6, y, 0,
-    x + radius * 0.9, y, radius * 1.1
-  );
-  terminatorGradient.addColorStop(0, 'rgba(0, 0, 0, 0.0)');
-  terminatorGradient.addColorStop(0.5, 'rgba(0, 0, 0, 0.18)');
-  terminatorGradient.addColorStop(1, 'rgba(0, 0, 0, 0.35)');
-
-  context.globalCompositeOperation = 'multiply';
-  context.fillStyle = terminatorGradient;
-  context.beginPath();
-  context.arc(x, y, radius, 0, Math.PI * 2);
-  context.fill();
-  context.restore();
-
-  // Atmospheric rim glow
-  context.globalCompositeOperation = 'screen';
-  const atmGradient = context.createRadialGradient(
-    x, y, radius * 0.95,
-    x, y, radius * 1.18
-  );
-  atmGradient.addColorStop(0, 'rgba(160, 200, 255, 0.0)');
-  atmGradient.addColorStop(0.5, 'rgba(160, 210, 255, 0.14)');
-  atmGradient.addColorStop(1, 'rgba(120, 180, 255, 0.0)');
-
-  context.fillStyle = atmGradient;
-  context.beginPath();
-  context.arc(x, y, radius * 1.2, 0, Math.PI * 2);
-  context.fill();
-
-  context.restore();
-}
-
-// Helper function to lighten a color - optimized
-function lightenColor(color, percent) {
-  const num = parseInt(color.replace('#', ''), 16);
-  const amt = Math.round(2.55 * percent);
-  const R = Math.min(255, (num >> 16) + amt);
-  const G = Math.min(255, ((num >> 8) & 0x00FF) + amt);
-  const B = Math.min(255, (num & 0x0000FF) + amt);
-  return `#${(1 << 24 | R << 16 | G << 8 | B).toString(16).slice(1)}`;
-}
-
-// Helper function to darken a color - optimized
-function darkenColor(color, percent) {
-  const num = parseInt(color.replace('#', ''), 16);
-  const amt = Math.round(2.55 * percent);
-  const R = Math.max(0, (num >> 16) - amt);
-  const G = Math.max(0, ((num >> 8) & 0x00FF) - amt);
-  const B = Math.max(0, (num & 0x0000FF) - amt);
-  return `#${(1 << 24 | R << 16 | G << 8 | B).toString(16).slice(1)}`;
+  return {
+    group,
+    update(time) {
+      const t = time || 0;
+      for (const mesh of meshes) {
+        mesh.rotation.y = t * mesh.userData.drift;
+      }
+      ring.rotation.z = -0.35 + Math.sin(t * 0.00008) * 0.015;
+    }
+  };
 }
 
 // Lazy loading system for non-essential components
@@ -7377,7 +7202,7 @@ const lazyLoader = new LazyLoader();
 
 // Initialize scene elements with lazy loading
 function initializeScene() {
-  console.log("🚀 MARS SCENE: initializeScene() called");
+  console.log("ðŸš€ MARS SCENE: initializeScene() called");
   console.log("Scene exists:", typeof scene !== 'undefined');
   console.log("Renderer exists:", typeof renderer !== 'undefined');
 
@@ -7391,7 +7216,7 @@ function initializeScene() {
 }
 
 function loadCoreComponents() {
-  console.log("🔧 MARS SCENE: loadCoreComponents() called");
+  console.log("ðŸ”§ MARS SCENE: loadCoreComponents() called");
   
   // Create the HUD (may not exist as a function, skip if undefined)
   if (typeof createHUD === 'function') {
@@ -7409,35 +7234,36 @@ function loadCoreComponents() {
     console.log("Mobile: simple sky background created");
   }
 
-  // Create the sun directional light
-  sun = new THREE.DirectionalLight(0xffffff, 1);
+  // Create the sun directional light; start dim because the scene begins at night
+  sun = new THREE.DirectionalLight(0xb96a45, isDaytime ? 1 : 0.04);
   sun.position.set(10, 100, 10);
   scene.add(sun);
   console.log("Sun light added to scene");
 
-  // Create a simple sun sphere for immediate visibility
-  const sunGeometry = new THREE.SphereGeometry(50, 16, 16); // Reduced geometry complexity
+  // Create a simple sun sphere for daytime only; hidden at night to avoid extra "planets"
+  const sunGeometry = new THREE.SphereGeometry(36, 16, 16); // Reduced geometry complexity
   const sunMaterial = new THREE.MeshBasicMaterial({
-    color: 0xffee66,
+    color: 0xc66a32,
     transparent: true,
-    opacity: 0.9
+    opacity: isDaytime ? 0.75 : 0.0
   });
   sunSphere = new THREE.Mesh(sunGeometry, sunMaterial);
   sunSphere.position.set(500, 300, -1000);
+  sunSphere.visible = isDaytime;
   scene.add(sunSphere);
   console.log("Sun sphere added to scene");
 
   // Eagerly create MarsSceneManager on desktop so colony and rockets
   // are always available even if lazy loading is delayed.
-  console.log("🏗️ MARS SCENE: About to create MarsSceneManager, isMobile=", perfSettings.isMobile);
+  console.log("ðŸ—ï¸ MARS SCENE: About to create MarsSceneManager, isMobile=", perfSettings.isMobile);
   if (!perfSettings.isMobile) {
     try {
-      console.log("🏗️ MARS SCENE: Creating MarsSceneManager now...");
+      console.log("ðŸ—ï¸ MARS SCENE: Creating MarsSceneManager now...");
       sceneManager = new MarsSceneManager(scene, 5000);
       window.marsSceneManager = sceneManager;
-      console.log('✅ MarsSceneManager eagerly created for desktop');
+      console.log('âœ… MarsSceneManager eagerly created for desktop');
     } catch (e) {
-      console.error('❌ Failed to create MarsSceneManager eagerly:', e);
+      console.error('âŒ Failed to create MarsSceneManager eagerly:', e);
       console.error('Error stack:', e.stack);
     }
   }
@@ -7506,6 +7332,7 @@ function loadNonEssentialComponents() {
   // Add sun glow effect only for higher performance settings
   if (perfSettings.detailLevel === 'high') {
     lazyLoader.loadInBackground('sunGlow', () => {
+      if (!sunSphere || !isDaytime) return Promise.resolve();
       const sunGlowGeometry = new THREE.SphereGeometry(60, 32, 32);
       const sunGlowMaterial = new THREE.MeshBasicMaterial({
         color: 0xffdd44,
@@ -7531,25 +7358,26 @@ function loadNonEssentialComponents() {
   console.log("Non-essential components queued for background loading");
 }
 
+// Day/night toggle and cycle (isDaytime declared at top of file)
+console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
 // Automatically initialize core scene elements once the game script
 // has finished loading. This ensures MarsSceneManager (and the
 // colony/rocket traffic it controls) is constructed on desktop,
 // and HUD/UI are set up, even though initializeScene wasn't being
 // called from index.html.
-console.log('🎮 MARS SCRIPT: End of mars.js reached, about to call initializeScene()');
-console.log('🎮 initializeScene exists:', typeof initializeScene);
-console.log('🎮 scene exists:', typeof scene);
-console.log('🎮 renderer exists:', typeof renderer);
+console.log('ðŸŽ® MARS SCRIPT: End of mars.js reached, about to call initializeScene()');
+console.log('ðŸŽ® initializeScene exists:', typeof initializeScene);
+console.log('ðŸŽ® scene exists:', typeof scene);
+console.log('ðŸŽ® renderer exists:', typeof renderer);
 try {
   if (typeof initializeScene === 'function') {
-    console.log('🎮 CALLING initializeScene() NOW...');
+    console.log('ðŸŽ® CALLING initializeScene() NOW...');
     initializeScene();
-    console.log('🎮 initializeScene() completed');
+    console.log('ðŸŽ® initializeScene() completed');
   } else {
-    console.warn('❌ initializeScene is not defined; core components not initialized');
+    console.warn('âŒ initializeScene is not defined; core components not initialized');
   }
 } catch (e) {
-  console.error('❌ Error during initializeScene:', e);
+  console.error('âŒ Error during initializeScene:', e);
   console.error('Error stack:', e.stack);
 }
-
