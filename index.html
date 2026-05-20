@@ -254,98 +254,6 @@
     }
     
     /* Mobile Action Buttons */
-    #mobile-buttons {
-      position: absolute;
-      bottom: 40px;
-      right: 20px;
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 15px;
-      pointer-events: auto;
-      max-width: 180px;
-    }
-
-    .mobile-btn {
-      width: 75px;
-      height: 75px;
-      background: rgba(0, 0, 0, 0.6);
-      color: white;
-      border: 3px solid rgba(255, 107, 53, 0.5);
-      border-radius: 50%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      font-size: 20px;
-      font-weight: bold;
-      cursor: pointer;
-      user-select: none;
-      transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
-      touch-action: manipulation;
-      backdrop-filter: blur(10px);
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-      position: relative;
-      overflow: hidden;
-    }
-    
-    .mobile-btn::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: linear-gradient(135deg, rgba(255, 107, 53, 0.1), rgba(255, 107, 53, 0.05));
-      border-radius: 50%;
-      opacity: 0;
-      transition: opacity 0.15s ease;
-      pointer-events: none;
-    }
-    
-    .mobile-btn:hover::before {
-      opacity: 1;
-    }
-    
-    .mobile-btn .btn-label {
-      font-size: 8px;
-      font-weight: bold;
-      letter-spacing: 0.5px;
-      margin-top: 2px;
-      opacity: 0.8;
-      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-      transition: opacity 0.15s ease;
-    }
-    
-    .mobile-btn:active {
-      background: rgba(255, 107, 53, 0.9);
-      transform: scale(0.85);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
-      border-color: rgba(255, 107, 53, 1);
-    }
-    
-    .mobile-btn:active .btn-label {
-      opacity: 1;
-    }
-    
-    .mobile-btn:hover {
-      background: rgba(255, 107, 53, 0.7);
-      border-color: rgba(255, 107, 53, 0.8);
-      transform: scale(1.05);
-    }
-    
-    /* Add a subtle pulsing animation for better visibility */
-    .mobile-btn {
-      animation: mobileBtnPulse 3s ease-in-out infinite;
-    }
-    
-    @keyframes mobileBtnPulse {
-      0%, 100% {
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
-      }
-      50% {
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3), 0 0 20px rgba(255, 107, 53, 0.2);
-      }
-    }
     
     /* Touch Camera Controls */
     #touch-camera-area {
@@ -436,10 +344,11 @@
         z-index: 120 !important;
       }
       
-      #mobile-buttons {
-        bottom: 30px !important;
-        right: 20px !important;
-        z-index: 120 !important;
+      /* Hide non-essential UI on mobile */
+      #loading-tips,
+      #settings-toggle,
+      #device-info {
+        display: none !important;
       }
       
       /* Add space between mobile controls and HUD panels */
@@ -482,18 +391,6 @@
       #youtube-title {
         max-width: 80px;
         font-size: 9px;
-      }
-      
-      /* Larger mobile buttons for better touch */
-      .mobile-btn {
-        width: 75px;
-        height: 75px;
-        font-size: 24px;
-      }
-      
-      #mobile-buttons {
-        gap: 12px;
-        max-width: 170px;
       }
       
       #virtual-joystick {
@@ -637,25 +534,6 @@
       <div id="joystick-knob"></div>
     </div>
     
-    <!-- Mobile Action Buttons -->
-    <div id="mobile-buttons">
-      <button class="mobile-btn" id="mobile-sample-btn" title="Collect Sample">
-        💎
-        <span class="btn-label">SAMPLE</span>
-      </button>
-      <button class="mobile-btn" id="mobile-analyze-btn" title="Analyze Sample">
-        🔬
-        <span class="btn-label">ANALYZE</span>
-      </button>
-      <button class="mobile-btn" id="mobile-rocket-btn" title="Launch Rocket">
-        🚀
-        <span class="btn-label">ROCKET</span>
-      </button>
-      <button class="mobile-btn" id="mobile-camera-btn" title="Switch Camera">
-        📷
-        <span class="btn-label">CAMERA</span>
-      </button>
-    </div>
 
   </div>
 
@@ -1099,6 +977,7 @@
       
       // Show click-to-play notification
       showClickToPlayNotification() {
+        if (this.deviceSpecs.isMobile) return;
         const notification = document.createElement('div');
         notification.style.cssText = `
           position: fixed;
