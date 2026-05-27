@@ -1016,6 +1016,10 @@ let rotationVelocity = 0;        // Current turn rate
 let isMoving = false;
 let currentSpeed = 0; // Track the current speed of the rover
 
+// === DEV DEBUG HELPERS (toggle with V key) ===
+window.showRoadDebug = false;
+let _roadDebugGroup = null;
+
 // Distance tracking variables
 let distanceTraveled = 0;
 let lastUpdateTime = 0;
@@ -1103,6 +1107,23 @@ const keydownHandler = (event) => {
   if (event.key.toLowerCase() === 'h') {
     toggleHelpSystem();
   }
+
+  // Dev road/vehicle debug visualizer (V key)
+  if (event.key.toLowerCase() === 'v') {
+    window.showRoadDebug = !window.showRoadDebug;
+    console.log('%c[DEV] Road debug visuals:', 'color:#0ff', window.showRoadDebug ? 'ON' : 'OFF');
+    if (!window.showRoadDebug && _roadDebugGroup) {
+      if (_roadDebugGroup.parent) _roadDebugGroup.parent.remove(_roadDebugGroup);
+      _roadDebugGroup.traverse(obj => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) {
+          if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+          else obj.material.dispose();
+        }
+      });
+      _roadDebugGroup = null;
+    }
+  }
   
   // Konami code easter egg
   if (getPerformanceSettings().enableEasterEggs) {
@@ -1128,8 +1149,8 @@ window.gameEventListeners.add(window, 'keydown', keydownHandler);
 window.gameEventListeners.add(window, 'keyup', keyupHandler);
 
 // Add camera modes and third-person view
-// Third-person camera: higher, farther back, slight side offset for a cinematic angle
-const cameraOffset = new THREE.Vector3(3, 8, 22);
+// Third-person camera: closer, more grounded chase cam for the rover (tighter feel)
+const cameraOffset = new THREE.Vector3(2.2, 5.2, 13.5);
 const cameraSpring = { velocity: new THREE.Vector3() };
 
 // Change default camera mode to thirdPerson - Make globally accessible for mobile controls
@@ -3640,6 +3661,13 @@ class MarsSceneManager {
 
       v.mesh.position.x = v.road.startX + (v.road.endX - v.road.startX) * v.t;
       v.mesh.position.z = v.road.startZ + (v.road.endZ - v.road.startZ) * v.t;
+
+      // === Phase 2 fix: Dynamically follow terrain height every frame ===
+      // This stops vehicles from floating or sinking on sloped roads.
+      if (typeof this.getTerrainHeight === 'function') {
+        const groundY = this.getTerrainHeight(v.mesh.position.x, v.mesh.position.z);
+        v.mesh.position.y = groundY + 0.3; // consistent offset above surface
+      }
     }
   }
 
@@ -5323,6 +5351,13 @@ function animate(time) {
     if (window.marsSceneManager && rover && frameCount % (frameThrottle * 4) === 0) {
       window.marsSceneManager.update(rover.position);
     }
+
+    // Dev road/vehicle debug visuals (cheap when off, throttled when on)
+    if (window.showRoadDebug && window.marsSceneManager && frameCount % 6 === 0) {
+      if (typeof updateRoadDebugVisuals === 'function') {
+        updateRoadDebugVisuals();
+      }
+    }
   }
 
   // Rover Movement
@@ -5671,6 +5706,96 @@ function updateWheelSuspension(wheels, originalWheelPositions) {
   });
 }
 
+// === DEV DEBUG: Road centerlines + vehicle height error visualizer ===
+// Toggle with 'V' key. Shows exactly where vehicles are sitting vs the actual ground.
+function updateRoadDebugVisuals() {
+  const mgr = window.marsSceneManager;
+  if (!mgr || !mgr.scene) return;
+
+  // Create or reuse a dedicated debug group
+  if (!_roadDebugGroup) {
+    _roadDebugGroup = new THREE.Group();
+    _roadDebugGroup.name = 'RoadDebugGroup';
+    mgr.scene.add(_roadDebugGroup);
+  }
+
+  // Throttle heavy rebuilds
+  const now = Date.now();
+  if (_roadDebugGroup.userData.lastRebuild && (now - _roadDebugGroup.userData.lastRebuild) < 120) {
+    return; // skip rebuild this frame
+  }
+  _roadDebugGroup.userData.lastRebuild = now;
+
+  // Clear previous debug objects (cheap for dev tool)
+  while (_roadDebugGroup.children.length > 0) {
+    const child = _roadDebugGroup.children[0];
+    _roadDebugGroup.remove(child);
+    if (child.geometry) child.geometry.dispose();
+    if (child.material) {
+      if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+      else child.material.dispose();
+    }
+  }
+
+  const lineMat = new THREE.LineBasicMaterial({ color: 0x00ffff, depthTest: false });
+  const errorMatGood = new THREE.LineBasicMaterial({ color: 0x00ff88, depthTest: false });
+  const errorMatBad  = new THREE.LineBasicMaterial({ color: 0xff4444, depthTest: false });
+  const markerMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+
+  // 1) Road centerlines
+  if (mgr.roads && mgr.roads.size > 0) {
+    mgr.roads.forEach((road) => {
+      const points = [
+        new THREE.Vector3(road.startX, road.groundY + 0.2, road.startZ),
+        new THREE.Vector3(road.endX,   road.groundY + 0.2, road.endZ)
+      ];
+      const geom = new THREE.BufferGeometry().setFromPoints(points);
+      const line = new THREE.Line(geom, lineMat);
+      line.renderOrder = 9999;
+      _roadDebugGroup.add(line);
+    });
+  }
+
+  // 2) Vehicle height error lines (roadVehicles + aiVehicles)
+  const addVehicleErrorLine = (mesh) => {
+    if (!mesh || !mesh.position) return;
+    const x = mesh.position.x;
+    const z = mesh.position.z;
+    const vehY = mesh.position.y;
+
+    let groundY = vehY;
+    try {
+      if (typeof mgr.getTerrainHeight === 'function') {
+        groundY = mgr.getTerrainHeight(x, z);
+      }
+    } catch (_) {}
+
+    const delta = vehY - groundY;
+    const colorMat = Math.abs(delta) < 0.8 ? errorMatGood : errorMatBad;
+
+    const pts = [
+      new THREE.Vector3(x, vehY + 0.5, z),
+      new THREE.Vector3(x, groundY + 0.1, z)
+    ];
+    const g = new THREE.BufferGeometry().setFromPoints(pts);
+    const line = new THREE.Line(g, colorMat);
+    line.renderOrder = 10000;
+    _roadDebugGroup.add(line);
+
+    // Small marker at sampled ground height
+    const marker = new THREE.Mesh(new THREE.SphereGeometry(0.25, 8, 8), markerMat);
+    marker.position.set(x, groundY + 0.1, z);
+    _roadDebugGroup.add(marker);
+  };
+
+  if (mgr.roadVehicles && mgr.roadVehicles.length) {
+    mgr.roadVehicles.forEach(v => addVehicleErrorLine(v.mesh));
+  }
+  if (mgr.aiVehicles && mgr.aiVehicles.length) {
+    mgr.aiVehicles.forEach(v => addVehicleErrorLine(v.mesh));
+  }
+}
+
 function updateCamera(deltaMs) {
   const dt = Math.min((deltaMs || 16.67) / 1000, 0.05);
 
@@ -5687,12 +5812,12 @@ function updateCamera(deltaMs) {
 
   switch (cameraMode) {
     case 'thirdPerson': {
-      // Speed-adaptive zoom: pull back and up at higher speeds
+      // Speed-adaptive zoom — much gentler now for a consistently close chase feel
       const speedRatio = Math.abs(velocity) / MAX_SPEED;
       vectors.offset.set(
         cameraOffset.x,
-        cameraOffset.y + speedRatio * 4,
-        cameraOffset.z + speedRatio * 10
+        cameraOffset.y + speedRatio * 2.2,
+        cameraOffset.z + speedRatio * 5.5
       );
       vectors.offset.applyAxisAngle(vectors.upAxis, roverYaw);
 
