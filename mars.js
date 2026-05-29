@@ -6436,11 +6436,6 @@ function createSpaceSkybox() {
       varying vec3 vWorldPos;
 
       // --- Hash / noise helpers (GPU-friendly) ---
-      float hash(vec2 p) {
-        p = fract(p * vec2(443.897, 441.423));
-        p += dot(p, p.yx + 19.19);
-        return fract((p.x + p.y) * p.x);
-      }
       float hash3(vec3 p) {
         p = fract(p * vec3(443.897, 441.423, 437.195));
         p += dot(p, p.yzx + 19.19);
@@ -6507,24 +6502,31 @@ function createSpaceSkybox() {
           float n = fbm(nCoord);
           float detail = fbm(nCoord * 3.0 + 1.5);
 
-          float milky = bandMask * smoothstep(0.32, 0.65, n);
-          milky += bandMask * 0.4 * smoothstep(0.35, 0.7, detail);
+          // Higher-contrast glow so the band reads as a structured cloud, not haze
+          float milky = bandMask * smoothstep(0.34, 0.62, n);
+          milky += bandMask * 0.45 * smoothstep(0.38, 0.72, detail);
 
-          // Core brightness
-          float core = smoothstep(0.12, 0.0, bandDist) * smoothstep(0.38, 0.65, n) * 0.6;
+          // Core brightness (bright galactic centre line)
+          float core = smoothstep(0.12, 0.0, bandDist) * smoothstep(0.40, 0.66, n) * 0.75;
           milky += core;
 
-          // Color: blue-white with slight warmth in the core
+          // Dark dust lanes: a second noise field carves voids through the band,
+          // which is what gives the real Milky Way its mottled, structured look.
+          float dust = fbm(nCoord * 1.7 + 9.0);
+          float lanes = smoothstep(0.40, 0.62, dust);
+          milky *= 1.0 - lanes * 0.7;
+
+          // Color: blue-white outer, warm lavender core
           vec3 milkyColor = mix(
-            vec3(0.35, 0.45, 0.7),   // blue-white outer
-            vec3(0.7, 0.65, 0.85),   // pale lavender core
+            vec3(0.34, 0.44, 0.72),   // blue-white outer
+            vec3(0.78, 0.70, 0.88),   // pale lavender core
             core
           );
-          // Add faint pink/magenta knots
-          float knots = smoothstep(0.62, 0.75, detail) * bandMask * 0.3;
-          milkyColor += vec3(0.25, 0.05, 0.15) * knots;
+          // Faint pink/magenta emission knots
+          float knots = smoothstep(0.64, 0.78, detail) * bandMask * 0.35;
+          milkyColor += vec3(0.30, 0.06, 0.18) * knots;
 
-          sky += milkyColor * milky * 0.70;
+          sky += milkyColor * milky * 0.85;
         }
 
         // Stars are drawn by the dedicated particle layer (createTwinklingStars),
@@ -6650,54 +6652,75 @@ function createTwinklingStars() {
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+  geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
+  geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
+  geometry.setAttribute('aPhase', new THREE.BufferAttribute(phases, 1));
+  geometry.setAttribute('aSpeed', new THREE.BufferAttribute(speeds, 1));
 
   // Create soft circular star texture
   const starTexture = createStarTexture();
 
-  const material = new THREE.PointsMaterial({
-    size: 8,
-    map: starTexture,
-    vertexColors: true,
+  // GPU twinkle: each star's brightness/size oscillates in the vertex shader,
+  // so the whole field animates every frame for free (no per-frame CPU buffer
+  // uploads). This also fixes the old PointsMaterial path, which ignored the
+  // per-point size attribute entirely, so twinkling never actually showed.
+  const dpr = (renderer && renderer.getPixelRatio) ? renderer.getPixelRatio() : (window.devicePixelRatio || 1);
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0.0 },
+      uTexture: { value: starTexture },
+      uScale: { value: window.innerHeight * dpr * 0.5 } // matches three.js size attenuation
+    },
+    vertexShader: `
+      attribute float aSize;
+      attribute float aPhase;
+      attribute float aSpeed;
+      attribute vec3 aColor;
+      uniform float uTime;
+      uniform float uScale;
+      varying vec3 vColor;
+      varying float vTwinkle;
+      void main() {
+        vColor = aColor;
+        float t = uTime * 0.001;
+        float tw = 0.60 + 0.28 * (
+          sin(t * aSpeed + aPhase) * 0.5 +
+          sin(t * aSpeed * 1.7 + aPhase * 2.3) * 0.3 +
+          sin(t * aSpeed * 0.4 + aPhase * 0.7) * 0.2
+        );
+        vTwinkle = tw;
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        // 4x boost: the particle layer now carries the whole star field (the
+        // old per-fragment shader stars were removed), so make points readable.
+        gl_PointSize = max(aSize * tw * 4.0 * (uScale / -mvPosition.z), 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D uTexture;
+      varying vec3 vColor;
+      varying float vTwinkle;
+      void main() {
+        vec4 tex = texture2D(uTexture, gl_PointCoord);
+        gl_FragColor = vec4(vColor, 1.0) * tex * (0.45 + vTwinkle);
+      }
+    `,
     transparent: true,
-    opacity: 0.95,
     blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    sizeAttenuation: true,
-    alphaTest: 0.005
+    depthWrite: false
   });
 
   const points = new THREE.Points(geometry, material);
   points.frustumCulled = false;
 
-  // Return system with update function
+  // Return system with update function â€” just advances the shader clock.
   return {
     points,
-    phases,
-    speeds,
-    sizes,
-    originalSizes: new Float32Array(sizes), // copy for reference
-    _updateOffset: 0, // rolling offset for partial updates
     update(time) {
-      const t = time * 0.001;
-      const sizeAttr = geometry.attributes.size;
-      const arr = sizeAttr.array;
-      // Update only a batch of stars each frame to spread CPU cost
-      const batchSize = Math.min(4000, starCount);
-      const start = this._updateOffset;
-      const end = Math.min(start + batchSize, starCount);
-      for (let i = start; i < end; i++) {
-        // Smooth sinusoidal twinkling with harmonics for natural look
-        const twinkle = 0.60 + 0.28 * (
-          Math.sin(t * speeds[i] + phases[i]) * 0.5 +
-          Math.sin(t * speeds[i] * 1.7 + phases[i] * 2.3) * 0.3 +
-          Math.sin(t * speeds[i] * 0.4 + phases[i] * 0.7) * 0.2
-        );
-        arr[i] = this.originalSizes[i] * twinkle;
-      }
-      this._updateOffset = end >= starCount ? 0 : end;
-      sizeAttr.needsUpdate = true;
+      material.uniforms.uTime.value = time;
+      // Keep size attenuation correct if the window was resized
+      const d = (renderer && renderer.getPixelRatio) ? renderer.getPixelRatio() : (window.devicePixelRatio || 1);
+      material.uniforms.uScale.value = window.innerHeight * d * 0.5;
     }
   };
 }
@@ -6980,50 +7003,153 @@ function createAsteroidSkyLayer() {
 
 function createDistantPlanetLayer() {
   const group = new THREE.Group();
-  const planetGeometry = new THREE.SphereGeometry(1, 32, 16);
+  const planetGeometry = new THREE.SphereGeometry(1, 48, 32);
+
+  // Shared world-space "sunlight" direction so every planet shows a consistent
+  // phase (terminator between lit day side and dark night side).
+  const lightDir = new THREE.Vector3(0.75, 0.32, 0.58).normalize();
 
   const planets = [
     {
       position: new THREE.Vector3(-2850, 2100, -3400),
-      scale: new THREE.Vector3(68, 68, 68),
-      color: 0x8aa7d9,
-      opacity: 0.72,
+      scale: 68,
+      colorA: new THREE.Color(0x9fb4e0), // pale blue
+      colorB: new THREE.Color(0x4a6bb0), // deep blue bands
+      opacity: 0.95,
       drift: 0.000003
     },
     {
       position: new THREE.Vector3(2500, 1750, -3900),
-      scale: new THREE.Vector3(42, 42, 42),
-      color: 0xd0a070,
-      opacity: 0.58,
+      scale: 42,
+      colorA: new THREE.Color(0xe6c79a), // sandy gold
+      colorB: new THREE.Color(0xb07840), // ochre bands
+      opacity: 0.92,
       drift: -0.000004
     }
   ];
 
+  // Per-planet shader: lit hemisphere with soft terminator, fBm surface bands,
+  // limb darkening, and a faint atmospheric rim on the lit edge.
+  const planetVertex = `
+    varying vec3 vN;
+    varying vec3 vLocal;
+    void main() {
+      vN = normalize(mat3(modelMatrix) * normal);
+      vLocal = normal; // unit sphere: local position == normal
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+  const planetFragment = `
+    uniform float uTime;
+    uniform vec3 uLightDir;
+    uniform vec3 uViewDir;   // planet -> camera, world space
+    uniform vec3 uColorA;
+    uniform vec3 uColorB;
+    uniform float uOpacity;
+    varying vec3 vN;
+    varying vec3 vLocal;
+
+    float h3(vec3 p){ p = fract(p * vec3(443.897, 441.423, 437.195)); p += dot(p, p.yzx + 19.19); return fract((p.x + p.y + p.z) * p.x); }
+    float n3(vec3 p){
+      vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(mix(h3(i), h3(i+vec3(1,0,0)), f.x), mix(h3(i+vec3(0,1,0)), h3(i+vec3(1,1,0)), f.x), f.y),
+                 mix(mix(h3(i+vec3(0,0,1)), h3(i+vec3(1,0,1)), f.x), mix(h3(i+vec3(0,1,1)), h3(i+vec3(1,1,1)), f.x), f.y), f.z);
+    }
+    float fb(vec3 p){ float v = 0.0, a = 0.5; for (int i = 0; i < 4; i++){ v += a * n3(p); p *= 2.05; a *= 0.5; } return v; }
+
+    void main() {
+      vec3 N = normalize(vN);
+
+      // Surface: latitudinal bands warped by fBm + mottling
+      float warp = fb(vLocal * 2.5) * 2.5;
+      float bands = sin(vLocal.y * 9.0 + warp) * 0.5 + 0.5;
+      float mottle = fb(vLocal * 3.5 + vec3(0.0, uTime * 0.00001, 0.0));
+      vec3 surf = mix(uColorA, uColorB, clamp(bands * 0.7 + mottle * 0.4, 0.0, 1.0));
+
+      // Phase / day-night terminator
+      float ndl = dot(N, normalize(uLightDir));
+      float lit = smoothstep(-0.18, 0.35, ndl);
+      vec3 col = surf * (0.04 + 0.96 * lit);
+
+      // Limb darkening (1 at disk centre, 0 at silhouette)
+      float vdn = clamp(dot(N, normalize(uViewDir)), 0.0, 1.0);
+      col *= 0.5 + 0.5 * pow(vdn, 0.55);
+
+      // Atmospheric rim glow on the lit limb
+      float rim = pow(1.0 - vdn, 3.0) * lit;
+      col += uColorA * rim * 0.6;
+
+      gl_FragColor = vec4(col, uOpacity);
+    }
+  `;
+
   const meshes = planets.map(config => {
-    const material = new THREE.MeshBasicMaterial({
-      color: config.color,
+    const viewDir = config.position.clone().multiplyScalar(-1).normalize(); // planet -> camera (origin)
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0.0 },
+        uLightDir: { value: lightDir.clone() },
+        uViewDir: { value: viewDir },
+        uColorA: { value: config.colorA },
+        uColorB: { value: config.colorB },
+        uOpacity: { value: config.opacity }
+      },
+      vertexShader: planetVertex,
+      fragmentShader: planetFragment,
       transparent: true,
-      opacity: config.opacity,
       depthWrite: false,
+      side: THREE.FrontSide,
       fog: false
     });
     const mesh = new THREE.Mesh(planetGeometry, material);
     mesh.position.copy(config.position);
-    mesh.scale.copy(config.scale);
+    mesh.scale.setScalar(config.scale);
     mesh.frustumCulled = false;
     mesh.userData.drift = config.drift;
+    mesh.userData.material = material;
     group.add(mesh);
     return mesh;
   });
 
-  // A very thin ring makes the smaller planet legible without adding a big bright disk.
-  const ringGeometry = new THREE.RingGeometry(54, 72, 64);
-  const ringMaterial = new THREE.MeshBasicMaterial({
-    color: 0xc6a98a,
+  // Saturn-like ring for the second planet, with radial banding, a Cassini-style
+  // gap and soft edges instead of a flat translucent disk.
+  const ringGeometry = new THREE.RingGeometry(50, 78, 96, 1);
+  const ringMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: new THREE.Color(0xd8bd95) },
+      uInner: { value: 50.0 },
+      uOuter: { value: 78.0 }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      varying float vRadius;
+      void main() {
+        vUv = uv;
+        vRadius = length(position.xy);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uColor;
+      uniform float uInner;
+      uniform float uOuter;
+      varying float vRadius;
+      void main() {
+        float t = clamp((vRadius - uInner) / (uOuter - uInner), 0.0, 1.0);
+        // Soft inner/outer edges
+        float edge = smoothstep(0.0, 0.08, t) * smoothstep(1.0, 0.9, t);
+        // Fine ring banding
+        float bands = 0.6 + 0.4 * sin(t * 60.0);
+        // Cassini-style gap
+        float gap = smoothstep(0.42, 0.46, t) * smoothstep(0.54, 0.50, t);
+        float alpha = edge * bands * (1.0 - gap * 0.85) * 0.55;
+        gl_FragColor = vec4(uColor, alpha);
+      }
+    `,
     transparent: true,
-    opacity: 0.22,
     side: THREE.DoubleSide,
     depthWrite: false,
+    blending: THREE.AdditiveBlending,
     fog: false
   });
   const ring = new THREE.Mesh(ringGeometry, ringMaterial);
@@ -7039,7 +7165,8 @@ function createDistantPlanetLayer() {
     update(time) {
       const t = time || 0;
       for (const mesh of meshes) {
-        mesh.rotation.y = t * mesh.userData.drift;
+        mesh.rotation.y = t * mesh.userData.drift; // slow surface spin
+        mesh.userData.material.uniforms.uTime.value = t;
       }
       ring.rotation.z = -0.35 + Math.sin(t * 0.00008) * 0.015;
     }
