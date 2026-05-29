@@ -6224,7 +6224,7 @@ function createRealisticMarsTerrain() {
     material = new THREE.MeshBasicMaterial({
       color: 0xb33112,
       vertexColors: true,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide, // terrain is only ever seen from above
       fog: true
     });
   } else {
@@ -6240,7 +6240,7 @@ function createRealisticMarsTerrain() {
 
   const terrain = new THREE.Mesh(geometry, material);
   terrain.receiveShadow = true;
-  terrain.castShadow = true;
+  terrain.castShadow = false; // ground receives shadows but shouldn't cast them
 
   // 7. Add color variation to the terrain
   const colors = new Float32Array(geometry.attributes.position.count * 3);
@@ -6295,130 +6295,6 @@ function createRealisticMarsTerrain() {
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
   return terrain;
-}
-
-// Create a realistic Mars texture - EMERGENCY MOBILE MODE
-function createRealisticMarsTexture() {
-  const marsPerfSettings = getPerformanceSettings();
-  
-  // Force minimal texture size on ALL devices to prevent WebGL context issues
-  const textureSize = 64; // Ultra minimal texture size
-  
-  const canvas = document.createElement('canvas');
-  canvas.width = textureSize;
-  canvas.height = textureSize;
-  const context = canvas.getContext('2d');
-  
-  // MOBILE EMERGENCY: Return solid color instead of complex texture
-  if (marsPerfSettings.isMobile) {
-    context.fillStyle = '#a83c0c'; // Simple Mars red color
-    context.fillRect(0, 0, textureSize, textureSize);
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.generateMipmaps = false; // Prevent additional GPU load
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    return texture;
-  }
-
-  // Base color - deeper reddish-orange like in the reference image
-  const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, '#a83c0c');
-  gradient.addColorStop(0.3, '#8a3208');
-  gradient.addColorStop(0.6, '#9c3a0a');
-  gradient.addColorStop(1, '#7a2e08');
-
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Add large regional variations
-  for (let i = 0; i < 30; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const radius = Math.random() * 500 + 200;
-
-    const gradient = context.createRadialGradient(
-      x, y, 0,
-      x, y, radius
-    );
-
-    // Random variation of Mars colors - darker and more varied like in the image
-    const colorType = Math.random();
-    let color1, color2;
-
-    if (colorType < 0.33) {
-      // Darker regions (iron-rich)
-      color1 = '#6a2208';
-      color2 = '#7a2a08';
-    } else if (colorType < 0.66) {
-      // Medium reddish regions
-      color1 = '#9c3a0a';
-      color2 = '#8a3208';
-    } else {
-      // More brownish regions (clay minerals)
-      color1 = '#704020';
-      color2 = '#603010';
-    }
-
-    gradient.addColorStop(0, color1);
-    gradient.addColorStop(1, color2);
-
-    context.globalAlpha = 0.6;
-    context.fillStyle = gradient;
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fill();
-    context.globalAlpha = 1.0;
-  }
-
-  // Add more visible rock formations (reduced for faster texture generation)
-  for (let i = 0; i < 150; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const size = Math.random() * 30 + 10;
-
-    // Random rock color
-    const rockColor = Math.random() < 0.5 ?
-      `rgba(${60 + Math.random() * 30}, ${30 + Math.random() * 20}, ${20 + Math.random() * 10}, 0.7)` :
-      `rgba(${100 + Math.random() * 40}, ${50 + Math.random() * 30}, ${30 + Math.random() * 20}, 0.7)`;
-
-    context.fillStyle = rockColor;
-    context.beginPath();
-
-    // Create irregular rock shapes
-    context.moveTo(x, y);
-    for (let j = 0; j < 6; j++) {
-      const angle = j * Math.PI / 3;
-      const distance = size * (0.7 + Math.random() * 0.6);
-      context.lineTo(
-        x + Math.cos(angle) * distance,
-        y + Math.sin(angle) * distance
-      );
-    }
-    context.closePath();
-    context.fill();
-  }
-
-  // Add dust deposits (reduced count)
-  for (let i = 0; i < 50; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const radius = Math.random() * 200 + 50;
-
-    const gradient = context.createRadialGradient(
-      x, y, 0,
-      x, y, radius
-    );
-
-    gradient.addColorStop(0, 'rgba(200, 150, 120, 0.3)');
-    gradient.addColorStop(1, 'rgba(200, 150, 120, 0)');
-
-    context.fillStyle = gradient;
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fill();
-  }
-
-  return new THREE.CanvasTexture(canvas);
 }
 
 // Create a normal map for Mars terrain
@@ -6531,7 +6407,9 @@ function createSpaceSkybox() {
   skyboxGroup.renderOrder = -1000;
 
   // === LAYER 1: Procedural shader sky sphere ===
-  const skyboxGeometry = new THREE.SphereGeometry(5900, 64, 48);
+  // Low tessellation is fine â€” all sky detail lives in the fragment shader,
+  // the vertex shader only needs a smooth direction interpolant.
+  const skyboxGeometry = new THREE.SphereGeometry(5900, 32, 24);
 
   const skyboxMaterial = new THREE.ShaderMaterial({
     uniforms: {
@@ -6582,31 +6460,6 @@ function createSpaceSkybox() {
           a *= 0.48;
         }
         return v;
-      }
-
-      // --- Stars ---
-      // Returns brightness of the nearest star in a grid cell
-      float starField(vec3 dir, float scale, float threshold) {
-        vec3 p = dir * scale;
-        vec3 cell = floor(p);
-        float bright = 0.0;
-        // Check this cell and neighbors for closest star
-        for (int dx = -1; dx <= 1; dx++)
-        for (int dy = -1; dy <= 1; dy++)
-        for (int dz = -1; dz <= 1; dz++) {
-          vec3 c = cell + vec3(float(dx), float(dy), float(dz));
-          float h = hash3(c);
-          if (h > threshold) {
-            vec3 starPos = c + vec3(hash3(c + 0.1), hash3(c + 0.2), hash3(c + 0.3));
-            float d = length(p - starPos);
-            float size = 0.02 + 0.04 * hash3(c + 0.5);
-            float b = smoothstep(size, 0.0, d);
-            // Twinkle
-            float twinkle = 0.7 + 0.3 * sin(uTime * 0.0008 * (hash3(c + 0.7) * 4.0 + 1.0) + hash3(c + 0.9) * 6.28);
-            bright = max(bright, b * twinkle);
-          }
-        }
-        return bright;
       }
 
       void main() {
@@ -6665,22 +6518,8 @@ function createSpaceSkybox() {
           sky += milkyColor * milky * 0.70;
         }
 
-        // --- Static star layers (painted by shader, no canvas) ---
-        float s1 = starField(dir, 80.0, 0.925);  // sparse bright stars
-        float s2 = starField(dir, 200.0, 0.885);  // medium density
-        float s3 = starField(dir, 500.0, 0.835);  // dense dim stars
-
-        // Star colors: mostly white-blue, some warm
-        vec3 starCol1 = mix(vec3(0.8, 0.85, 1.0), vec3(1.0, 0.9, 0.7), hash(dir.xz * 80.0));
-        vec3 starCol2 = mix(vec3(0.85, 0.9, 1.0), vec3(1.0, 0.85, 0.65), hash(dir.xz * 200.0));
-
-        sky += starCol1 * s1 * 0.95;
-        sky += starCol2 * s2 * 0.48;
-        sky += vec3(0.7, 0.75, 0.9) * s3 * 0.18;
-
-        // Fade stars near horizon (atmospheric extinction)
-        float extinction = smoothstep(0.0, 0.15, abs(elevation));
-        sky = mix(sky * vec3(1.0, 0.7, 0.5) * 0.3, sky, extinction);
+        // Stars are drawn by the dedicated particle layer (createTwinklingStars),
+        // so the sky shader only paints the gradient + Milky Way here.
 
         gl_FragColor = vec4(sky, 1.0);
       }
@@ -6995,11 +6834,16 @@ function createShootingStarSystem() {
   // Spawn timer
   let nextSpawn = 1.5 + Math.random() * 3;
   let elapsed = 0;
+  let lastTime = null;
 
   return {
     group,
     update(time) {
-      const dt = 0.016; // ~60fps timestep
+      // Real frame delta (seconds) so shooting stars move at a consistent
+      // real-world speed regardless of display refresh rate.
+      let dt = 0.016;
+      if (lastTime != null) dt = Math.min(Math.max((time - lastTime) / 1000, 0), 0.1);
+      lastTime = time;
       elapsed += dt;
 
       // Spawn new shooting stars periodically (a few, not a shower)
