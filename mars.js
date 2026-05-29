@@ -1004,11 +1004,11 @@ controls.enabled = false; // Disable orbit controls since we're starting in thir
 // Movement Logic - Make keys globally accessible for mobile controls
 window.keys = { w: false, a: false, s: false, d: false };
 const keys = window.keys; // Keep local reference for backward compatibility
-const MAX_SPEED = 0.46;          // Quicker top speed while keeping rover handling stable
+const MAX_SPEED = 0.30;          // Calmer top speed â€” easier to control on rough terrain
 const REVERSE_SPEED_FACTOR = 0.55;
-const ACCELERATION = 0.020;      // Faster launch from rest for snappier gameplay
-const DECELERATION = 0.026;      // Braking stays responsive at the higher speed
-const COAST_DECEL = 0.009;       // Passive deceleration when no key held
+const ACCELERATION = 0.014;      // Gentler launch from rest
+const DECELERATION = 0.022;      // Braking stays responsive
+const COAST_DECEL = 0.008;       // Passive deceleration when no key held
 const MAX_ROTATION_SPEED = 0.020; // Slightly quicker turn rate
 const ROTATION_ACCEL = 0.003;    // Turn rate ramps up gradually
 let velocity = 0;                // Current velocity (-MAX_SPEED to +MAX_SPEED)
@@ -3607,8 +3607,11 @@ class MarsSceneManager {
         const veh = this.createCybertruckVehicle();
         const scale = 0.45 + Math.random() * 0.18;
         veh.scale.set(scale, scale, scale);
-        veh.position.set(x, road.groundY + 0.3, z);
-        veh.rotation.y = road.angle + (Math.random() < 0.5 ? 0 : Math.PI); // face either direction
+        const spawnGroundY = Math.max(road.groundY, this.getTerrainHeight(x, z));
+        veh.position.set(x, spawnGroundY + 0.3, z);
+        // Cybertruck forward axis is +X; the road runs along world angle `road.angle`,
+        // so face -road.angle to drive along the road instead of across it.
+        veh.rotation.y = -road.angle + (Math.random() < 0.5 ? 0 : Math.PI); // face either direction
 
         this.scene.add(veh);
         this.roadVehicles.push({
@@ -3630,6 +3633,10 @@ class MarsSceneManager {
 
       v.mesh.position.x = v.road.startX + (v.road.endX - v.road.startX) * v.t;
       v.mesh.position.z = v.road.startZ + (v.road.endZ - v.road.startZ) * v.t;
+      // Ride on top of whichever is higher: the flat road plane or the terrain
+      // beneath it, so vehicles never disappear under a hill the road cuts through.
+      const groundY = Math.max(v.road.groundY, this.getTerrainHeight(v.mesh.position.x, v.mesh.position.z));
+      v.mesh.position.y = groundY + 0.3;
     }
   }
 
@@ -4420,16 +4427,18 @@ class MarsSceneManager {
       a = points[i];
       b = points[i + 1];
 
-      // Interpolate position between waypoints (includes terrain height from route creation)
+      // Interpolate position between waypoints, then snap to the actual terrain
+      // height so vehicles ride the surface instead of sinking through hills/roads.
       const pos = new THREE.Vector3().copy(a).lerp(b, t);
       if (vehicle.mesh) {
-        vehicle.mesh.position.copy(pos);
+        const groundY = this.getTerrainHeight(pos.x, pos.z);
+        vehicle.mesh.position.set(pos.x, groundY + 0.2, pos.z);
 
-        // Orient vehicle to face along its path
+        // Orient vehicle to face along its path. The Cybertruck model's forward
+        // axis is +X, so align +X with the travel direction (atan2(-dz, dx)).
         const dir = new THREE.Vector3().subVectors(b, a).multiplyScalar(vehicle.directionSign);
         if (dir.lengthSq() > 0.0001) {
-          const yaw = Math.atan2(dir.x, dir.z);
-          vehicle.mesh.rotation.y = yaw;
+          vehicle.mesh.rotation.y = Math.atan2(-dir.z, dir.x);
         }
       }
     }
@@ -5562,6 +5571,31 @@ function createRoverTireTracks() {
 }
 
 // Optimize the positionRoverOnTerrain function
+// Shared downward raycast to sample ground height at an arbitrary (x, z).
+// Used by the chase camera and AI traffic so nothing clips below the surface.
+function getGroundHeight(x, z, fallback = 0) {
+  if (!window._groundHeightRaycaster) {
+    window._groundHeightRaycaster = new THREE.Raycaster();
+    window._groundHeightRaycaster.ray.direction.set(0, -1, 0);
+  }
+  const rc = window._groundHeightRaycaster;
+  rc.ray.origin.set(x, 500, z);
+
+  // Prefer active terrain chunks, fall back to the main surface
+  let closest = null;
+  if (typeof terrainSystem !== 'undefined' && terrainSystem.chunks && terrainSystem.chunks.size > 0) {
+    for (const chunk of terrainSystem.chunks.values()) {
+      const hits = rc.intersectObject(chunk, false);
+      if (hits.length > 0 && (!closest || hits[0].distance < closest.distance)) closest = hits[0];
+    }
+  }
+  if (!closest && typeof marsSurface !== 'undefined' && marsSurface) {
+    const hits = rc.intersectObject(marsSurface, false);
+    if (hits.length > 0) closest = hits[0];
+  }
+  return closest ? closest.point.y : fallback;
+}
+
 function positionRoverOnTerrain() {
   // Reuse raycaster object instead of creating a new one each time
   if (!window.terrainRaycaster) {
@@ -5692,6 +5726,13 @@ function updateCamera() {
 
       // Snappier follow for responsive feel
       camera.position.lerp(vectors.target, 0.1);
+
+      // Keep the camera above the terrain so it never clips through hills behind the rover
+      {
+        const groundY = getGroundHeight(camera.position.x, camera.position.z, rover.position.y);
+        const minCamY = groundY + 3.0; // clearance above the surface
+        if (camera.position.y < minCamY) camera.position.y = minCamY;
+      }
 
       // Look slightly ahead of the rover (in its facing direction) for a dynamic feel
       vectors.forward.set(0, 0, -1).applyAxisAngle(vectors.upAxis, roverYaw);
