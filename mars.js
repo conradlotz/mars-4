@@ -678,14 +678,37 @@ function createRealisticRover() {
     wheels.push(wheel);
   });
 
-  // Add minimal rover lighting for mobile visibility (reduced for performance)
+  // === Night driving headlights (the rover's front faces local -Z) ===
+  // Emissive lamp meshes so the headlights are visible on the rover itself.
+  const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfff6e0 });
+  const headlightGeom = new THREE.SphereGeometry(0.2, 10, 10);
+  const lampPositions = [[-1.15, 1.25, -3.0], [1.15, 1.25, -3.0]];
+  lampPositions.forEach(([lx, ly, lz]) => {
+    const lamp = new THREE.Mesh(headlightGeom, headlightMat);
+    lamp.position.set(lx, ly, lz);
+    roverGroup.add(lamp);
+  });
+
   if (perfSettings.isMobile) {
-    // Only one main rover light to reduce GPU load
-    const roverLight = new THREE.PointLight(0xffffff, 1.5, 25);
-    roverLight.position.set(0, 2, 0);
+    // Mobile: one cheap point light at the front, no spotlights
+    const roverLight = new THREE.PointLight(0xfff2d8, 1.6, 28);
+    roverLight.position.set(0, 2, -2.5);
     roverGroup.add(roverLight);
-    
     console.log('Minimal mobile rover lighting added for performance');
+  } else {
+    // Desktop: two forward spotlight cones for real headlight beams,
+    // plus a soft warm fill so the rover body and nearby ground read at night.
+    lampPositions.forEach(([lx, ly, lz]) => {
+      const spot = new THREE.SpotLight(0xfff2d8, 3.0, 85, Math.PI * 0.22, 0.5, 1.0);
+      spot.position.set(lx, ly, lz);
+      spot.target.position.set(lx * 1.5, -3, lz - 34); // aim forward and slightly down
+      spot.castShadow = false;
+      roverGroup.add(spot);
+      roverGroup.add(spot.target);
+    });
+    const fill = new THREE.PointLight(0xffe9cc, 0.8, 20);
+    fill.position.set(0, 2.2, -2.0);
+    roverGroup.add(fill);
   }
 
   return {
@@ -2472,7 +2495,12 @@ class MarsSceneManager {
 
     // Store primary colony center for use by traffic and rail systems
     this.colonyCenter = new THREE.Vector3(colonyOffsetX, groundY, colonyOffsetZ);
-    
+
+    // The colony buildings are placed at a fixed ground height (groundY=0), so
+    // flatten the terrain beneath them to remove the little hills that would
+    // otherwise poke up in front of the structures and the rocket area.
+    flattenMarsTerrain(colonyOffsetX, colonyOffsetZ, 220, groundY);
+
     // Shared materials for colony infrastructure (avoid duplicates)
     const windowMaterial = new THREE.MeshStandardMaterial({
       color: 0x4488ff,
@@ -3501,15 +3529,18 @@ class MarsSceneManager {
       }
     }
 
-    // Shared road material
+    // Shared road material (double-sided so a draped ribbon is visible
+    // regardless of triangle winding as it follows the terrain)
     if (!this._roadMaterial) {
       this._roadMaterial = new THREE.MeshBasicMaterial({
         color: 0x3a3028,
+        side: THREE.DoubleSide,
         depthWrite: true
       });
       this._roadMaterial._shared = true;
       this._roadLineMaterial = new THREE.MeshBasicMaterial({
         color: 0xffaa33,
+        side: THREE.DoubleSide,
         depthWrite: true
       });
       this._roadLineMaterial._shared = true;
@@ -3538,25 +3569,44 @@ class MarsSceneManager {
 
         const roadGroup = new THREE.Group();
 
-        // Road surface â€” flat plane stretched between the two settlements
-        const roadWidth = 6;
-        const roadGeom = new THREE.PlaneGeometry(dist, roadWidth, 1, 1);
-        roadGeom.rotateX(-Math.PI / 2);
-        const road = new THREE.Mesh(roadGeom, this._roadMaterial);
-
-        // Position at midpoint, rotated to face from A to B
         const angle = Math.atan2(b.center.z - a.center.z, b.center.x - a.center.x);
         const groundY = (a.center.y + b.center.y) / 2 + 0.15;
-        road.position.set(midX, groundY, midZ);
-        road.rotation.y = -angle;
+
+        // Road surface â€” a ribbon DRAPED over the terrain so it follows the
+        // hills. A single flat plane floats over dips and lets the rover drive
+        // underneath it; sampling terrain height per segment fixes that.
+        const roadWidth = 6;
+        const dirX = (b.center.x - a.center.x) / dist;
+        const dirZ = (b.center.z - a.center.z) / dist;
+        const perpX = -dirZ, perpZ = dirX;
+        const segs = Math.max(8, Math.floor(dist / 12));
+        const buildDrapedRibbon = (halfWidth, yOff) => {
+          const v = [];
+          for (let s = 0; s < segs; s++) {
+            const t0 = s / segs, t1 = (s + 1) / segs;
+            const ax0 = a.center.x + (b.center.x - a.center.x) * t0;
+            const az0 = a.center.z + (b.center.z - a.center.z) * t0;
+            const ax1 = a.center.x + (b.center.x - a.center.x) * t1;
+            const az1 = a.center.z + (b.center.z - a.center.z) * t1;
+            const ay0 = this.getTerrainHeight(ax0, az0) + yOff;
+            const ay1 = this.getTerrainHeight(ax1, az1) + yOff;
+            const l0 = [ax0 + perpX * halfWidth, ay0, az0 + perpZ * halfWidth];
+            const r0 = [ax0 - perpX * halfWidth, ay0, az0 - perpZ * halfWidth];
+            const l1 = [ax1 + perpX * halfWidth, ay1, az1 + perpZ * halfWidth];
+            const r1 = [ax1 - perpX * halfWidth, ay1, az1 - perpZ * halfWidth];
+            v.push(...l0, ...r0, ...l1, ...l1, ...r0, ...r1);
+          }
+          const g = new THREE.BufferGeometry();
+          g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+          g.computeVertexNormals();
+          return g;
+        };
+
+        const road = new THREE.Mesh(buildDrapedRibbon(roadWidth / 2, 0.15), this._roadMaterial);
         roadGroup.add(road);
 
-        // Center line (dashed effect via a thin strip)
-        const lineGeom = new THREE.PlaneGeometry(dist, 0.3, 1, 1);
-        lineGeom.rotateX(-Math.PI / 2);
-        const line = new THREE.Mesh(lineGeom, this._roadLineMaterial);
-        line.position.set(midX, groundY + 0.05, midZ);
-        line.rotation.y = -angle;
+        // Center line, draped just above the road surface
+        const line = new THREE.Mesh(buildDrapedRibbon(0.3, 0.22), this._roadLineMaterial);
         roadGroup.add(line);
 
         this.scene.add(roadGroup);
@@ -3665,7 +3715,9 @@ class MarsSceneManager {
     ];
     const pal = palettes[Math.floor(rand() * palettes.length)];
 
-    const wallMat = new THREE.MeshStandardMaterial({ color: pal.wall, metalness: 0.7, roughness: 0.3, emissive: pal.emissive, emissiveIntensity: 0.15 });
+    const wallMat = new THREE.MeshStandardMaterial({ color: pal.wall, metalness: 0.7, roughness: 0.3, emissive: pal.emissive, emissiveIntensity: 0.35 });
+    // Glowing window band material so towers light up at night
+    const winMat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.9 });
     const glowMat = new THREE.MeshBasicMaterial({ color: pal.accent, transparent: true, opacity: 0.85 });
     const glow2Mat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.7 });
     const padMat  = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9, metalness: 0.2 });
@@ -3682,6 +3734,15 @@ class MarsSceneManager {
         seg.position.set(x, sy, z);
         seg.rotation.y = twist * si;
         group.add(seg);
+        // Glowing window band per floor (skip the ground floor) so the tower
+        // reads as a lit building at night.
+        if (si > 0) {
+          const bandGeom = new THREE.BoxGeometry(w + 0.25, segH * 0.34, d + 0.25);
+          const band = new THREE.Mesh(bandGeom, winMat);
+          band.position.copy(seg.position);
+          band.rotation.y = seg.rotation.y;
+          group.add(band);
+        }
       }
       this.registerCollidable({ x, z }, Math.max(w, d) * 0.8 + 2);
     };
@@ -5596,6 +5657,28 @@ function getGroundHeight(x, z, fallback = 0) {
   return closest ? closest.point.y : fallback;
 }
 
+// Flatten a disc of the Mars terrain toward a target height, with a smooth
+// blended rim. Used to remove the bumps that poke up around colony buildings
+// (which are placed at a fixed ground height, not the undulating terrain).
+function flattenMarsTerrain(cx, cz, radius, targetY = 0) {
+  if (typeof marsSurface === 'undefined' || !marsSurface || !marsSurface.geometry) return;
+  const geo = marsSurface.geometry;
+  const pos = geo.attributes.position;
+  const arr = pos.array;
+  const inner = radius * 0.6; // fully flat within the inner disc
+  for (let i = 0; i < arr.length; i += 3) {
+    const dx = arr[i] - cx;
+    const dz = arr[i + 2] - cz;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (d >= radius) continue;
+    let w = d <= inner ? 1.0 : 1.0 - (d - inner) / (radius - inner);
+    w = w * w * (3 - 2 * w); // smoothstep blend
+    arr[i + 1] = arr[i + 1] * (1 - w) + targetY * w;
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+}
+
 function positionRoverOnTerrain() {
   // Reuse raycaster object instead of creating a new one each time
   if (!window.terrainRaycaster) {
@@ -6470,22 +6553,21 @@ function createSpaceSkybox() {
         vec3 dir = normalize(vWorldPos);
         float elevation = dir.y; // -1 bottom, +1 top
 
-        // --- Sky gradient: deep space colors for Mars night ---
-        vec3 zenith  = vec3(0.014, 0.020, 0.050); // blue-tinted deep space overhead
-        vec3 horizon = vec3(0.044, 0.022, 0.020); // rusty horizon with a cool blue lift
-        vec3 nadir   = vec3(0.0, 0.0, 0.0);      // black below
+        // --- Sky gradient: deep, dark Mars night (no blue wash) ---
+        vec3 zenith  = vec3(0.010, 0.013, 0.026); // near-black overhead
+        vec3 horizon = vec3(0.028, 0.016, 0.013); // faint dark rust at horizon
+        vec3 nadir   = vec3(0.0, 0.0, 0.0);       // black below
 
         float t = elevation * 0.5 + 0.5; // remap to 0..1
         vec3 sky = mix(nadir, horizon, smoothstep(0.0, 0.45, t));
         sky = mix(sky, zenith, smoothstep(0.45, 1.0, t));
-        sky += vec3(0.015, 0.026, 0.060) * smoothstep(0.08, 0.95, t);
 
-        // Subtle warm Mars dust glow near the horizon
-        float horizonGlow = exp(-abs(elevation) * 8.0);
-        sky += vec3(0.10, 0.032, 0.020) * horizonGlow * 0.22;
+        // Very faint warm dust line tight to the horizon only
+        float horizonGlow = exp(-abs(elevation) * 16.0);
+        sky += vec3(0.045, 0.016, 0.009) * horizonGlow * 0.12;
 
-        // --- Milky Way band ---
-        // Rotate direction so the band runs diagonally across the sky
+        // --- Milky Way band: subtle, high in the sky, and faded out toward the
+        // horizon so it never reads as ground-level "smoke". ---
         float angle = -0.55;
         float ca = cos(angle), sa = sin(angle);
         vec3 rd = vec3(
@@ -6494,43 +6576,29 @@ function createSpaceSkybox() {
           dir.x * sa + dir.z * ca
         );
         float bandDist = abs(rd.y);
-        float bandMask = smoothstep(0.28, 0.0, bandDist);
+        float bandMask = smoothstep(0.16, 0.0, bandDist);
+        // Gate by true elevation: nothing low in the sky, only well overhead.
+        bandMask *= smoothstep(0.18, 0.5, elevation);
 
         if (bandMask > 0.01) {
-          // Multi-octave noise cloud along the band
           vec3 nCoord = rd * 6.0 + vec3(0.0, 0.0, uTime * 0.000002);
           float n = fbm(nCoord);
           float detail = fbm(nCoord * 3.0 + 1.5);
 
-          // Higher-contrast glow so the band reads as a structured cloud, not haze
-          float milky = bandMask * smoothstep(0.34, 0.62, n);
-          milky += bandMask * 0.45 * smoothstep(0.38, 0.72, detail);
+          float milky = bandMask * smoothstep(0.44, 0.74, n);
+          milky += bandMask * 0.3 * smoothstep(0.48, 0.80, detail);
 
-          // Core brightness (bright galactic centre line)
-          float core = smoothstep(0.12, 0.0, bandDist) * smoothstep(0.40, 0.66, n) * 0.75;
-          milky += core;
-
-          // Dark dust lanes: a second noise field carves voids through the band,
-          // which is what gives the real Milky Way its mottled, structured look.
+          // Dark dust lanes carve voids for a mottled look
           float dust = fbm(nCoord * 1.7 + 9.0);
-          float lanes = smoothstep(0.40, 0.62, dust);
-          milky *= 1.0 - lanes * 0.7;
+          milky *= 1.0 - smoothstep(0.40, 0.62, dust) * 0.8;
 
-          // Color: blue-white outer, warm lavender core
-          vec3 milkyColor = mix(
-            vec3(0.34, 0.44, 0.72),   // blue-white outer
-            vec3(0.78, 0.70, 0.88),   // pale lavender core
-            core
-          );
-          // Faint pink/magenta emission knots
-          float knots = smoothstep(0.64, 0.78, detail) * bandMask * 0.35;
-          milkyColor += vec3(0.30, 0.06, 0.18) * knots;
-
-          sky += milkyColor * milky * 0.85;
+          // Desaturated, dim so it's a hint of galaxy, not a glowing cloud
+          vec3 milkyColor = vec3(0.28, 0.32, 0.44);
+          sky += milkyColor * milky * 0.26;
         }
 
         // Stars are drawn by the dedicated particle layer (createTwinklingStars),
-        // so the sky shader only paints the gradient + Milky Way here.
+        // so the sky shader only paints the gradient + faint Milky Way here.
 
         gl_FragColor = vec4(sky, 1.0);
       }
