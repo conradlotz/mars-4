@@ -5788,6 +5788,35 @@ const resizeHandler = () => {
 
 window.gameEventListeners.add(window, 'resize', resizeHandler);
 
+// --- Deterministic CPU value-noise + fBm for natural terrain shaping ---
+// (same idea as the skybox shader's noise3/fbm, on the CPU). Deterministic so
+// the terrain is identical every load.
+function _terrainHash2(x, y) {
+  const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return h - Math.floor(h); // [0,1)
+}
+function _terrainValueNoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  const a = _terrainHash2(xi, yi);
+  const b = _terrainHash2(xi + 1, yi);
+  const c = _terrainHash2(xi, yi + 1);
+  const d = _terrainHash2(xi + 1, yi + 1);
+  return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v; // [0,1]
+}
+function _terrainFbm(x, y, octaves) {
+  let val = 0, amp = 0.5, freq = 1, norm = 0;
+  for (let o = 0; o < octaves; o++) {
+    val += amp * _terrainValueNoise(x * freq, y * freq);
+    norm += amp;
+    freq *= 2.03;
+    amp *= 0.5;
+  }
+  return val / norm; // normalised [0,1]
+}
+
 function createRealisticMarsTerrain() {
   // Performance-adaptive terrain creation with mobile optimization
   const perfSettings = getPerformanceSettings();
@@ -5845,27 +5874,28 @@ function createRealisticMarsTerrain() {
       
       elevation = baseElevation + mediumFeatures + fineFeatures + craterFeatures;
     } else {
-      // Desktop: Full terrain generation
-      // Large features (mountains and valleys) - always included
-      const largeFeatures = Math.sin(x * 0.01) * Math.cos(z * 0.01) * 8 +
-        Math.sin(x * 0.02 + 10) * Math.cos(z * 0.015) * 6;
+      // Desktop: natural terrain via domain-warped fBm instead of summed
+      // sin/cos (which reads as repetitive grid-aligned waves). Domain warping
+      // breaks up the regularity; a ridged octave adds rocky spines.
+      const warpX = _terrainFbm(x * 0.0009 + 11.2, z * 0.0009 + 4.7, 3) - 0.5;
+      const warpZ = _terrainFbm(x * 0.0009 + 23.5, z * 0.0009 + 9.1, 3) - 0.5;
+      const wx = x + warpX * 140;
+      const wz = z + warpZ * 140;
 
-      // Medium features (hills and craters) - included based on performance
-      const mediumFeatures = perfSettings.detailLevel !== 'low' ? 
-        Math.sin(x * 0.05) * Math.cos(z * 0.04) * 3 +
-        Math.sin(x * 0.07 + 1) * Math.cos(z * 0.06) * 2 : 0;
+      // Broad continents (large rolling highs and lows)
+      const continents = (_terrainFbm(wx * 0.0016, wz * 0.0016, 5) - 0.5) * 34;
+      // Mid-scale hills
+      const hills = (_terrainFbm(wx * 0.006, wz * 0.006, 4) - 0.5) * 10;
+      // Ridged noise -> rocky ridges and crest lines
+      const ridged = (1 - Math.abs(2 * _terrainFbm(wx * 0.012 + 50, wz * 0.012 + 50, 4) - 1)) * 6;
 
-      // Small features (bumps and rocks) - only for high performance
-      const smallFeatures = perfSettings.detailLevel === 'high' ? 
-        Math.sin(x * 0.2 + 2) * Math.cos(z * 0.15) * 1 +
-        Math.sin(x * 0.3 + 3) * Math.cos(z * 0.25) * 0.5 : 0;
+      // Fine rocky detail only on high detail to keep load fast
+      const detailRocks = perfSettings.detailLevel === 'high'
+        ? (_terrainFbm(wx * 0.05, wz * 0.05, 3) - 0.5) * 1.8 +
+          (_terrainFbm(wx * 0.13 + 7, wz * 0.13 + 7, 2) - 0.5) * 0.7
+        : 0;
 
-      // Micro details - only for high performance
-      const microDetails = perfSettings.detailLevel === 'high' ? 
-        Math.sin(x * 0.8 + 4) * Math.cos(z * 0.6) * 0.3 : 0;
-
-      // Combine all features with different weights
-      elevation = largeFeatures + mediumFeatures + smallFeatures + microDetails;
+      elevation = continents + hills * 0.8 + ridged * 0.7 + detailRocks;
     }
 
     // Add deterministic variation based on position (not Math.random) for consistent terrain
@@ -6228,13 +6258,24 @@ function createRealisticMarsTerrain() {
       fog: true
     });
   } else {
-    // Desktop: Lambert â€” simple, predictable lighting, vertex colors show correctly
-    // (avoids PBR colour darkening under ACES tone mapping)
-    material = new THREE.MeshLambertMaterial({
+    // Desktop: Phong â€” per-fragment lighting so the normal map actually shows,
+    // but NOT physically based, so vertex colours don't get crushed under ACES
+    // tone mapping the way MeshStandardMaterial would. Low shininess + near-black
+    // specular keeps the regolith matte.
+    const normalMap = createMarsNormalMap();
+    normalMap.repeat.set(terrainSize / 45, terrainSize / 45); // tile the detail across the ground
+    if (renderer && renderer.capabilities) {
+      normalMap.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    }
+    material = new THREE.MeshPhongMaterial({
       color: 0xffffff, // white base so vertex colours are the sole tint
       vertexColors: true,
-      side: THREE.DoubleSide,
-      fog: true
+      side: THREE.FrontSide,
+      fog: true,
+      shininess: 3,
+      specular: 0x0a0805,
+      normalMap: normalMap,
+      normalScale: new THREE.Vector2(0.55, 0.55)
     });
   }
 
@@ -6297,106 +6338,74 @@ function createRealisticMarsTerrain() {
   return terrain;
 }
 
-// Create a normal map for Mars terrain
+// Create a SEAMLESSLY TILING rocky normal map for Mars terrain.
+// Builds a periodic fBm height field, then derives normals from it via central
+// differences so the map can repeat across the terrain without visible seams.
 function createMarsNormalMap() {
-  const perfSettings = getPerformanceSettings();
-  const textureSize = Math.min(perfSettings.textureSize || 1024, 1024); // Cap at 1024 for normal maps
-  
+  const size = 256; // small but tiles many times across the terrain
   const canvas = document.createElement('canvas');
-  canvas.width = textureSize;
-  canvas.height = textureSize;
+  canvas.width = size;
+  canvas.height = size;
   const context = canvas.getContext('2d');
+  const img = context.createImageData(size, size);
+  const data = img.data;
 
-  // Fill with neutral normal (128, 128, 255)
-  context.fillStyle = 'rgb(128, 128, 255)';
-  context.fillRect(0, 0, canvas.width, canvas.height);
+  // Periodic value noise: wrapping the integer lattice modulo P makes it tile.
+  const phash = (x, y, P) => {
+    x = ((x % P) + P) % P;
+    y = ((y % P) + P) % P;
+    const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+    return h - Math.floor(h);
+  };
+  const pnoise = (x, y, P) => {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const u = xf * xf * (3 - 2 * xf);
+    const v = yf * yf * (3 - 2 * yf);
+    const a = phash(xi, yi, P), b = phash(xi + 1, yi, P);
+    const c = phash(xi, yi + 1, P), d = phash(xi + 1, yi + 1, P);
+    return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
+  };
 
-  // Add various bumps and details (reduced count for faster generation)
-  for (let i = 0; i < 500; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const radius = Math.random() * 10 + 2;
-
-    // Create a radial gradient for each bump
-    const gradient = context.createRadialGradient(
-      x, y, 0,
-      x, y, radius
-    );
-
-    // Random bump direction
-    const angle = Math.random() * Math.PI * 2;
-    const r = 128 + Math.cos(angle) * 50;
-    const g = 128 + Math.sin(angle) * 50;
-
-    gradient.addColorStop(0, `rgb(${r}, ${g}, 255)`);
-    gradient.addColorStop(1, 'rgb(128, 128, 255)');
-
-    context.fillStyle = gradient;
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fill();
+  // Precompute the periodic height field once (cheap), then difference it.
+  const H = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      let val = 0, amp = 0.5, norm = 0, P = 8;
+      for (let o = 0; o < 4; o++) {
+        val += amp * pnoise((x / size) * P, (y / size) * P, P);
+        norm += amp;
+        amp *= 0.5;
+        P *= 2;
+      }
+      H[y * size + x] = val / norm;
+    }
   }
+  const at = (x, y) => H[(((y % size) + size) % size) * size + (((x % size) + size) % size)];
 
-  // Add some larger features (reduced count)
-  for (let i = 0; i < 30; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const radius = Math.random() * 30 + 10;
-
-    // Create a radial gradient for each feature
-    const gradient = context.createRadialGradient(
-      x, y, 0,
-      x, y, radius
-    );
-
-    // Random feature direction
-    const angle = Math.random() * Math.PI * 2;
-    const r = 128 + Math.cos(angle) * 50;
-    const g = 128 + Math.sin(angle) * 50;
-
-    gradient.addColorStop(0, `rgb(${r}, ${g}, 255)`);
-    gradient.addColorStop(1, 'rgb(128, 128, 255)');
-
-    context.fillStyle = gradient;
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fill();
+  const strength = 2.2; // bump intensity
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const hL = at(x - 1, y), hR = at(x + 1, y);
+      const hD = at(x, y - 1), hU = at(x, y + 1);
+      let nx = (hL - hR) * strength;
+      let ny = (hD - hU) * strength;
+      let nz = 1.0;
+      const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      nx /= len; ny /= len; nz /= len;
+      const idx = (y * size + x) * 4;
+      data[idx]     = (nx * 0.5 + 0.5) * 255;
+      data[idx + 1] = (ny * 0.5 + 0.5) * 255;
+      data[idx + 2] = (nz * 0.5 + 0.5) * 255;
+      data[idx + 3] = 255;
+    }
   }
+  context.putImageData(img, 0, 0);
 
-  return new THREE.CanvasTexture(canvas);
-}
-
-// Create a roughness map
-function createMarsRoughnessMap() {
-  const perfSettings = getPerformanceSettings();
-  const textureSize = Math.min(perfSettings.textureSize || 1024, 1024); // Cap at 1024 for roughness maps
-  
-  const canvas = document.createElement('canvas');
-  canvas.width = textureSize;
-  canvas.height = textureSize;
-  const context = canvas.getContext('2d');
-
-  // Fill with neutral roughness (0.85)
-  context.fillStyle = 'rgb(136, 136, 136)';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Add some random variations (reduced count for faster generation)
-  for (let i = 0; i < 2000; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const radius = Math.random() * 10 + 2;
-
-    // Random variation
-    const randomVariation = Math.random() * 0.1 - 0.05;
-    const roughness = 0.85 + randomVariation;
-
-    context.fillStyle = `rgb(${Math.round(roughness * 255)}, ${Math.round(roughness * 255)}, ${Math.round(roughness * 255)})`;
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fill();
-  }
-
-  return new THREE.CanvasTexture(canvas);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  return texture;
 }
 
 // Create a skybox with procedural shader sky, Milky Way, and planets
