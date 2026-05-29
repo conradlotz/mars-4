@@ -1779,24 +1779,12 @@ class MarsAtmosphericEffects {
   }
 
   createAtmosphericHaze() {
-    // Atmospheric haze that stays within terrain bounds
-    // Uses a dark Mars-dust tint that blends with the black background
-    const hazeGeometry = new THREE.PlaneGeometry(5000, 5000);
-    const hazeMaterial = new THREE.MeshBasicMaterial({
-      color: 0x301808,
-      transparent: true,
-      opacity: 0.06,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-      fog: true,           // Let fog fade it out at the edges
-      depthWrite: false
-    });
-    
-    this.atmosphericHaze = new THREE.Mesh(hazeGeometry, hazeMaterial);
-    this.atmosphericHaze.rotation.x = -Math.PI / 2;
-    this.atmosphericHaze.position.y = 200;
-    this.atmosphericHaze.renderOrder = -1;
-    this.scene.add(this.atmosphericHaze);
+    // Disabled: this was a large horizontal additive plane at y=200. Viewed at
+    // eye level it always rendered as a bright warm band across the horizon
+    // (a visible seam where it met the dark sky) and washed the upper sky warm.
+    // The update methods all guard on `this.atmosphericHaze`, so leaving it null
+    // is safe. Ground dust + dust devils still provide atmosphere.
+    this.atmosphericHaze = null;
   }
 
   createDustDevilPool() {
