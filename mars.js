@@ -1130,8 +1130,8 @@ window.gameEventListeners.add(window, 'keyup', keyupHandler);
 // Add camera modes and third-person view
 // Third-person camera: higher, farther back, slight side offset for a cinematic angle
 const cameraOffset = perfSettings.isMobile
-  ? new THREE.Vector3(2, 5, 14)   // closer on mobile
-  : new THREE.Vector3(3, 8, 22);
+  ? new THREE.Vector3(1, 4, 9)    // closer on mobile
+  : new THREE.Vector3(2, 6, 14);  // closer on desktop too
 const cameraSpring = { velocity: new THREE.Vector3() };
 
 // Change default camera mode to thirdPerson - Make globally accessible for mobile controls
