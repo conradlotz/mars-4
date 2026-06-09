@@ -323,10 +323,28 @@ function ensureSpaceSkybox() {
 // Create skybox right away â€” night mode needs it visible from frame 1
 ensureSpaceSkybox();
 
-// Fog fades distant terrain to black, matching the void behind everything
-const fogColor = 0x6B1F00;
+// Fog fades distant terrain to Martian rust, matching the hazy horizon
+const fogColor = 0x8B3A1A;
 const fogDensity = perfSettings.samsungOptimized ? perfSettings.fogDensityReduction : 1.0;
-scene.fog = new THREE.Fog(fogColor, perfSettings.fogDistance * 0.2 * fogDensity, perfSettings.renderDistance);
+scene.fog = new THREE.FogExp2(fogColor, 0.00018 * fogDensity);
+
+// Surface dust haze — a large translucent plane just above ground level, follows rover
+const hazeGeo = new THREE.PlaneGeometry(8000, 8000);
+const hazeMat = new THREE.MeshBasicMaterial({
+  color: 0xC05020,
+  transparent: true,
+  opacity: 0.07,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  fog: false,
+  side: THREE.DoubleSide
+});
+const dustHazePlane = new THREE.Mesh(hazeGeo, hazeMat);
+dustHazePlane.rotation.x = -Math.PI / 2;
+dustHazePlane.position.y = 1.2;
+dustHazePlane.frustumCulled = false;
+dustHazePlane.visible = !perfSettings.isMobile;
+scene.add(dustHazePlane);
 
 // Endless terrain system with reduced complexity
 const terrainSystem = {
@@ -986,8 +1004,8 @@ const sunLight = new THREE.DirectionalLight(sunColor, sunIntensity);
 sunLight.position.set(-120, 55, 80);
 if (!perfSettings.isMobile) {
   sunLight.castShadow = true;
-  sunLight.shadow.mapSize.width = 2048;
-  sunLight.shadow.mapSize.height = 2048;
+  sunLight.shadow.mapSize.width = 1024;
+  sunLight.shadow.mapSize.height = 1024;
   sunLight.shadow.camera.near = 1;
   sunLight.shadow.camera.far = 1200;
   sunLight.shadow.camera.left = -400;
@@ -2498,6 +2516,7 @@ class MarsSceneManager {
 
   // --- UPDATE animated objects ---
   updateAnimations(time) {
+    this._animFrame = (this._animFrame || 0) + 1;
     const rover = window.rover;
     const roverPos = rover ? rover.position : null;
     const BEACON_CULL_DIST_SQ = 700 * 700;
@@ -2505,10 +2524,13 @@ class MarsSceneManager {
     for (const anim of this.animatedObjects) {
       if (!anim.mesh) continue;
 
-      // Skip beacons that are too far from the rover
+      // Skip beacons that are too far from the rover (cache world pos every 15 frames)
       if (roverPos && anim.type === 'blink') {
-        const wp = new THREE.Vector3();
-        anim.mesh.getWorldPosition(wp);
+        if (!anim._wpCache || !anim._wpFrame || (this._animFrame || 0) % 15 === 0) {
+          if (!anim._wpCache) anim._wpCache = new THREE.Vector3();
+          anim.mesh.getWorldPosition(anim._wpCache);
+        }
+        const wp = anim._wpCache;
         const dx = wp.x - roverPos.x, dz = wp.z - roverPos.z;
         if (dx * dx + dz * dz > BEACON_CULL_DIST_SQ) {
           anim.mesh.visible = false;
@@ -5405,6 +5427,11 @@ function animate(time) {
     if (spaceSkybox) {
       spaceSkybox.position.copy(camera.position);
     }
+    // Dust haze follows rover (desktop only — mobile skips it for perf)
+    if (dustHazePlane && rover) {
+      dustHazePlane.position.x = rover.position.x;
+      dustHazePlane.position.z = rover.position.z;
+    }
 
     // Update meteor system if it exists and we're in night mode (throttled)
     if (window.meteorSystem && (!isDaytime || isTransitioning) && frameCount % frameThrottle === 0) {
@@ -5467,8 +5494,8 @@ function animate(time) {
     rover.position.x += moveX;
     rover.position.z += moveZ;
 
-    // Collision detection â€” revert if the rover hits a structure
-    if (window.marsSceneManager &&
+    // Collision detection – revert if the rover hits a structure (throttled every 3 frames)
+    if (window.marsSceneManager && frameCount % 3 === 0 &&
         window.marsSceneManager.checkCollision(rover.position.x, rover.position.z, 2.5)) {
       rover.position.x = previousPosition.x;
       rover.position.z = previousPosition.z;
@@ -6783,6 +6810,11 @@ function createSpaceSkybox() {
   skyboxGroup.add(planetSystem.group);
   skyboxGroup.userData.planets = planetSystem;
 
+  // === LAYER 6: Martian Aurora Borealis ===
+  const auroraSystem = createMartianAurora();
+  skyboxGroup.add(auroraSystem.mesh);
+  skyboxGroup.userData.aurora = auroraSystem;
+
   // Store update function for animation loop
   skyboxGroup.userData.update = function(time) {
     // Update shader time uniform
@@ -6795,6 +6827,8 @@ function createSpaceSkybox() {
     if (asteroidSystem && asteroidSystem.update) asteroidSystem.update(time);
     // Small planets
     if (planetSystem && planetSystem.update) planetSystem.update(time);
+    // Aurora
+    if (auroraSystem && auroraSystem.update) auroraSystem.update(time);
   };
 
   skyboxGroup.frustumCulled = false;
@@ -7406,6 +7440,100 @@ function createDistantPlanetLayer() {
         mesh.userData.material.uniforms.uTime.value = t;
       }
       ring.rotation.z = -0.35 + Math.sin(t * 0.00008) * 0.015;
+    }
+  };
+}
+
+// ============================================================
+// MARTIAN AURORA BOREALIS
+// ============================================================
+function createMartianAurora() {
+  // Tall open cylinder wrapping the sky at high altitude
+  const geo = new THREE.CylinderGeometry(3200, 3200, 1400, 80, 24, true);
+
+  const vertexShader = `
+    varying vec2 vUv;
+    varying float vHeight;
+    void main() {
+      vUv = uv;
+      vHeight = uv.y;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+
+  const fragmentShader = `
+    uniform float uTime;
+    varying vec2 vUv;
+    varying float vHeight;
+
+    float hash(vec2 p) {
+      p = fract(p * vec2(443.8975, 397.2973));
+      p += dot(p, p + 19.19);
+      return fract(p.x * p.y);
+    }
+    float noise(vec2 p) {
+      vec2 i = floor(p), f = fract(p);
+      f = f * f * (3.0 - 2.0 * f);
+      return mix(
+        mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+        mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
+        f.y
+      );
+    }
+    float fbm(vec2 p) {
+      float v = 0.0, a = 0.5;
+      for (int i = 0; i < 5; i++) {
+        v += a * noise(p);
+        p = p * 2.07 + vec2(0.3, -0.1);
+        a *= 0.5;
+      }
+      return v;
+    }
+
+    void main() {
+      float t = uTime * 0.00022;
+
+      // Flowing curtain pattern — warp UV with fbm
+      vec2 uv = vUv;
+      float warp = fbm(vec2(uv.x * 3.5 + t * 0.4, t * 0.3)) * 0.35;
+      float curtain = fbm(vec2(uv.x * 5.0 + warp + t * 0.15, uv.y * 2.0 - t * 0.2));
+      curtain = pow(curtain, 1.8);
+
+      // Fade at top and bottom (aurora hangs mid-sky)
+      float vFade = smoothstep(0.0, 0.18, vHeight) * smoothstep(1.0, 0.72, vHeight);
+
+      // Horizontal bands of color (green -> cyan -> purple)
+      float hBand = fbm(vec2(uv.x * 2.0 + t * 0.06, t * 0.09));
+      vec3 green  = vec3(0.05, 0.85, 0.45);
+      vec3 cyan   = vec3(0.05, 0.75, 0.95);
+      vec3 purple = vec3(0.50, 0.10, 0.90);
+      vec3 auroraColor = mix(green, cyan, smoothstep(0.3, 0.6, hBand));
+      auroraColor = mix(auroraColor, purple, smoothstep(0.65, 0.95, hBand));
+
+      float alpha = curtain * vFade * 0.38;
+      gl_FragColor = vec4(auroraColor * 1.4, alpha);
+    }
+  `;
+
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0.0 } },
+    vertexShader,
+    fragmentShader,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.BackSide,
+    blending: THREE.AdditiveBlending,
+    fog: false
+  });
+
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.y = 500;
+  mesh.frustumCulled = false;
+
+  return {
+    mesh,
+    update(time) {
+      mat.uniforms.uTime.value = time;
     }
   };
 }
