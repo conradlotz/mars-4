@@ -228,29 +228,27 @@
       position: absolute;
       bottom: 40px;
       left: 40px;
-      width: 140px;
-      height: 140px;
-      background: rgba(0, 0, 0, 0.4);
-      border: 3px solid rgba(255, 107, 53, 0.5);
+      width: 100px;
+      height: 100px;
+      background: rgba(0, 0, 0, 0.35);
       border-radius: 50%;
       pointer-events: auto;
       touch-action: none;
       backdrop-filter: blur(10px);
       box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
     }
-    
+
     #joystick-knob {
       position: absolute;
       top: 50%;
       left: 50%;
-      width: 50px;
-      height: 50px;
+      width: 38px;
+      height: 38px;
       background: linear-gradient(145deg, #ff6b35, #e55a2b);
       border-radius: 50%;
       transform: translate(-50%, -50%);
       transition: all 0.1s ease;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-      border: 2px solid rgba(255, 255, 255, 0.3);
     }
     
     /* Mobile Action Buttons */
@@ -394,55 +392,18 @@
       }
       
       #virtual-joystick {
-        width: 150px;
-        height: 150px;
+        width: 100px;
+        height: 100px;
         bottom: 30px;
         left: 30px;
       }
-      
+
       #joystick-knob {
-        width: 55px;
-        height: 55px;
+        width: 38px;
+        height: 38px;
       }
     }
     
-    /* Joystick touch feedback */
-    #virtual-joystick::before {
-      content: '';
-      position: absolute;
-      top: -8px;
-      left: -8px;
-      right: -8px;
-      bottom: -8px;
-      border: 2px solid rgba(255, 107, 53, 0.2);
-      border-radius: 50%;
-      animation: joystickPulse 3s infinite;
-    }
-    
-    #virtual-joystick::after {
-      content: 'MOVE';
-      position: absolute;
-      bottom: -25px;
-      left: 50%;
-      transform: translateX(-50%);
-      font-size: 10px;
-      color: rgba(255, 255, 255, 0.6);
-      font-weight: bold;
-      letter-spacing: 1px;
-    }
-    
-    @keyframes joystickPulse {
-      0%, 100% { 
-        opacity: 0.3; 
-        transform: scale(1); 
-        border-color: rgba(255, 107, 53, 0.2);
-      }
-      50% { 
-        opacity: 0.8; 
-        transform: scale(1.05); 
-        border-color: rgba(255, 107, 53, 0.5);
-      }
-    }
     
     /* Hide bottom mode buttons (day/night, stylized mode) */
     .hidden-mode-button {
