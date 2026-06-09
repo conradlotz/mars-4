@@ -135,11 +135,11 @@ if (window.gameRenderer) {
 
 // Scene, Camera, Renderer
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(85, window.innerWidth / window.innerHeight, 0.1, 10000);
-camera.position.set(0, 10, 20);
-
 // Performance-optimized renderer with adaptive settings - MOBILE EMERGENCY MODE
 const perfSettings = getPerformanceSettings();
+const cameraFov = perfSettings.isMobile ? 58 : 85;
+const camera = new THREE.PerspectiveCamera(cameraFov, window.innerWidth / window.innerHeight, 0.1, 10000);
+camera.position.set(0, 10, 20);
 const renderer = new THREE.WebGLRenderer({
   antialias: !perfSettings.isMobile, // Antialiasing on desktop for crisp edges
   powerPreference: perfSettings.isMobile ? 'low-power' : 'high-performance',
@@ -1039,6 +1039,20 @@ let rotationVelocity = 0;        // Current turn rate
 let isMoving = false;
 let currentSpeed = 0; // Track the current speed of the rover
 
+function resetRoverMotion(clearInput = false) {
+  velocity = 0;
+  rotationVelocity = 0;
+  if (clearInput) {
+    keys.w = false;
+    keys.a = false;
+    keys.s = false;
+    keys.d = false;
+  }
+  if (typeof cameraSpring !== 'undefined' && cameraSpring.velocity) {
+    cameraSpring.velocity.set(0, 0, 0);
+  }
+}
+
 // === DEV DEBUG HELPERS (toggle with V key) ===
 window.showRoadDebug = false;
 let _roadDebugGroup = null;
@@ -1170,10 +1184,15 @@ const keyupHandler = (event) => {
 // Add event listeners using the centralized system
 window.gameEventListeners.add(window, 'keydown', keydownHandler);
 window.gameEventListeners.add(window, 'keyup', keyupHandler);
+window.gameEventListeners.add(window, 'blur', () => resetRoverMotion(true));
+window.gameEventListeners.add(document, 'visibilitychange', () => {
+  if (document.hidden) resetRoverMotion(true);
+});
 
 // Add camera modes and third-person view
 // Third-person camera: closer, more grounded chase cam for the rover (tighter feel)
 const cameraOffset = new THREE.Vector3(2.2, 5.2, 13.5);
+const mobileCameraOffset = new THREE.Vector3(0.8, 3.6, 4.8);
 const cameraSpring = { velocity: new THREE.Vector3() };
 
 // Change default camera mode to thirdPerson - Make globally accessible for mobile controls
@@ -5324,8 +5343,12 @@ function animate(time) {
   lastTime = time;
 
   // Skip frames if browser tab is inactive or delta is too large (indicating lag)
-  if (delta > 100) return;
+  if (delta > 100) {
+    resetRoverMotion(true);
+    return;
+  }
   const frameScale = Math.min(delta / 16.67, 2.5);
+  const controlFrameScale = Math.min(delta / 16.67, 1.0);
 
   // Mobile performance monitoring with adaptive throttling  
   if (currentPerfSettings.isMobile) {
@@ -5421,23 +5444,23 @@ function animate(time) {
   // Smooth acceleration/deceleration physics
   if (keys.w) {
     const accel = velocity < 0 ? DECELERATION : ACCELERATION;
-    velocity = Math.min(velocity + accel * frameScale, MAX_SPEED);
+    velocity = Math.min(velocity + accel * controlFrameScale, MAX_SPEED);
   } else if (keys.s) {
     const accel = velocity > 0 ? DECELERATION : ACCELERATION;
-    velocity = Math.max(velocity - accel * frameScale, -MAX_SPEED * REVERSE_SPEED_FACTOR);
+    velocity = Math.max(velocity - accel * controlFrameScale, -MAX_SPEED * REVERSE_SPEED_FACTOR);
   } else {
     // Coast to a stop when no key held
     if (velocity > 0) {
-      velocity = Math.max(velocity - COAST_DECEL * frameScale, 0);
+      velocity = Math.max(velocity - COAST_DECEL * controlFrameScale, 0);
     } else if (velocity < 0) {
-      velocity = Math.min(velocity + COAST_DECEL * frameScale, 0);
+      velocity = Math.min(velocity + COAST_DECEL * controlFrameScale, 0);
     }
   }
 
   if (Math.abs(velocity) > 0.0005) {
     isMoving = true;
     // Forward is negative Z in Three.js â€” negate velocity to match original convention
-    const frameVelocity = velocity * frameScale;
+    const frameVelocity = velocity * controlFrameScale;
     const moveX = Math.sin(roverYaw) * (-frameVelocity);
     const moveZ = Math.cos(roverYaw) * (-frameVelocity);
 
@@ -5491,17 +5514,17 @@ function animate(time) {
   if (keys.a || keys.d) {
     const turnDir = keys.a ? 1 : -1;
     rotationVelocity = Math.min(
-      Math.abs(rotationVelocity) + ROTATION_ACCEL * frameScale,
+      Math.abs(rotationVelocity) + ROTATION_ACCEL * controlFrameScale,
       MAX_ROTATION_SPEED
     ) * turnDir;
   } else {
     // Dampen rotation when key released
-    rotationVelocity *= Math.pow(0.6, frameScale);
+    rotationVelocity *= Math.pow(0.6, controlFrameScale);
     if (Math.abs(rotationVelocity) < 0.0001) rotationVelocity = 0;
   }
 
   if (rotationVelocity !== 0) {
-    const effectiveRotation = rotationVelocity * speedFactor * frameScale;
+    const effectiveRotation = rotationVelocity * speedFactor * controlFrameScale;
     roverYaw += effectiveRotation;
 
     // Normalize roverYaw to keep it within 0-2Ï€ range
@@ -5514,13 +5537,13 @@ function animate(time) {
     // Differential wheel rotation for turning - only update if moving
     if (isMoving) {
       const turnDirection = rotationVelocity > 0 ? 1 : -1;
-      updateWheelRotation(wheels, currentSpeed * frameScale, turnDirection);
+      updateWheelRotation(wheels, currentSpeed * controlFrameScale, turnDirection);
     }
   } else if (isMoving) {
     // Straight movement, all wheels rotate at the same speed
     if (frameCount % 2 === 0) {
       wheels.forEach(wheel => {
-        wheel.rotation.x += currentSpeed * frameScale * 0.3;
+        wheel.rotation.x += currentSpeed * controlFrameScale * 0.3;
       });
     }
   }
@@ -5535,10 +5558,9 @@ function animate(time) {
     updateWheelSuspension(wheels, originalWheelPositions);
   }
 
-  // Update camera position based on mode - throttle for performance
-  if (frameCount % frameThrottle === 0) {
-    updateCamera(delta);
-  }
+  // Keep the chase camera responsive every frame; mobile throttling here makes
+  // the rover outrun the camera and appear much farther away while moving.
+  updateCamera(delta);
 
   // Update dust particles - only when moving and throttled based on performance
   if (isMoving && frameCount % (frameThrottle * 2) === 0) {
@@ -5911,7 +5933,7 @@ function updateCamera(deltaMs) {
   switch (cameraMode) {
     case 'thirdPerson': {
       // Fixed close chase distance; the spring-damper below keeps motion smooth.
-      vectors.offset.copy(cameraOffset);
+      vectors.offset.copy(perfSettings.isMobile ? mobileCameraOffset : cameraOffset);
       vectors.offset.applyAxisAngle(vectors.upAxis, roverYaw);
 
       vectors.target.set(
@@ -5920,9 +5942,11 @@ function updateCamera(deltaMs) {
         rover.position.z + vectors.offset.z
       );
 
-      // Terrain-collision avoidance: pull camera in front of any hill it would clip through
-      if (!window.cameraRaycaster) window.cameraRaycaster = new THREE.Raycaster();
-      {
+      // Terrain-collision avoidance: pull camera in front of any hill it would clip through.
+      // On mobile this raycast is throttled, while the chase camera itself still follows every frame.
+      const shouldCheckCameraTerrain = !perfSettings.isMobile || frameCount % 6 === 0;
+      if (shouldCheckCameraTerrain) {
+        if (!window.cameraRaycaster) window.cameraRaycaster = new THREE.Raycaster();
         const toCamera = vectors.target.clone().sub(rover.position);
         const dist = toCamera.length();
         const dir = toCamera.clone().normalize();
@@ -5955,10 +5979,12 @@ function updateCamera(deltaMs) {
 
       // Look slightly ahead of the rover (in its facing direction) for a dynamic feel
       vectors.forward.set(0, 0, -1).applyAxisAngle(vectors.upAxis, roverYaw);
+      const lookAhead = perfSettings.isMobile ? 2.0 : 5.0;
+      const lookHeight = perfSettings.isMobile ? 1.4 : 2.0;
       camera.lookAt(
-        rover.position.x + vectors.forward.x * 5,
-        rover.position.y + 2.0,
-        rover.position.z + vectors.forward.z * 5
+        rover.position.x + vectors.forward.x * lookAhead,
+        rover.position.y + lookHeight,
+        rover.position.z + vectors.forward.z * lookAhead
       );
       break;
     }
@@ -6782,7 +6808,8 @@ function createSpaceSkybox() {
 function createTwinklingStars() {
   const perfSettings = getPerformanceSettings();
   // Dense star field for a brighter, deeper Mars night sky
-  const starCount = perfSettings.isMobile ? 7200 : 26000;
+  const starCount = perfSettings.isMobile ? 12000 : 42000;
+  const milkyWayStarCount = Math.floor(starCount * 0.28);
   const skyRadius = 5500;
 
   const positions = new Float32Array(starCount * 3);
@@ -6792,16 +6819,33 @@ function createTwinklingStars() {
   const speeds = new Float32Array(starCount); // twinkle speed
 
   for (let i = 0; i < starCount; i++) {
-    // Distribute on sphere using fibonacci sphere for even distribution
-    const phi = Math.acos(1 - 2 * (i + 0.5) / starCount);
-    const theta = Math.PI * (1 + Math.sqrt(5)) * i;
-    // Add small jitter so it doesn't look too uniform
-    const jitterPhi = phi + (Math.random() - 0.5) * 0.02;
-    const jitterTheta = theta + (Math.random() - 0.5) * 0.02;
+    let x;
+    let y;
+    let z;
 
-    positions[i * 3]     = skyRadius * Math.sin(jitterPhi) * Math.cos(jitterTheta);
-    positions[i * 3 + 1] = skyRadius * Math.cos(jitterPhi);
-    positions[i * 3 + 2] = skyRadius * Math.sin(jitterPhi) * Math.sin(jitterTheta);
+    if (i < milkyWayStarCount) {
+      // Extra upper-sky density so the Milky Way reads as a richer star band.
+      const theta = Math.random() * Math.PI * 2;
+      const bandY = 0.48 + Math.sin(theta - 0.55) * 0.24;
+      y = Math.max(0.18, Math.min(0.92, bandY + (Math.random() - 0.5) * 0.18));
+      const horizontalRadius = Math.sqrt(Math.max(0.0, 1.0 - y * y));
+      x = horizontalRadius * Math.cos(theta + (Math.random() - 0.5) * 0.035);
+      z = horizontalRadius * Math.sin(theta + (Math.random() - 0.5) * 0.035);
+    } else {
+      // Distribute on sphere using fibonacci sphere for even distribution
+      const phi = Math.acos(1 - 2 * (i + 0.5) / starCount);
+      const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+      // Add small jitter so it doesn't look too uniform
+      const jitterPhi = phi + (Math.random() - 0.5) * 0.02;
+      const jitterTheta = theta + (Math.random() - 0.5) * 0.02;
+      x = Math.sin(jitterPhi) * Math.cos(jitterTheta);
+      y = Math.cos(jitterPhi);
+      z = Math.sin(jitterPhi) * Math.sin(jitterTheta);
+    }
+
+    positions[i * 3]     = skyRadius * x;
+    positions[i * 3 + 1] = skyRadius * y;
+    positions[i * 3 + 2] = skyRadius * z;
 
     // Star color variety
     const colorType = Math.random();
