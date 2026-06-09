@@ -5910,13 +5910,8 @@ function updateCamera(deltaMs) {
 
   switch (cameraMode) {
     case 'thirdPerson': {
-      // Speed-adaptive zoom — much gentler now for a consistently close chase feel
-      const speedRatio = Math.abs(velocity) / MAX_SPEED;
-      vectors.offset.set(
-        cameraOffset.x,
-        cameraOffset.y + speedRatio * 2.2,
-        cameraOffset.z + speedRatio * 5.5
-      );
+      // Fixed close chase distance; the spring-damper below keeps motion smooth.
+      vectors.offset.copy(cameraOffset);
       vectors.offset.applyAxisAngle(vectors.upAxis, roverYaw);
 
       vectors.target.set(

@@ -230,13 +230,12 @@
       left: 40px;
       width: 140px;
       height: 140px;
-      background: rgba(0, 0, 0, 0.4);
-      border: 3px solid rgba(255, 107, 53, 0.5);
+      background: transparent;
+      border: none;
       border-radius: 50%;
       pointer-events: auto;
       touch-action: none;
-      backdrop-filter: blur(10px);
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      box-shadow: none;
     }
     
     #joystick-knob {
@@ -357,13 +356,7 @@
       }
       
       .controls {
-        bottom: 240px !important;
-        font-size: 12px;
-        padding: 8px;
-        left: 10px;
-        right: 10px;
-        width: auto;
-        text-align: center;
+        display: none !important;
       }
       
       #youtube-audio-container {
@@ -408,27 +401,13 @@
     
     /* Joystick touch feedback */
     #virtual-joystick::before {
-      content: '';
-      position: absolute;
-      top: -8px;
-      left: -8px;
-      right: -8px;
-      bottom: -8px;
-      border: 2px solid rgba(255, 107, 53, 0.2);
-      border-radius: 50%;
-      animation: joystickPulse 3s infinite;
+      display: none;
+      content: none;
     }
     
     #virtual-joystick::after {
-      content: 'MOVE';
-      position: absolute;
-      bottom: -25px;
-      left: 50%;
-      transform: translateX(-50%);
-      font-size: 10px;
-      color: rgba(255, 255, 255, 0.6);
-      font-weight: bold;
-      letter-spacing: 1px;
+      display: none;
+      content: none;
     }
     
     @keyframes joystickPulse {
