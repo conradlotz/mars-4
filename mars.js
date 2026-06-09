@@ -5693,8 +5693,8 @@ function updateCamera(deltaMs) {
       const speedRatio = Math.abs(velocity) / MAX_SPEED;
       vectors.offset.set(
         cameraOffset.x,
-        cameraOffset.y + speedRatio * 4,
-        cameraOffset.z + speedRatio * 10
+        cameraOffset.y + speedRatio * 2,
+        cameraOffset.z + speedRatio * 5
       );
       vectors.offset.applyAxisAngle(vectors.upAxis, roverYaw);
 
