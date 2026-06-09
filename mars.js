@@ -678,14 +678,37 @@ function createRealisticRover() {
     wheels.push(wheel);
   });
 
-  // Add minimal rover lighting for mobile visibility (reduced for performance)
+  // === Night driving headlights (the rover's front faces local -Z) ===
+  // Emissive lamp meshes so the headlights are visible on the rover itself.
+  const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfff6e0 });
+  const headlightGeom = new THREE.SphereGeometry(0.2, 10, 10);
+  const lampPositions = [[-1.15, 1.25, -3.0], [1.15, 1.25, -3.0]];
+  lampPositions.forEach(([lx, ly, lz]) => {
+    const lamp = new THREE.Mesh(headlightGeom, headlightMat);
+    lamp.position.set(lx, ly, lz);
+    roverGroup.add(lamp);
+  });
+
   if (perfSettings.isMobile) {
-    // Only one main rover light to reduce GPU load
-    const roverLight = new THREE.PointLight(0xffffff, 1.5, 25);
-    roverLight.position.set(0, 2, 0);
+    // Mobile: one cheap point light at the front, no spotlights
+    const roverLight = new THREE.PointLight(0xfff2d8, 1.6, 28);
+    roverLight.position.set(0, 2, -2.5);
     roverGroup.add(roverLight);
-    
     console.log('Minimal mobile rover lighting added for performance');
+  } else {
+    // Desktop: two forward spotlight cones for real headlight beams,
+    // plus a soft warm fill so the rover body and nearby ground read at night.
+    lampPositions.forEach(([lx, ly, lz]) => {
+      const spot = new THREE.SpotLight(0xfff2d8, 3.0, 85, Math.PI * 0.22, 0.5, 1.0);
+      spot.position.set(lx, ly, lz);
+      spot.target.position.set(lx * 1.5, -3, lz - 34); // aim forward and slightly down
+      spot.castShadow = false;
+      roverGroup.add(spot);
+      roverGroup.add(spot.target);
+    });
+    const fill = new THREE.PointLight(0xffe9cc, 0.8, 20);
+    fill.position.set(0, 2.2, -2.0);
+    roverGroup.add(fill);
   }
 
   return {
@@ -1004,13 +1027,13 @@ controls.enabled = false; // Disable orbit controls since we're starting in thir
 // Movement Logic - Make keys globally accessible for mobile controls
 window.keys = { w: false, a: false, s: false, d: false };
 const keys = window.keys; // Keep local reference for backward compatibility
-const MAX_SPEED = 0.25;
+const MAX_SPEED = 0.30;          // Calmer top speed - easier to control on rough terrain
 const REVERSE_SPEED_FACTOR = 0.55;
-const ACCELERATION = 0.012;
-const DECELERATION = 0.016;
-const COAST_DECEL = 0.006;
-const MAX_ROTATION_SPEED = 0.018;
-const ROTATION_ACCEL = 0.003;
+const ACCELERATION = 0.014;      // Gentler launch from rest
+const DECELERATION = 0.022;      // Braking stays responsive
+const COAST_DECEL = 0.008;       // Passive deceleration when no key held
+const MAX_ROTATION_SPEED = 0.020; // Slightly quicker turn rate
+const ROTATION_ACCEL = 0.003;    // Turn rate ramps up gradually
 let velocity = 0;                // Current velocity (-MAX_SPEED to +MAX_SPEED)
 let rotationVelocity = 0;        // Current turn rate
 let isMoving = false;
@@ -1778,24 +1801,12 @@ class MarsAtmosphericEffects {
   }
 
   createAtmosphericHaze() {
-    // Atmospheric haze that stays within terrain bounds
-    // Uses a dark Mars-dust tint that blends with the black background
-    const hazeGeometry = new THREE.PlaneGeometry(5000, 5000);
-    const hazeMaterial = new THREE.MeshBasicMaterial({
-      color: 0x301808,
-      transparent: true,
-      opacity: 0.06,
-      side: THREE.DoubleSide,
-      blending: THREE.AdditiveBlending,
-      fog: true,           // Let fog fade it out at the edges
-      depthWrite: false
-    });
-    
-    this.atmosphericHaze = new THREE.Mesh(hazeGeometry, hazeMaterial);
-    this.atmosphericHaze.rotation.x = -Math.PI / 2;
-    this.atmosphericHaze.position.y = 200;
-    this.atmosphericHaze.renderOrder = -1;
-    this.scene.add(this.atmosphericHaze);
+    // Disabled: this was a large horizontal additive plane at y=200. Viewed at
+    // eye level it always rendered as a bright warm band across the horizon
+    // (a visible seam where it met the dark sky) and washed the upper sky warm.
+    // The update methods all guard on `this.atmosphericHaze`, so leaving it null
+    // is safe. Ground dust + dust devils still provide atmosphere.
+    this.atmosphericHaze = null;
   }
 
   createDustDevilPool() {
@@ -2503,7 +2514,12 @@ class MarsSceneManager {
 
     // Store primary colony center for use by traffic and rail systems
     this.colonyCenter = new THREE.Vector3(colonyOffsetX, groundY, colonyOffsetZ);
-    
+
+    // The colony buildings are placed at a fixed ground height (groundY=0), so
+    // flatten the terrain beneath them to remove the little hills that would
+    // otherwise poke up in front of the structures and the rocket area.
+    flattenMarsTerrain(colonyOffsetX, colonyOffsetZ, 220, groundY);
+
     // Shared materials for colony infrastructure (avoid duplicates)
     const windowMaterial = new THREE.MeshStandardMaterial({
       color: 0x4488ff,
@@ -3532,15 +3548,18 @@ class MarsSceneManager {
       }
     }
 
-    // Shared road material
+    // Shared road material (double-sided so a draped ribbon is visible
+    // regardless of triangle winding as it follows the terrain)
     if (!this._roadMaterial) {
       this._roadMaterial = new THREE.MeshBasicMaterial({
         color: 0x3a3028,
+        side: THREE.DoubleSide,
         depthWrite: true
       });
       this._roadMaterial._shared = true;
       this._roadLineMaterial = new THREE.MeshBasicMaterial({
         color: 0xffaa33,
+        side: THREE.DoubleSide,
         depthWrite: true
       });
       this._roadLineMaterial._shared = true;
@@ -3569,25 +3588,44 @@ class MarsSceneManager {
 
         const roadGroup = new THREE.Group();
 
-        // Road surface â€” flat plane stretched between the two settlements
-        const roadWidth = 6;
-        const roadGeom = new THREE.PlaneGeometry(dist, roadWidth, 1, 1);
-        roadGeom.rotateX(-Math.PI / 2);
-        const road = new THREE.Mesh(roadGeom, this._roadMaterial);
-
-        // Position at midpoint, rotated to face from A to B
         const angle = Math.atan2(b.center.z - a.center.z, b.center.x - a.center.x);
         const groundY = (a.center.y + b.center.y) / 2 + 0.15;
-        road.position.set(midX, groundY, midZ);
-        road.rotation.y = -angle;
+
+        // Road surface â€” a ribbon DRAPED over the terrain so it follows the
+        // hills. A single flat plane floats over dips and lets the rover drive
+        // underneath it; sampling terrain height per segment fixes that.
+        const roadWidth = 6;
+        const dirX = (b.center.x - a.center.x) / dist;
+        const dirZ = (b.center.z - a.center.z) / dist;
+        const perpX = -dirZ, perpZ = dirX;
+        const segs = Math.max(8, Math.floor(dist / 12));
+        const buildDrapedRibbon = (halfWidth, yOff) => {
+          const v = [];
+          for (let s = 0; s < segs; s++) {
+            const t0 = s / segs, t1 = (s + 1) / segs;
+            const ax0 = a.center.x + (b.center.x - a.center.x) * t0;
+            const az0 = a.center.z + (b.center.z - a.center.z) * t0;
+            const ax1 = a.center.x + (b.center.x - a.center.x) * t1;
+            const az1 = a.center.z + (b.center.z - a.center.z) * t1;
+            const ay0 = this.getTerrainHeight(ax0, az0) + yOff;
+            const ay1 = this.getTerrainHeight(ax1, az1) + yOff;
+            const l0 = [ax0 + perpX * halfWidth, ay0, az0 + perpZ * halfWidth];
+            const r0 = [ax0 - perpX * halfWidth, ay0, az0 - perpZ * halfWidth];
+            const l1 = [ax1 + perpX * halfWidth, ay1, az1 + perpZ * halfWidth];
+            const r1 = [ax1 - perpX * halfWidth, ay1, az1 - perpZ * halfWidth];
+            v.push(...l0, ...r0, ...l1, ...l1, ...r0, ...r1);
+          }
+          const g = new THREE.BufferGeometry();
+          g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+          g.computeVertexNormals();
+          return g;
+        };
+
+        const road = new THREE.Mesh(buildDrapedRibbon(roadWidth / 2, 0.15), this._roadMaterial);
         roadGroup.add(road);
 
-        // Center line (dashed effect via a thin strip)
-        const lineGeom = new THREE.PlaneGeometry(dist, 0.3, 1, 1);
-        lineGeom.rotateX(-Math.PI / 2);
-        const line = new THREE.Mesh(lineGeom, this._roadLineMaterial);
-        line.position.set(midX, groundY + 0.05, midZ);
-        line.rotation.y = -angle;
+        // Center line, draped just above the road surface
+        const line = new THREE.Mesh(buildDrapedRibbon(0.3, 0.22), this._roadLineMaterial);
         roadGroup.add(line);
 
         this.scene.add(roadGroup);
@@ -3638,8 +3676,11 @@ class MarsSceneManager {
         const veh = this.createCybertruckVehicle();
         const scale = 0.9 + Math.random() * 0.35;
         veh.scale.set(scale, scale, scale);
-        veh.position.set(x, road.groundY + 0.3, z);
-        veh.rotation.y = road.angle + (Math.random() < 0.5 ? 0 : Math.PI); // face either direction
+        const spawnGroundY = Math.max(road.groundY, this.getTerrainHeight(x, z));
+        veh.position.set(x, spawnGroundY + 0.3, z);
+        // Cybertruck forward axis is +X; the road runs along world angle `road.angle`,
+        // so face -road.angle to drive along the road instead of across it.
+        veh.rotation.y = -road.angle + (Math.random() < 0.5 ? 0 : Math.PI); // face either direction
 
         this.scene.add(veh);
         this.roadVehicles.push({
@@ -3661,13 +3702,10 @@ class MarsSceneManager {
 
       v.mesh.position.x = v.road.startX + (v.road.endX - v.road.startX) * v.t;
       v.mesh.position.z = v.road.startZ + (v.road.endZ - v.road.startZ) * v.t;
-
-      // === Phase 2 fix: Dynamically follow terrain height every frame ===
-      // This stops vehicles from floating or sinking on sloped roads.
-      if (typeof this.getTerrainHeight === 'function') {
-        const groundY = this.getTerrainHeight(v.mesh.position.x, v.mesh.position.z);
-        v.mesh.position.y = groundY + 0.3; // consistent offset above surface
-      }
+      // Ride on top of whichever is higher: the flat road plane or the terrain
+      // beneath it, so vehicles never disappear under a hill the road cuts through.
+      const groundY = Math.max(v.road.groundY, this.getTerrainHeight(v.mesh.position.x, v.mesh.position.z));
+      v.mesh.position.y = groundY + 0.3;
     }
   }
 
@@ -3696,7 +3734,9 @@ class MarsSceneManager {
     ];
     const pal = palettes[Math.floor(rand() * palettes.length)];
 
-    const wallMat = new THREE.MeshStandardMaterial({ color: pal.wall, metalness: 0.7, roughness: 0.3, emissive: pal.emissive, emissiveIntensity: 0.15 });
+    const wallMat = new THREE.MeshStandardMaterial({ color: pal.wall, metalness: 0.7, roughness: 0.3, emissive: pal.emissive, emissiveIntensity: 0.35 });
+    // Glowing window band material so towers light up at night
+    const winMat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.9 });
     const glowMat = new THREE.MeshBasicMaterial({ color: pal.accent, transparent: true, opacity: 0.85 });
     const glow2Mat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.7 });
     const padMat  = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9, metalness: 0.2 });
@@ -3713,6 +3753,15 @@ class MarsSceneManager {
         seg.position.set(x, sy, z);
         seg.rotation.y = twist * si;
         group.add(seg);
+        // Glowing window band per floor (skip the ground floor) so the tower
+        // reads as a lit building at night.
+        if (si > 0) {
+          const bandGeom = new THREE.BoxGeometry(w + 0.25, segH * 0.34, d + 0.25);
+          const band = new THREE.Mesh(bandGeom, winMat);
+          band.position.copy(seg.position);
+          band.rotation.y = seg.rotation.y;
+          group.add(band);
+        }
       }
       this.registerCollidable({ x, z }, Math.max(w, d) * 0.8 + 2);
     };
@@ -4458,16 +4507,18 @@ class MarsSceneManager {
       a = points[i];
       b = points[i + 1];
 
-      // Interpolate position between waypoints (includes terrain height from route creation)
+      // Interpolate position between waypoints, then snap to the actual terrain
+      // height so vehicles ride the surface instead of sinking through hills/roads.
       const pos = new THREE.Vector3().copy(a).lerp(b, t);
       if (vehicle.mesh) {
-        vehicle.mesh.position.copy(pos);
+        const groundY = this.getTerrainHeight(pos.x, pos.z);
+        vehicle.mesh.position.set(pos.x, groundY + 0.2, pos.z);
 
-        // Orient vehicle to face along its path
+        // Orient vehicle to face along its path. The Cybertruck model's forward
+        // axis is +X, so align +X with the travel direction (atan2(-dz, dx)).
         const dir = new THREE.Vector3().subVectors(b, a).multiplyScalar(vehicle.directionSign);
         if (dir.lengthSq() > 0.0001) {
-          const yaw = Math.atan2(dir.x, dir.z);
-          vehicle.mesh.rotation.y = yaw;
+          vehicle.mesh.rotation.y = Math.atan2(-dir.z, dir.x);
         }
       }
     }
@@ -5607,6 +5658,53 @@ function createRoverTireTracks() {
 }
 
 // Optimize the positionRoverOnTerrain function
+// Shared downward raycast to sample ground height at an arbitrary (x, z).
+// Used by the chase camera and AI traffic so nothing clips below the surface.
+function getGroundHeight(x, z, fallback = 0) {
+  if (!window._groundHeightRaycaster) {
+    window._groundHeightRaycaster = new THREE.Raycaster();
+    window._groundHeightRaycaster.ray.direction.set(0, -1, 0);
+  }
+  const rc = window._groundHeightRaycaster;
+  rc.ray.origin.set(x, 500, z);
+
+  // Prefer active terrain chunks, fall back to the main surface
+  let closest = null;
+  if (typeof terrainSystem !== 'undefined' && terrainSystem.chunks && terrainSystem.chunks.size > 0) {
+    for (const chunk of terrainSystem.chunks.values()) {
+      const hits = rc.intersectObject(chunk, false);
+      if (hits.length > 0 && (!closest || hits[0].distance < closest.distance)) closest = hits[0];
+    }
+  }
+  if (!closest && typeof marsSurface !== 'undefined' && marsSurface) {
+    const hits = rc.intersectObject(marsSurface, false);
+    if (hits.length > 0) closest = hits[0];
+  }
+  return closest ? closest.point.y : fallback;
+}
+
+// Flatten a disc of the Mars terrain toward a target height, with a smooth
+// blended rim. Used to remove the bumps that poke up around colony buildings
+// (which are placed at a fixed ground height, not the undulating terrain).
+function flattenMarsTerrain(cx, cz, radius, targetY = 0) {
+  if (typeof marsSurface === 'undefined' || !marsSurface || !marsSurface.geometry) return;
+  const geo = marsSurface.geometry;
+  const pos = geo.attributes.position;
+  const arr = pos.array;
+  const inner = radius * 0.6; // fully flat within the inner disc
+  for (let i = 0; i < arr.length; i += 3) {
+    const dx = arr[i] - cx;
+    const dz = arr[i + 2] - cz;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (d >= radius) continue;
+    let w = d <= inner ? 1.0 : 1.0 - (d - inner) / (radius - inner);
+    w = w * w * (3 - 2 * w); // smoothstep blend
+    arr[i + 1] = arr[i + 1] * (1 - w) + targetY * w;
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+}
+
 function positionRoverOnTerrain() {
   // Reuse raycaster object instead of creating a new one each time
   if (!window.terrainRaycaster) {
@@ -5853,6 +5951,14 @@ function updateCamera(deltaMs) {
       cameraSpring.velocity.multiplyScalar(Math.max(0, 1 - damping * dt));
       camera.position.addScaledVector(cameraSpring.velocity, dt);
 
+      // Keep the camera above the terrain so it never clips through hills behind the rover
+      {
+        const groundY = getGroundHeight(camera.position.x, camera.position.z, rover.position.y);
+        const minCamY = groundY + 3.0; // clearance above the surface
+        if (camera.position.y < minCamY) camera.position.y = minCamY;
+      }
+
+      // Look slightly ahead of the rover (in its facing direction) for a dynamic feel
       vectors.forward.set(0, 0, -1).applyAxisAngle(vectors.upAxis, roverYaw);
       camera.lookAt(
         rover.position.x + vectors.forward.x * 5,
@@ -5894,6 +6000,35 @@ const resizeHandler = () => {
 };
 
 window.gameEventListeners.add(window, 'resize', resizeHandler);
+
+// --- Deterministic CPU value-noise + fBm for natural terrain shaping ---
+// (same idea as the skybox shader's noise3/fbm, on the CPU). Deterministic so
+// the terrain is identical every load.
+function _terrainHash2(x, y) {
+  const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return h - Math.floor(h); // [0,1)
+}
+function _terrainValueNoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf);
+  const v = yf * yf * (3 - 2 * yf);
+  const a = _terrainHash2(xi, yi);
+  const b = _terrainHash2(xi + 1, yi);
+  const c = _terrainHash2(xi, yi + 1);
+  const d = _terrainHash2(xi + 1, yi + 1);
+  return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v; // [0,1]
+}
+function _terrainFbm(x, y, octaves) {
+  let val = 0, amp = 0.5, freq = 1, norm = 0;
+  for (let o = 0; o < octaves; o++) {
+    val += amp * _terrainValueNoise(x * freq, y * freq);
+    norm += amp;
+    freq *= 2.03;
+    amp *= 0.5;
+  }
+  return val / norm; // normalised [0,1]
+}
 
 function createRealisticMarsTerrain() {
   // Performance-adaptive terrain creation with mobile optimization
@@ -5952,27 +6087,28 @@ function createRealisticMarsTerrain() {
       
       elevation = baseElevation + mediumFeatures + fineFeatures + craterFeatures;
     } else {
-      // Desktop: Full terrain generation
-      // Large features (mountains and valleys) - always included
-      const largeFeatures = Math.sin(x * 0.01) * Math.cos(z * 0.01) * 8 +
-        Math.sin(x * 0.02 + 10) * Math.cos(z * 0.015) * 6;
+      // Desktop: natural terrain via domain-warped fBm instead of summed
+      // sin/cos (which reads as repetitive grid-aligned waves). Domain warping
+      // breaks up the regularity; a ridged octave adds rocky spines.
+      const warpX = _terrainFbm(x * 0.0009 + 11.2, z * 0.0009 + 4.7, 3) - 0.5;
+      const warpZ = _terrainFbm(x * 0.0009 + 23.5, z * 0.0009 + 9.1, 3) - 0.5;
+      const wx = x + warpX * 140;
+      const wz = z + warpZ * 140;
 
-      // Medium features (hills and craters) - included based on performance
-      const mediumFeatures = perfSettings.detailLevel !== 'low' ? 
-        Math.sin(x * 0.05) * Math.cos(z * 0.04) * 3 +
-        Math.sin(x * 0.07 + 1) * Math.cos(z * 0.06) * 2 : 0;
+      // Broad continents (large rolling highs and lows)
+      const continents = (_terrainFbm(wx * 0.0016, wz * 0.0016, 5) - 0.5) * 34;
+      // Mid-scale hills
+      const hills = (_terrainFbm(wx * 0.006, wz * 0.006, 4) - 0.5) * 10;
+      // Ridged noise -> rocky ridges and crest lines
+      const ridged = (1 - Math.abs(2 * _terrainFbm(wx * 0.012 + 50, wz * 0.012 + 50, 4) - 1)) * 6;
 
-      // Small features (bumps and rocks) - only for high performance
-      const smallFeatures = perfSettings.detailLevel === 'high' ? 
-        Math.sin(x * 0.2 + 2) * Math.cos(z * 0.15) * 1 +
-        Math.sin(x * 0.3 + 3) * Math.cos(z * 0.25) * 0.5 : 0;
+      // Fine rocky detail only on high detail to keep load fast
+      const detailRocks = perfSettings.detailLevel === 'high'
+        ? (_terrainFbm(wx * 0.05, wz * 0.05, 3) - 0.5) * 1.8 +
+          (_terrainFbm(wx * 0.13 + 7, wz * 0.13 + 7, 2) - 0.5) * 0.7
+        : 0;
 
-      // Micro details - only for high performance
-      const microDetails = perfSettings.detailLevel === 'high' ? 
-        Math.sin(x * 0.8 + 4) * Math.cos(z * 0.6) * 0.3 : 0;
-
-      // Combine all features with different weights
-      elevation = largeFeatures + mediumFeatures + smallFeatures + microDetails;
+      elevation = continents + hills * 0.8 + ridged * 0.7 + detailRocks;
     }
 
     // Add deterministic variation based on position (not Math.random) for consistent terrain
@@ -6331,23 +6467,34 @@ function createRealisticMarsTerrain() {
     material = new THREE.MeshBasicMaterial({
       color: 0xb33112,
       vertexColors: true,
-      side: THREE.DoubleSide,
+      side: THREE.FrontSide, // terrain is only ever seen from above
       fog: true
     });
   } else {
-    // Desktop: Lambert â€” simple, predictable lighting, vertex colors show correctly
-    // (avoids PBR colour darkening under ACES tone mapping)
-    material = new THREE.MeshLambertMaterial({
+    // Desktop: Phong â€” per-fragment lighting so the normal map actually shows,
+    // but NOT physically based, so vertex colours don't get crushed under ACES
+    // tone mapping the way MeshStandardMaterial would. Low shininess + near-black
+    // specular keeps the regolith matte.
+    const normalMap = createMarsNormalMap();
+    normalMap.repeat.set(terrainSize / 45, terrainSize / 45); // tile the detail across the ground
+    if (renderer && renderer.capabilities) {
+      normalMap.anisotropy = renderer.capabilities.getMaxAnisotropy();
+    }
+    material = new THREE.MeshPhongMaterial({
       color: 0xffffff, // white base so vertex colours are the sole tint
       vertexColors: true,
-      side: THREE.DoubleSide,
-      fog: true
+      side: THREE.FrontSide,
+      fog: true,
+      shininess: 3,
+      specular: 0x0a0805,
+      normalMap: normalMap,
+      normalScale: new THREE.Vector2(0.55, 0.55)
     });
   }
 
   const terrain = new THREE.Mesh(geometry, material);
   terrain.receiveShadow = true;
-  terrain.castShadow = true;
+  terrain.castShadow = false; // ground receives shadows but shouldn't cast them
 
   // 7. Add color variation to the terrain
   const colors = new Float32Array(geometry.attributes.position.count * 3);
@@ -6404,230 +6551,74 @@ function createRealisticMarsTerrain() {
   return terrain;
 }
 
-// Create a realistic Mars texture - EMERGENCY MOBILE MODE
-function createRealisticMarsTexture() {
-  const marsPerfSettings = getPerformanceSettings();
-  
-  // Force minimal texture size on ALL devices to prevent WebGL context issues
-  const textureSize = 64; // Ultra minimal texture size
-  
-  const canvas = document.createElement('canvas');
-  canvas.width = textureSize;
-  canvas.height = textureSize;
-  const context = canvas.getContext('2d');
-  
-  // MOBILE EMERGENCY: Return solid color instead of complex texture
-  if (marsPerfSettings.isMobile) {
-    context.fillStyle = '#a83c0c'; // Simple Mars red color
-    context.fillRect(0, 0, textureSize, textureSize);
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.generateMipmaps = false; // Prevent additional GPU load
-    texture.minFilter = THREE.LinearFilter;
-    texture.magFilter = THREE.LinearFilter;
-    return texture;
-  }
-
-  // Base color - deeper reddish-orange like in the reference image
-  const gradient = context.createLinearGradient(0, 0, canvas.width, canvas.height);
-  gradient.addColorStop(0, '#a83c0c');
-  gradient.addColorStop(0.3, '#8a3208');
-  gradient.addColorStop(0.6, '#9c3a0a');
-  gradient.addColorStop(1, '#7a2e08');
-
-  context.fillStyle = gradient;
-  context.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Add large regional variations
-  for (let i = 0; i < 30; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const radius = Math.random() * 500 + 200;
-
-    const gradient = context.createRadialGradient(
-      x, y, 0,
-      x, y, radius
-    );
-
-    // Random variation of Mars colors - darker and more varied like in the image
-    const colorType = Math.random();
-    let color1, color2;
-
-    if (colorType < 0.33) {
-      // Darker regions (iron-rich)
-      color1 = '#6a2208';
-      color2 = '#7a2a08';
-    } else if (colorType < 0.66) {
-      // Medium reddish regions
-      color1 = '#9c3a0a';
-      color2 = '#8a3208';
-    } else {
-      // More brownish regions (clay minerals)
-      color1 = '#704020';
-      color2 = '#603010';
-    }
-
-    gradient.addColorStop(0, color1);
-    gradient.addColorStop(1, color2);
-
-    context.globalAlpha = 0.6;
-    context.fillStyle = gradient;
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fill();
-    context.globalAlpha = 1.0;
-  }
-
-  // Add more visible rock formations (reduced for faster texture generation)
-  for (let i = 0; i < 150; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const size = Math.random() * 30 + 10;
-
-    // Random rock color
-    const rockColor = Math.random() < 0.5 ?
-      `rgba(${60 + Math.random() * 30}, ${30 + Math.random() * 20}, ${20 + Math.random() * 10}, 0.7)` :
-      `rgba(${100 + Math.random() * 40}, ${50 + Math.random() * 30}, ${30 + Math.random() * 20}, 0.7)`;
-
-    context.fillStyle = rockColor;
-    context.beginPath();
-
-    // Create irregular rock shapes
-    context.moveTo(x, y);
-    for (let j = 0; j < 6; j++) {
-      const angle = j * Math.PI / 3;
-      const distance = size * (0.7 + Math.random() * 0.6);
-      context.lineTo(
-        x + Math.cos(angle) * distance,
-        y + Math.sin(angle) * distance
-      );
-    }
-    context.closePath();
-    context.fill();
-  }
-
-  // Add dust deposits (reduced count)
-  for (let i = 0; i < 50; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const radius = Math.random() * 200 + 50;
-
-    const gradient = context.createRadialGradient(
-      x, y, 0,
-      x, y, radius
-    );
-
-    gradient.addColorStop(0, 'rgba(200, 150, 120, 0.3)');
-    gradient.addColorStop(1, 'rgba(200, 150, 120, 0)');
-
-    context.fillStyle = gradient;
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fill();
-  }
-
-  return new THREE.CanvasTexture(canvas);
-}
-
-// Create a normal map for Mars terrain
+// Create a SEAMLESSLY TILING rocky normal map for Mars terrain.
+// Builds a periodic fBm height field, then derives normals from it via central
+// differences so the map can repeat across the terrain without visible seams.
 function createMarsNormalMap() {
-  const perfSettings = getPerformanceSettings();
-  const textureSize = Math.min(perfSettings.textureSize || 1024, 1024); // Cap at 1024 for normal maps
-  
+  const size = 256; // small but tiles many times across the terrain
   const canvas = document.createElement('canvas');
-  canvas.width = textureSize;
-  canvas.height = textureSize;
+  canvas.width = size;
+  canvas.height = size;
   const context = canvas.getContext('2d');
+  const img = context.createImageData(size, size);
+  const data = img.data;
 
-  // Fill with neutral normal (128, 128, 255)
-  context.fillStyle = 'rgb(128, 128, 255)';
-  context.fillRect(0, 0, canvas.width, canvas.height);
+  // Periodic value noise: wrapping the integer lattice modulo P makes it tile.
+  const phash = (x, y, P) => {
+    x = ((x % P) + P) % P;
+    y = ((y % P) + P) % P;
+    const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+    return h - Math.floor(h);
+  };
+  const pnoise = (x, y, P) => {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const u = xf * xf * (3 - 2 * xf);
+    const v = yf * yf * (3 - 2 * yf);
+    const a = phash(xi, yi, P), b = phash(xi + 1, yi, P);
+    const c = phash(xi, yi + 1, P), d = phash(xi + 1, yi + 1, P);
+    return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
+  };
 
-  // Add various bumps and details (reduced count for faster generation)
-  for (let i = 0; i < 500; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const radius = Math.random() * 10 + 2;
-
-    // Create a radial gradient for each bump
-    const gradient = context.createRadialGradient(
-      x, y, 0,
-      x, y, radius
-    );
-
-    // Random bump direction
-    const angle = Math.random() * Math.PI * 2;
-    const r = 128 + Math.cos(angle) * 50;
-    const g = 128 + Math.sin(angle) * 50;
-
-    gradient.addColorStop(0, `rgb(${r}, ${g}, 255)`);
-    gradient.addColorStop(1, 'rgb(128, 128, 255)');
-
-    context.fillStyle = gradient;
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fill();
+  // Precompute the periodic height field once (cheap), then difference it.
+  const H = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      let val = 0, amp = 0.5, norm = 0, P = 8;
+      for (let o = 0; o < 4; o++) {
+        val += amp * pnoise((x / size) * P, (y / size) * P, P);
+        norm += amp;
+        amp *= 0.5;
+        P *= 2;
+      }
+      H[y * size + x] = val / norm;
+    }
   }
+  const at = (x, y) => H[(((y % size) + size) % size) * size + (((x % size) + size) % size)];
 
-  // Add some larger features (reduced count)
-  for (let i = 0; i < 30; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const radius = Math.random() * 30 + 10;
-
-    // Create a radial gradient for each feature
-    const gradient = context.createRadialGradient(
-      x, y, 0,
-      x, y, radius
-    );
-
-    // Random feature direction
-    const angle = Math.random() * Math.PI * 2;
-    const r = 128 + Math.cos(angle) * 50;
-    const g = 128 + Math.sin(angle) * 50;
-
-    gradient.addColorStop(0, `rgb(${r}, ${g}, 255)`);
-    gradient.addColorStop(1, 'rgb(128, 128, 255)');
-
-    context.fillStyle = gradient;
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fill();
+  const strength = 2.2; // bump intensity
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const hL = at(x - 1, y), hR = at(x + 1, y);
+      const hD = at(x, y - 1), hU = at(x, y + 1);
+      let nx = (hL - hR) * strength;
+      let ny = (hD - hU) * strength;
+      let nz = 1.0;
+      const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
+      nx /= len; ny /= len; nz /= len;
+      const idx = (y * size + x) * 4;
+      data[idx]     = (nx * 0.5 + 0.5) * 255;
+      data[idx + 1] = (ny * 0.5 + 0.5) * 255;
+      data[idx + 2] = (nz * 0.5 + 0.5) * 255;
+      data[idx + 3] = 255;
+    }
   }
+  context.putImageData(img, 0, 0);
 
-  return new THREE.CanvasTexture(canvas);
-}
-
-// Create a roughness map
-function createMarsRoughnessMap() {
-  const perfSettings = getPerformanceSettings();
-  const textureSize = Math.min(perfSettings.textureSize || 1024, 1024); // Cap at 1024 for roughness maps
-  
-  const canvas = document.createElement('canvas');
-  canvas.width = textureSize;
-  canvas.height = textureSize;
-  const context = canvas.getContext('2d');
-
-  // Fill with neutral roughness (0.85)
-  context.fillStyle = 'rgb(136, 136, 136)';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Add some random variations (reduced count for faster generation)
-  for (let i = 0; i < 2000; i++) {
-    const x = Math.random() * canvas.width;
-    const y = Math.random() * canvas.height;
-    const radius = Math.random() * 10 + 2;
-
-    // Random variation
-    const randomVariation = Math.random() * 0.1 - 0.05;
-    const roughness = 0.85 + randomVariation;
-
-    context.fillStyle = `rgb(${Math.round(roughness * 255)}, ${Math.round(roughness * 255)}, ${Math.round(roughness * 255)})`;
-    context.beginPath();
-    context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fill();
-  }
-
-  return new THREE.CanvasTexture(canvas);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  return texture;
 }
 
 // Create a skybox with procedural shader sky, Milky Way, and planets
@@ -6638,7 +6629,9 @@ function createSpaceSkybox() {
   skyboxGroup.renderOrder = -1000;
 
   // === LAYER 1: Procedural shader sky sphere ===
-  const skyboxGeometry = new THREE.SphereGeometry(5900, 64, 48);
+  // Low tessellation is fine â€” all sky detail lives in the fragment shader,
+  // the vertex shader only needs a smooth direction interpolant.
+  const skyboxGeometry = new THREE.SphereGeometry(5900, 32, 24);
 
   const skyboxMaterial = new THREE.ShaderMaterial({
     uniforms: {
@@ -6656,11 +6649,6 @@ function createSpaceSkybox() {
       varying vec3 vWorldPos;
 
       // --- Hash / noise helpers (GPU-friendly) ---
-      float hash(vec2 p) {
-        p = fract(p * vec2(443.897, 441.423));
-        p += dot(p, p.yx + 19.19);
-        return fract((p.x + p.y) * p.x);
-      }
       float hash3(vec3 p) {
         p = fract(p * vec3(443.897, 441.423, 437.195));
         p += dot(p, p.yzx + 19.19);
@@ -6691,51 +6679,25 @@ function createSpaceSkybox() {
         return v;
       }
 
-      // --- Stars ---
-      // Returns brightness of the nearest star in a grid cell
-      float starField(vec3 dir, float scale, float threshold) {
-        vec3 p = dir * scale;
-        vec3 cell = floor(p);
-        float bright = 0.0;
-        // Check this cell and neighbors for closest star
-        for (int dx = -1; dx <= 1; dx++)
-        for (int dy = -1; dy <= 1; dy++)
-        for (int dz = -1; dz <= 1; dz++) {
-          vec3 c = cell + vec3(float(dx), float(dy), float(dz));
-          float h = hash3(c);
-          if (h > threshold) {
-            vec3 starPos = c + vec3(hash3(c + 0.1), hash3(c + 0.2), hash3(c + 0.3));
-            float d = length(p - starPos);
-            float size = 0.02 + 0.04 * hash3(c + 0.5);
-            float b = smoothstep(size, 0.0, d);
-            // Twinkle
-            float twinkle = 0.7 + 0.3 * sin(uTime * 0.0008 * (hash3(c + 0.7) * 4.0 + 1.0) + hash3(c + 0.9) * 6.28);
-            bright = max(bright, b * twinkle);
-          }
-        }
-        return bright;
-      }
-
       void main() {
         vec3 dir = normalize(vWorldPos);
         float elevation = dir.y; // -1 bottom, +1 top
 
-        // --- Sky gradient: deep space colors for Mars night ---
-        vec3 zenith  = vec3(0.014, 0.020, 0.050); // blue-tinted deep space overhead
-        vec3 horizon = vec3(0.044, 0.022, 0.020); // rusty horizon with a cool blue lift
-        vec3 nadir   = vec3(0.0, 0.0, 0.0);      // black below
+        // --- Sky gradient: deep, dark Mars night (no blue wash) ---
+        vec3 zenith  = vec3(0.010, 0.013, 0.026); // near-black overhead
+        vec3 horizon = vec3(0.028, 0.016, 0.013); // faint dark rust at horizon
+        vec3 nadir   = vec3(0.0, 0.0, 0.0);       // black below
 
         float t = elevation * 0.5 + 0.5; // remap to 0..1
         vec3 sky = mix(nadir, horizon, smoothstep(0.0, 0.45, t));
         sky = mix(sky, zenith, smoothstep(0.45, 1.0, t));
-        sky += vec3(0.015, 0.026, 0.060) * smoothstep(0.08, 0.95, t);
 
-        // Subtle warm Mars dust glow near the horizon
-        float horizonGlow = exp(-abs(elevation) * 8.0);
-        sky += vec3(0.10, 0.032, 0.020) * horizonGlow * 0.22;
+        // Very faint warm dust line tight to the horizon only
+        float horizonGlow = exp(-abs(elevation) * 16.0);
+        sky += vec3(0.045, 0.016, 0.009) * horizonGlow * 0.12;
 
-        // --- Milky Way band ---
-        // Rotate direction so the band runs diagonally across the sky
+        // --- Milky Way band: subtle, high in the sky, and faded out toward the
+        // horizon so it never reads as ground-level "smoke". ---
         float angle = -0.55;
         float ca = cos(angle), sa = sin(angle);
         vec3 rd = vec3(
@@ -6744,50 +6706,29 @@ function createSpaceSkybox() {
           dir.x * sa + dir.z * ca
         );
         float bandDist = abs(rd.y);
-        float bandMask = smoothstep(0.28, 0.0, bandDist);
+        float bandMask = smoothstep(0.16, 0.0, bandDist);
+        // Gate by true elevation: nothing low in the sky, only well overhead.
+        bandMask *= smoothstep(0.18, 0.5, elevation);
 
         if (bandMask > 0.01) {
-          // Multi-octave noise cloud along the band
           vec3 nCoord = rd * 6.0 + vec3(0.0, 0.0, uTime * 0.000002);
           float n = fbm(nCoord);
           float detail = fbm(nCoord * 3.0 + 1.5);
 
-          float milky = bandMask * smoothstep(0.32, 0.65, n);
-          milky += bandMask * 0.4 * smoothstep(0.35, 0.7, detail);
+          float milky = bandMask * smoothstep(0.44, 0.74, n);
+          milky += bandMask * 0.3 * smoothstep(0.48, 0.80, detail);
 
-          // Core brightness
-          float core = smoothstep(0.12, 0.0, bandDist) * smoothstep(0.38, 0.65, n) * 0.6;
-          milky += core;
+          // Dark dust lanes carve voids for a mottled look
+          float dust = fbm(nCoord * 1.7 + 9.0);
+          milky *= 1.0 - smoothstep(0.40, 0.62, dust) * 0.8;
 
-          // Color: blue-white with slight warmth in the core
-          vec3 milkyColor = mix(
-            vec3(0.35, 0.45, 0.7),   // blue-white outer
-            vec3(0.7, 0.65, 0.85),   // pale lavender core
-            core
-          );
-          // Add faint pink/magenta knots
-          float knots = smoothstep(0.62, 0.75, detail) * bandMask * 0.3;
-          milkyColor += vec3(0.25, 0.05, 0.15) * knots;
-
-          sky += milkyColor * milky * 0.70;
+          // Desaturated, dim so it's a hint of galaxy, not a glowing cloud
+          vec3 milkyColor = vec3(0.28, 0.32, 0.44);
+          sky += milkyColor * milky * 0.26;
         }
 
-        // --- Static star layers (painted by shader, no canvas) ---
-        float s1 = starField(dir, 80.0, 0.925);  // sparse bright stars
-        float s2 = starField(dir, 200.0, 0.885);  // medium density
-        float s3 = starField(dir, 500.0, 0.835);  // dense dim stars
-
-        // Star colors: mostly white-blue, some warm
-        vec3 starCol1 = mix(vec3(0.8, 0.85, 1.0), vec3(1.0, 0.9, 0.7), hash(dir.xz * 80.0));
-        vec3 starCol2 = mix(vec3(0.85, 0.9, 1.0), vec3(1.0, 0.85, 0.65), hash(dir.xz * 200.0));
-
-        sky += starCol1 * s1 * 0.95;
-        sky += starCol2 * s2 * 0.48;
-        sky += vec3(0.7, 0.75, 0.9) * s3 * 0.18;
-
-        // Fade stars near horizon (atmospheric extinction)
-        float extinction = smoothstep(0.0, 0.15, abs(elevation));
-        sky = mix(sky * vec3(1.0, 0.7, 0.5) * 0.3, sky, extinction);
+        // Stars are drawn by the dedicated particle layer (createTwinklingStars),
+        // so the sky shader only paints the gradient + faint Milky Way here.
 
         gl_FragColor = vec4(sky, 1.0);
       }
@@ -6909,54 +6850,75 @@ function createTwinklingStars() {
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+  geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
+  geometry.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
+  geometry.setAttribute('aPhase', new THREE.BufferAttribute(phases, 1));
+  geometry.setAttribute('aSpeed', new THREE.BufferAttribute(speeds, 1));
 
   // Create soft circular star texture
   const starTexture = createStarTexture();
 
-  const material = new THREE.PointsMaterial({
-    size: 8,
-    map: starTexture,
-    vertexColors: true,
+  // GPU twinkle: each star's brightness/size oscillates in the vertex shader,
+  // so the whole field animates every frame for free (no per-frame CPU buffer
+  // uploads). This also fixes the old PointsMaterial path, which ignored the
+  // per-point size attribute entirely, so twinkling never actually showed.
+  const dpr = (renderer && renderer.getPixelRatio) ? renderer.getPixelRatio() : (window.devicePixelRatio || 1);
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uTime: { value: 0.0 },
+      uTexture: { value: starTexture },
+      uScale: { value: window.innerHeight * dpr * 0.5 } // matches three.js size attenuation
+    },
+    vertexShader: `
+      attribute float aSize;
+      attribute float aPhase;
+      attribute float aSpeed;
+      attribute vec3 aColor;
+      uniform float uTime;
+      uniform float uScale;
+      varying vec3 vColor;
+      varying float vTwinkle;
+      void main() {
+        vColor = aColor;
+        float t = uTime * 0.001;
+        float tw = 0.60 + 0.28 * (
+          sin(t * aSpeed + aPhase) * 0.5 +
+          sin(t * aSpeed * 1.7 + aPhase * 2.3) * 0.3 +
+          sin(t * aSpeed * 0.4 + aPhase * 0.7) * 0.2
+        );
+        vTwinkle = tw;
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        // 4x boost: the particle layer now carries the whole star field (the
+        // old per-fragment shader stars were removed), so make points readable.
+        gl_PointSize = max(aSize * tw * 4.0 * (uScale / -mvPosition.z), 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D uTexture;
+      varying vec3 vColor;
+      varying float vTwinkle;
+      void main() {
+        vec4 tex = texture2D(uTexture, gl_PointCoord);
+        gl_FragColor = vec4(vColor, 1.0) * tex * (0.45 + vTwinkle);
+      }
+    `,
     transparent: true,
-    opacity: 0.95,
     blending: THREE.AdditiveBlending,
-    depthWrite: false,
-    sizeAttenuation: true,
-    alphaTest: 0.005
+    depthWrite: false
   });
 
   const points = new THREE.Points(geometry, material);
   points.frustumCulled = false;
 
-  // Return system with update function
+  // Return system with update function â€” just advances the shader clock.
   return {
     points,
-    phases,
-    speeds,
-    sizes,
-    originalSizes: new Float32Array(sizes), // copy for reference
-    _updateOffset: 0, // rolling offset for partial updates
     update(time) {
-      const t = time * 0.001;
-      const sizeAttr = geometry.attributes.size;
-      const arr = sizeAttr.array;
-      // Update only a batch of stars each frame to spread CPU cost
-      const batchSize = Math.min(4000, starCount);
-      const start = this._updateOffset;
-      const end = Math.min(start + batchSize, starCount);
-      for (let i = start; i < end; i++) {
-        // Smooth sinusoidal twinkling with harmonics for natural look
-        const twinkle = 0.60 + 0.28 * (
-          Math.sin(t * speeds[i] + phases[i]) * 0.5 +
-          Math.sin(t * speeds[i] * 1.7 + phases[i] * 2.3) * 0.3 +
-          Math.sin(t * speeds[i] * 0.4 + phases[i] * 0.7) * 0.2
-        );
-        arr[i] = this.originalSizes[i] * twinkle;
-      }
-      this._updateOffset = end >= starCount ? 0 : end;
-      sizeAttr.needsUpdate = true;
+      material.uniforms.uTime.value = time;
+      // Keep size attenuation correct if the window was resized
+      const d = (renderer && renderer.getPixelRatio) ? renderer.getPixelRatio() : (window.devicePixelRatio || 1);
+      material.uniforms.uScale.value = window.innerHeight * d * 0.5;
     }
   };
 }
@@ -7102,11 +7064,16 @@ function createShootingStarSystem() {
   // Spawn timer
   let nextSpawn = 1.5 + Math.random() * 3;
   let elapsed = 0;
+  let lastTime = null;
 
   return {
     group,
     update(time) {
-      const dt = 0.016; // ~60fps timestep
+      // Real frame delta (seconds) so shooting stars move at a consistent
+      // real-world speed regardless of display refresh rate.
+      let dt = 0.016;
+      if (lastTime != null) dt = Math.min(Math.max((time - lastTime) / 1000, 0), 0.1);
+      lastTime = time;
       elapsed += dt;
 
       // Spawn new shooting stars periodically (a few, not a shower)
@@ -7234,50 +7201,153 @@ function createAsteroidSkyLayer() {
 
 function createDistantPlanetLayer() {
   const group = new THREE.Group();
-  const planetGeometry = new THREE.SphereGeometry(1, 32, 16);
+  const planetGeometry = new THREE.SphereGeometry(1, 48, 32);
+
+  // Shared world-space "sunlight" direction so every planet shows a consistent
+  // phase (terminator between lit day side and dark night side).
+  const lightDir = new THREE.Vector3(0.75, 0.32, 0.58).normalize();
 
   const planets = [
     {
       position: new THREE.Vector3(-2850, 2100, -3400),
-      scale: new THREE.Vector3(68, 68, 68),
-      color: 0x8aa7d9,
-      opacity: 0.72,
+      scale: 68,
+      colorA: new THREE.Color(0x9fb4e0), // pale blue
+      colorB: new THREE.Color(0x4a6bb0), // deep blue bands
+      opacity: 0.95,
       drift: 0.000003
     },
     {
       position: new THREE.Vector3(2500, 1750, -3900),
-      scale: new THREE.Vector3(42, 42, 42),
-      color: 0xd0a070,
-      opacity: 0.58,
+      scale: 42,
+      colorA: new THREE.Color(0xe6c79a), // sandy gold
+      colorB: new THREE.Color(0xb07840), // ochre bands
+      opacity: 0.92,
       drift: -0.000004
     }
   ];
 
+  // Per-planet shader: lit hemisphere with soft terminator, fBm surface bands,
+  // limb darkening, and a faint atmospheric rim on the lit edge.
+  const planetVertex = `
+    varying vec3 vN;
+    varying vec3 vLocal;
+    void main() {
+      vN = normalize(mat3(modelMatrix) * normal);
+      vLocal = normal; // unit sphere: local position == normal
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `;
+  const planetFragment = `
+    uniform float uTime;
+    uniform vec3 uLightDir;
+    uniform vec3 uViewDir;   // planet -> camera, world space
+    uniform vec3 uColorA;
+    uniform vec3 uColorB;
+    uniform float uOpacity;
+    varying vec3 vN;
+    varying vec3 vLocal;
+
+    float h3(vec3 p){ p = fract(p * vec3(443.897, 441.423, 437.195)); p += dot(p, p.yzx + 19.19); return fract((p.x + p.y + p.z) * p.x); }
+    float n3(vec3 p){
+      vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(mix(h3(i), h3(i+vec3(1,0,0)), f.x), mix(h3(i+vec3(0,1,0)), h3(i+vec3(1,1,0)), f.x), f.y),
+                 mix(mix(h3(i+vec3(0,0,1)), h3(i+vec3(1,0,1)), f.x), mix(h3(i+vec3(0,1,1)), h3(i+vec3(1,1,1)), f.x), f.y), f.z);
+    }
+    float fb(vec3 p){ float v = 0.0, a = 0.5; for (int i = 0; i < 4; i++){ v += a * n3(p); p *= 2.05; a *= 0.5; } return v; }
+
+    void main() {
+      vec3 N = normalize(vN);
+
+      // Surface: latitudinal bands warped by fBm + mottling
+      float warp = fb(vLocal * 2.5) * 2.5;
+      float bands = sin(vLocal.y * 9.0 + warp) * 0.5 + 0.5;
+      float mottle = fb(vLocal * 3.5 + vec3(0.0, uTime * 0.00001, 0.0));
+      vec3 surf = mix(uColorA, uColorB, clamp(bands * 0.7 + mottle * 0.4, 0.0, 1.0));
+
+      // Phase / day-night terminator
+      float ndl = dot(N, normalize(uLightDir));
+      float lit = smoothstep(-0.18, 0.35, ndl);
+      vec3 col = surf * (0.04 + 0.96 * lit);
+
+      // Limb darkening (1 at disk centre, 0 at silhouette)
+      float vdn = clamp(dot(N, normalize(uViewDir)), 0.0, 1.0);
+      col *= 0.5 + 0.5 * pow(vdn, 0.55);
+
+      // Atmospheric rim glow on the lit limb
+      float rim = pow(1.0 - vdn, 3.0) * lit;
+      col += uColorA * rim * 0.6;
+
+      gl_FragColor = vec4(col, uOpacity);
+    }
+  `;
+
   const meshes = planets.map(config => {
-    const material = new THREE.MeshBasicMaterial({
-      color: config.color,
+    const viewDir = config.position.clone().multiplyScalar(-1).normalize(); // planet -> camera (origin)
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0.0 },
+        uLightDir: { value: lightDir.clone() },
+        uViewDir: { value: viewDir },
+        uColorA: { value: config.colorA },
+        uColorB: { value: config.colorB },
+        uOpacity: { value: config.opacity }
+      },
+      vertexShader: planetVertex,
+      fragmentShader: planetFragment,
       transparent: true,
-      opacity: config.opacity,
       depthWrite: false,
+      side: THREE.FrontSide,
       fog: false
     });
     const mesh = new THREE.Mesh(planetGeometry, material);
     mesh.position.copy(config.position);
-    mesh.scale.copy(config.scale);
+    mesh.scale.setScalar(config.scale);
     mesh.frustumCulled = false;
     mesh.userData.drift = config.drift;
+    mesh.userData.material = material;
     group.add(mesh);
     return mesh;
   });
 
-  // A very thin ring makes the smaller planet legible without adding a big bright disk.
-  const ringGeometry = new THREE.RingGeometry(54, 72, 64);
-  const ringMaterial = new THREE.MeshBasicMaterial({
-    color: 0xc6a98a,
+  // Saturn-like ring for the second planet, with radial banding, a Cassini-style
+  // gap and soft edges instead of a flat translucent disk.
+  const ringGeometry = new THREE.RingGeometry(50, 78, 96, 1);
+  const ringMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: new THREE.Color(0xd8bd95) },
+      uInner: { value: 50.0 },
+      uOuter: { value: 78.0 }
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      varying float vRadius;
+      void main() {
+        vUv = uv;
+        vRadius = length(position.xy);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 uColor;
+      uniform float uInner;
+      uniform float uOuter;
+      varying float vRadius;
+      void main() {
+        float t = clamp((vRadius - uInner) / (uOuter - uInner), 0.0, 1.0);
+        // Soft inner/outer edges
+        float edge = smoothstep(0.0, 0.08, t) * smoothstep(1.0, 0.9, t);
+        // Fine ring banding
+        float bands = 0.6 + 0.4 * sin(t * 60.0);
+        // Cassini-style gap
+        float gap = smoothstep(0.42, 0.46, t) * smoothstep(0.54, 0.50, t);
+        float alpha = edge * bands * (1.0 - gap * 0.85) * 0.55;
+        gl_FragColor = vec4(uColor, alpha);
+      }
+    `,
     transparent: true,
-    opacity: 0.22,
     side: THREE.DoubleSide,
     depthWrite: false,
+    blending: THREE.AdditiveBlending,
     fog: false
   });
   const ring = new THREE.Mesh(ringGeometry, ringMaterial);
@@ -7293,7 +7363,8 @@ function createDistantPlanetLayer() {
     update(time) {
       const t = time || 0;
       for (const mesh of meshes) {
-        mesh.rotation.y = t * mesh.userData.drift;
+        mesh.rotation.y = t * mesh.userData.drift; // slow surface spin
+        mesh.userData.material.uniforms.uTime.value = t;
       }
       ring.rotation.z = -0.35 + Math.sin(t * 0.00008) * 0.015;
     }
