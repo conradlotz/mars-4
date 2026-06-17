@@ -33,10 +33,94 @@ function _getHudElements() {
       health: document.getElementById('rover-health'),
       fuel: document.getElementById('rover-fuel'),
       compass: document.getElementById('rover-heading'),
-      route: document.getElementById('tour-status')
+      route: document.getElementById('tour-status'),
+      mission: document.getElementById('mission-objective'),
+      toast: document.getElementById('mission-toast')
     };
   }
   return _hudElements;
+}
+
+function ensureMissionHUD() {
+  if (typeof document === 'undefined' || document.getElementById('mission-hud')) return;
+
+  const hud = document.createElement('div');
+  hud.id = 'mission-hud';
+  hud.style.cssText = `
+    position: fixed;
+    top: 18px;
+    left: 18px;
+    z-index: 220;
+    min-width: 220px;
+    max-width: min(340px, calc(100vw - 36px));
+    padding: 10px 12px;
+    color: #eaf8ff;
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+    line-height: 1.35;
+    background: rgba(5, 10, 16, 0.62);
+    border: 1px solid rgba(102, 234, 255, 0.36);
+    box-shadow: 0 0 24px rgba(54, 200, 255, 0.18);
+    backdrop-filter: blur(10px);
+    pointer-events: none;
+  `;
+  hud.innerHTML = `
+    <div style="font-size: 10px; letter-spacing: 1.4px; color: #66eaff; text-transform: uppercase;">Mission</div>
+    <div id="mission-objective" style="margin-top: 3px; font-weight: 700;">Follow the blue beacon route</div>
+    <div id="tour-status" style="margin-top: 4px; color: rgba(234,248,255,0.78);">Tour: 0/6 beacons</div>
+  `;
+  document.body.appendChild(hud);
+
+  const toast = document.createElement('div');
+  toast.id = 'mission-toast';
+  toast.style.cssText = `
+    position: fixed;
+    top: 86px;
+    left: 18px;
+    z-index: 221;
+    padding: 8px 11px;
+    color: #071116;
+    font-family: Arial, sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    background: rgba(102, 234, 255, 0.92);
+    opacity: 0;
+    transform: translateY(-8px);
+    transition: opacity 220ms ease, transform 220ms ease;
+    pointer-events: none;
+  `;
+  document.body.appendChild(toast);
+  _hudElements = null;
+}
+
+function showMissionToast(message) {
+  ensureMissionHUD();
+  const hud = _getHudElements();
+  if (!hud.toast) return;
+  hud.toast.textContent = message;
+  hud.toast.style.opacity = '1';
+  hud.toast.style.transform = 'translateY(0)';
+  clearTimeout(window._missionToastTimer);
+  window._missionToastTimer = setTimeout(() => {
+    hud.toast.style.opacity = '0';
+    hud.toast.style.transform = 'translateY(-8px)';
+  }, 1800);
+}
+
+function updateMissionObjective() {
+  ensureMissionHUD();
+  const hud = _getHudElements();
+  if (!hud.mission) return;
+  const route = window.guidedRouteProgress || { reached: 0, total: 6 };
+  const scan = window.scanSiteProgress || { reached: 0, total: 4 };
+
+  if (route.reached < route.total) {
+    hud.mission.textContent = `Reach beacon ${route.reached + 1}`;
+  } else if (scan.reached < scan.total) {
+    hud.mission.textContent = `${isDaytime ? 'Daylight survey' : 'Night scan'}: anomaly ${scan.reached + 1}`;
+  } else {
+    hud.mission.textContent = 'Return to the command colony';
+  }
 }
 
 // Compass direction lookup (avoid recreating every frame)
@@ -45,6 +129,7 @@ const _compassDirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 // Update HUD with game system information
 function updateGameHUD() {
   if (!rover) return;
+  ensureMissionHUD();
   const hud = _getHudElements();
 
   // Update health display
@@ -75,6 +160,7 @@ function updateGameHUD() {
     const scanText = scan ? ` | Scans: ${scan.reached}/${scan.total}` : '';
     hud.route.textContent = reached >= total ? `Tour: Complete${scanText}` : `Tour: ${reached}/${total} beacons${scanText}`;
   }
+  updateMissionObjective();
 }
 
 // Performance-aware initialization with mobile detection
@@ -2026,6 +2112,7 @@ class MarsSceneManager {
     this.lastSettlementCheck = 0;       // Throttle timestamp
     this.roads = new Map();             // key "fromâ†’to" â†’ { group }
     this.roadVehicles = [];             // Vehicles driving along roads
+    this.fadingSettlements = [];
 
     // Get reference to the terrain mesh for proper ground placement
     // The terrain is the largest PlaneGeometry in the scene (3000-5000 units wide)
@@ -2290,6 +2377,80 @@ class MarsSceneManager {
     };
 
     this.aiRoutes.push(route1, route2, route3, route4);
+    this.createTrafficRouteRoads();
+  }
+
+  createTrafficRouteRoads() {
+    if (!this.aiRoutes || this.aiRoutes.length === 0) return;
+    if (this.aiRoadGroup) {
+      this.scene.remove(this.aiRoadGroup);
+      this.aiRoadGroup.traverse(obj => {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) obj.material.dispose();
+      });
+    }
+
+    const group = new THREE.Group();
+    group.name = 'CybertruckRouteRoads';
+    const roadMat = new THREE.MeshStandardMaterial({
+      color: 0x2d2520,
+      roughness: 0.92,
+      metalness: 0.08
+    });
+    const laneMat = new THREE.MeshBasicMaterial({
+      color: 0xffb45a,
+      transparent: true,
+      opacity: 0.72
+    });
+
+    this.aiRoutes.forEach((route, routeIndex) => {
+      for (let i = 0; i < route.waypoints.length - 1; i++) {
+        const a = route.waypoints[i];
+        const b = route.waypoints[i + 1];
+        const dx = b.x - a.x;
+        const dz = b.z - a.z;
+        const length = Math.sqrt(dx * dx + dz * dz);
+        if (length < 1) continue;
+
+        const dirX = dx / length;
+        const dirZ = dz / length;
+        const perpX = -dirZ;
+        const perpZ = dirX;
+        const segs = Math.max(10, Math.floor(length / 10));
+        const buildDrapedRibbon = (halfWidth, yOff) => {
+          const verts = [];
+          for (let s = 0; s < segs; s++) {
+            const t0 = s / segs;
+            const t1 = (s + 1) / segs;
+            const x0 = a.x + dx * t0;
+            const z0 = a.z + dz * t0;
+            const x1 = a.x + dx * t1;
+            const z1 = a.z + dz * t1;
+            const y0 = this.getTerrainHeight(x0, z0) + yOff;
+            const y1 = this.getTerrainHeight(x1, z1) + yOff;
+            const l0 = [x0 + perpX * halfWidth, y0, z0 + perpZ * halfWidth];
+            const r0 = [x0 - perpX * halfWidth, y0, z0 - perpZ * halfWidth];
+            const l1 = [x1 + perpX * halfWidth, y1, z1 + perpZ * halfWidth];
+            const r1 = [x1 - perpX * halfWidth, y1, z1 - perpZ * halfWidth];
+            verts.push(...l0, ...r0, ...l1, ...l1, ...r0, ...r1);
+          }
+          const geometry = new THREE.BufferGeometry();
+          geometry.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+          geometry.computeVertexNormals();
+          return geometry;
+        };
+
+        const road = new THREE.Mesh(buildDrapedRibbon(6.5, 0.18), roadMat);
+        road.receiveShadow = true;
+        group.add(road);
+
+        const lane = new THREE.Mesh(buildDrapedRibbon(0.32, 0.28), laneMat);
+        group.add(lane);
+      }
+    });
+
+    this.aiRoadGroup = group;
+    this.scene.add(group);
   }
 
   // Simple boxy mining truck
@@ -2398,12 +2559,39 @@ class MarsSceneManager {
       metalness: 0.35,
       roughness: 0.72
     });
+    const darkTrimMat = new THREE.MeshStandardMaterial({
+      color: 0x16191d,
+      metalness: 0.65,
+      roughness: 0.42
+    });
 
     // Wide flat skateboard chassis
     const bodyGeom = new THREE.BoxGeometry(11.0, 2.2, 4.8);
     const body = new THREE.Mesh(bodyGeom, stainlessMat);
     body.position.y = 1.6;
     group.add(body);
+
+    // Faceted stainless side shells give the truck its wedge profile.
+    const shellShape = new THREE.Shape();
+    shellShape.moveTo(-5.4, -0.2);
+    shellShape.lineTo(4.9, -0.2);
+    shellShape.lineTo(2.15, 2.25);
+    shellShape.lineTo(-2.05, 2.52);
+    shellShape.lineTo(-5.0, 0.35);
+    shellShape.lineTo(-5.4, -0.2);
+    const shellGeom = new THREE.ShapeGeometry(shellShape);
+    const leftShell = new THREE.Mesh(shellGeom, stainlessMat);
+    leftShell.position.set(0, 1.88, 2.48);
+    group.add(leftShell);
+    const rightShell = leftShell.clone();
+    rightShell.position.z = -2.48;
+    rightShell.rotation.y = Math.PI;
+    group.add(rightShell);
+
+    const hood = new THREE.Mesh(new THREE.BoxGeometry(4.7, 0.22, 4.7), stainlessMat);
+    hood.position.set(3.15, 2.78, 0);
+    hood.rotation.z = -0.18;
+    group.add(hood);
 
     // Cybertruck's signature steep single-slope windshield
     const windshield = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.18, 4.6), glassMat);
@@ -2422,6 +2610,11 @@ class MarsSceneManager {
     rearSail.position.set(-3.8, 3.3, 0);
     rearSail.rotation.z = 0.52;
     group.add(rearSail);
+
+    const bedCover = new THREE.Mesh(new THREE.BoxGeometry(3.9, 0.2, 4.35), darkTrimMat);
+    bedCover.position.set(-3.72, 2.62, 0);
+    bedCover.rotation.z = 0.2;
+    group.add(bedCover);
 
     const sideGlassGeom = new THREE.BoxGeometry(3.1, 0.9, 0.16);
     const leftGlass = new THREE.Mesh(sideGlassGeom, glassMat);
@@ -2447,6 +2640,15 @@ class MarsSceneManager {
     rearStrip.scale.z = 0.82;
     group.add(rearStrip);
 
+    const tailRedMat = new THREE.MeshStandardMaterial({
+      color: 0xff3040,
+      emissive: 0xff1018,
+      emissiveIntensity: 1.1
+    });
+    const rearRed = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 3.4), tailRedMat);
+    rearRed.position.set(-5.56, 2.35, 0);
+    group.add(rearRed);
+
     // Emissive light strip is sufficient â€” no PointLight needed for each cybertruck
 
     // Dark lower fascia
@@ -2454,6 +2656,8 @@ class MarsSceneManager {
     const bumper = new THREE.Mesh(bumperGeom, blackMat);
     bumper.position.y = 0.92;
     group.add(bumper);
+
+    const flareGeom = new THREE.BoxGeometry(1.85, 0.48, 0.42);
 
     // Wheels
     const wheelGeom = new THREE.CylinderGeometry(1.25, 1.25, 0.9, 24);
@@ -2475,7 +2679,20 @@ class MarsSceneManager {
       rim.rotation.z = Math.PI / 2;
       rim.position.copy(wheel.position);
       group.add(rim);
+
+      const flare = new THREE.Mesh(flareGeom, darkTrimMat);
+      flare.position.set(x, 1.68, z > 0 ? 2.53 : -2.53);
+      flare.rotation.y = z > 0 ? 0.08 : -0.08;
+      group.add(flare);
     });
+
+    const mirrorGeom = new THREE.BoxGeometry(0.32, 0.18, 0.75);
+    const leftMirror = new THREE.Mesh(mirrorGeom, blackMat);
+    leftMirror.position.set(1.8, 3.0, 2.78);
+    group.add(leftMirror);
+    const rightMirror = leftMirror.clone();
+    rightMirror.position.z = -2.78;
+    group.add(rightMirror);
 
     return group;
   }
@@ -2540,6 +2757,46 @@ class MarsSceneManager {
       } else if (anim.type === 'rotate') {
         anim.mesh.rotation.y += anim.speed;
       }
+    }
+  }
+
+  prepareSettlementFadeIn(group, startTime) {
+    if (!group) return;
+    const materials = [];
+    group.traverse(obj => {
+      if (!obj.isMesh || !obj.material) return;
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+      mats.forEach((mat, index) => {
+        if (!mat) return;
+        const cloned = mat.clone();
+        cloned.transparent = true;
+        cloned.opacity = 0.0;
+        cloned.needsUpdate = true;
+        if (Array.isArray(obj.material)) obj.material[index] = cloned;
+        else obj.material = cloned;
+        materials.push({ material: cloned, targetOpacity: typeof mat.opacity === 'number' ? mat.opacity : 1 });
+      });
+    });
+    group.scale.setScalar(0.985);
+    this.fadingSettlements.push({ group, materials, startTime, duration: 2600 });
+  }
+
+  updateSettlementFades(time) {
+    if (!this.fadingSettlements || this.fadingSettlements.length === 0) return;
+
+    for (let i = this.fadingSettlements.length - 1; i >= 0; i--) {
+      const fade = this.fadingSettlements[i];
+      const t = Math.max(0, Math.min(1, (time - fade.startTime) / fade.duration));
+      const eased = t * t * (3 - 2 * t);
+      if (fade.group) fade.group.scale.setScalar(0.985 + eased * 0.015);
+      fade.materials.forEach(entry => {
+        entry.material.opacity = entry.targetOpacity * eased;
+        if (t >= 1 && entry.targetOpacity >= 1) {
+          entry.material.transparent = false;
+          entry.material.needsUpdate = true;
+        }
+      });
+      if (t >= 1) this.fadingSettlements.splice(i, 1);
     }
   }
 
@@ -3636,8 +3893,8 @@ class MarsSceneManager {
   createGuidedRoute() {
     try {
       const perfSettings = getPerformanceSettings();
-      // Skip on low-detail or mobile devices to avoid extra draw calls
-      if (perfSettings.isMobile || perfSettings.detailLevel === 'low') return;
+      // Keep route beacons on mobile too; they are core navigation objects.
+      if (perfSettings.detailLevel === 'low' && !perfSettings.isMobile) return;
 
       // Define a few world-space points forming a gentle path toward the colony
       const points = [
@@ -3691,16 +3948,21 @@ class MarsSceneManager {
         head.position.y = 10.5;
         group.add(head);
 
-        const light = new THREE.PointLight(0x66ddff, 1.2, 120);
-        light.position.copy(head.position);
-        group.add(light);
+        let light = null;
+        if (!perfSettings.isMobile) {
+          light = new THREE.PointLight(0x66ddff, 1.2, 120);
+          light.position.copy(head.position);
+          group.add(light);
+        }
 
         // Place on terrain so the base follows the hills
         this.positionOnTerrain(group, p.x, p.z);
+        const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        this.prepareSettlementFadeIn(group, now);
         this.scene.add(group);
 
         this.animatedObjects.push({
-          mesh: light,
+          mesh: light || head,
           type: 'blink',
           phase: index * 0.7
         });
@@ -4003,17 +4265,19 @@ class MarsSceneManager {
         veh.scale.set(scale, scale, scale);
         const spawnGroundY = Math.max(road.groundY, this.getTerrainHeight(x, z));
         veh.position.set(x, spawnGroundY + 0.3, z);
-        // Cybertruck forward axis is +X; the road runs along world angle `road.angle`,
-        // so face -road.angle to drive along the road instead of across it.
-        veh.rotation.y = -road.angle + (Math.random() < 0.5 ? 0 : Math.PI); // face either direction
+        const speed = (0.0003 + Math.random() * 0.0006) * (Math.random() < 0.5 ? 1 : -1);
+        const travelSign = speed >= 0 ? 1 : -1;
+        veh.rotation.y = Math.atan2(
+          -(road.endZ - road.startZ) * travelSign,
+          (road.endX - road.startX) * travelSign
+        );
 
         this.scene.add(veh);
         this.roadVehicles.push({
           mesh: veh,
           road,
           t,
-          speed: (0.0003 + Math.random() * 0.0006) * (Math.random() < 0.5 ? 1 : -1), // t per frame
-          direction: Math.random() < 0.5 ? 1 : -1
+          speed
         });
       }
     }
@@ -4031,6 +4295,11 @@ class MarsSceneManager {
       // beneath it, so vehicles never disappear under a hill the road cuts through.
       const groundY = Math.max(v.road.groundY, this.getTerrainHeight(v.mesh.position.x, v.mesh.position.z));
       v.mesh.position.y = groundY + 0.3;
+      const travelSign = v.speed >= 0 ? 1 : -1;
+      v.mesh.rotation.y = Math.atan2(
+        -(v.road.endZ - v.road.startZ) * travelSign,
+        (v.road.endX - v.road.startX) * travelSign
+      );
     }
   }
 
@@ -4276,35 +4545,40 @@ class MarsSceneManager {
       }
     };
 
-    const addModernArchitectureKit = () => {
+    const addMarsHardenedArchitectureKit = () => {
       const scale = type === 'city' ? 1.6 : type === 'base' ? 1.15 : 0.85;
       const radius = type === 'city' ? 115 : type === 'base' ? 72 : 42;
       const modernWallMat = new THREE.MeshStandardMaterial({
-        color: 0xe7edf5,
-        roughness: 0.16,
-        metalness: 0.92,
-        emissive: 0x101827,
-        emissiveIntensity: 0.28
+        color: 0xc7c1b8,
+        roughness: 0.62,
+        metalness: 0.46,
+        emissive: 0x120906,
+        emissiveIntensity: 0.18
       });
       const darkTrimMat = new THREE.MeshStandardMaterial({
-        color: 0x202833,
-        roughness: 0.28,
-        metalness: 0.88
+        color: 0x28211d,
+        roughness: 0.7,
+        metalness: 0.42
       });
       const modernGlassMat = new THREE.MeshStandardMaterial({
-        color: 0x9ddfff,
-        roughness: 0.04,
-        metalness: 0.55,
+        color: 0x84c5dd,
+        roughness: 0.18,
+        metalness: 0.35,
         transparent: true,
-        opacity: 0.52,
-        emissive: 0x2ca8ff,
-        emissiveIntensity: 0.42
+        opacity: 0.38,
+        emissive: 0x114466,
+        emissiveIntensity: 0.22
       });
-      const lightMat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.86 });
+      const regolithMat = new THREE.MeshStandardMaterial({
+        color: 0x8c3f24,
+        roughness: 1.0,
+        metalness: 0.0
+      });
+      const lightMat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.74 });
 
-      const commandW = 26 * scale;
-      const commandH = 12 * scale;
-      const commandD = 36 * scale;
+      const commandW = 34 * scale;
+      const commandH = 8 * scale;
+      const commandD = 44 * scale;
       const command = new THREE.Group();
       command.position.set(cx + radius * 0.36, gy + commandH * 0.5, cz - radius * 0.34);
       command.rotation.y = -0.42;
@@ -4313,62 +4587,106 @@ class MarsSceneManager {
       body.receiveShadow = true;
       command.add(body);
 
-      const glassNose = new THREE.Mesh(new THREE.BoxGeometry(commandW * 0.72, commandH * 0.52, 0.7), modernGlassMat);
-      glassNose.position.set(0, commandH * 0.12, commandD * 0.5 + 0.45);
+      const glassNose = new THREE.Mesh(new THREE.BoxGeometry(commandW * 0.62, commandH * 0.24, 0.55), modernGlassMat);
+      glassNose.position.set(0, commandH * 0.08, commandD * 0.5 + 0.32);
       command.add(glassNose);
 
-      const roofBlade = new THREE.Mesh(new THREE.BoxGeometry(commandW * 0.9, 1.1, commandD * 0.72), darkTrimMat);
-      roofBlade.position.y = commandH * 0.54;
-      roofBlade.rotation.x = -0.08;
-      command.add(roofBlade);
+      const pressureCap = new THREE.Mesh(new THREE.CylinderGeometry(commandD * 0.18, commandD * 0.2, commandW * 0.88, 16), modernWallMat);
+      pressureCap.rotation.z = Math.PI / 2;
+      pressureCap.position.y = commandH * 0.48;
+      command.add(pressureCap);
       group.add(command);
       this.registerCollidable({ x: command.position.x, z: command.position.z }, Math.max(commandW, commandD) * 0.42);
 
-      const finCount = type === 'city' ? 8 : type === 'base' ? 5 : 3;
-      for (let i = 0; i < finCount; i++) {
-        const angle = (i / finCount) * Math.PI * 2 + 0.28;
-        const finH = (type === 'city' ? 56 : type === 'base' ? 38 : 24) * (0.78 + rand() * 0.44);
-        const dist = radius * (0.62 + rand() * 0.32);
+      const bermCount = type === 'city' ? 12 : type === 'base' ? 8 : 5;
+      for (let i = 0; i < bermCount; i++) {
+        const angle = (i / bermCount) * Math.PI * 2 + 0.28;
+        const dist = radius * (0.72 + rand() * 0.22);
         const x = cx + Math.cos(angle) * dist;
         const z = cz + Math.sin(angle) * dist;
-        const fin = new THREE.Mesh(new THREE.BoxGeometry(2.4 * scale, finH, 7 * scale), modernGlassMat);
-        fin.position.set(x, gy + finH * 0.5, z);
-        fin.rotation.y = -angle + Math.PI / 2;
-        fin.castShadow = true;
-        group.add(fin);
-
-        const spine = new THREE.Mesh(new THREE.BoxGeometry(0.7 * scale, finH * 0.82, 0.7 * scale), lightMat);
-        spine.position.set(0, 0, 3.9 * scale);
-        fin.add(spine);
+        const berm = new THREE.Mesh(new THREE.BoxGeometry(18 * scale, 3.2 * scale, 8 * scale), regolithMat);
+        berm.position.set(x, gy + 1.7 * scale, z);
+        berm.rotation.y = -angle;
+        berm.castShadow = true;
+        berm.receiveShadow = true;
+        group.add(berm);
       }
 
-      const crownRadius = type === 'city' ? 42 : type === 'base' ? 28 : 18;
-      const crownY = gy + (type === 'city' ? 118 : type === 'base' ? 74 : 42) * scale;
-      const crown = new THREE.Mesh(new THREE.TorusGeometry(crownRadius, 0.85 * scale, 8, 72), lightMat);
-      crown.position.set(cx, crownY, cz);
-      crown.rotation.x = Math.PI / 2;
-      group.add(crown);
+      const moduleCount = type === 'city' ? 7 : type === 'base' ? 5 : 3;
+      for (let i = 0; i < moduleCount; i++) {
+        const angle = (i / moduleCount) * Math.PI * 2 + 0.15;
+        const dist = radius * (0.35 + rand() * 0.22);
+        const x = cx + Math.cos(angle) * dist;
+        const z = cz + Math.sin(angle) * dist;
+        const length = (18 + rand() * 18) * scale;
+        const r = (5 + rand() * 2.5) * scale;
+        const habitat = new THREE.Mesh(new THREE.CylinderGeometry(r, r, length, 18), modernWallMat);
+        habitat.rotation.z = Math.PI / 2;
+        habitat.rotation.y = -angle;
+        habitat.position.set(x, gy + r + 0.8, z);
+        habitat.castShadow = true;
+        habitat.receiveShadow = true;
+        group.add(habitat);
 
-      const beaconCore = new THREE.Mesh(new THREE.OctahedronGeometry(5.5 * scale, 1), modernGlassMat);
-      beaconCore.position.set(cx, crownY + 7 * scale, cz);
-      group.add(beaconCore);
+        const windowBand = new THREE.Mesh(new THREE.BoxGeometry(length * 0.56, 0.45 * scale, 0.55 * scale), lightMat);
+        windowBand.position.set(0, r * 0.35, r + 0.15);
+        habitat.add(windowBand);
+        this.registerCollidable({ x, z }, r + length * 0.22);
+      }
 
-      if (type === 'city') {
-        const shardCount = 5;
-        for (let i = 0; i < shardCount; i++) {
-          const angle = (i / shardCount) * Math.PI * 2 + 0.17;
-          const h = 120 + rand() * 130;
-          const x = cx + Math.cos(angle) * (radius * 0.48);
-          const z = cz + Math.sin(angle) * (radius * 0.48);
-          const shard = new THREE.Mesh(new THREE.OctahedronGeometry(11 + rand() * 5, 0), modernGlassMat);
-          shard.scale.set(0.75, h / 22, 0.75);
-          shard.position.set(x, gy + h * 0.52, z);
-          shard.rotation.y = angle;
-          shard.rotation.z = (rand() - 0.5) * 0.12;
-          group.add(shard);
-          this.registerCollidable({ x, z }, 14);
+      const towerCount = type === 'city' ? 6 : type === 'base' ? 3 : 1;
+      for (let i = 0; i < towerCount; i++) {
+        const angle = (i / towerCount) * Math.PI * 2 + rand() * 0.28;
+        const dist = radius * (type === 'city' ? 0.22 + rand() * 0.42 : 0.32 + rand() * 0.36);
+        const x = cx + Math.cos(angle) * dist;
+        const z = cz + Math.sin(angle) * dist;
+        const towerH = (type === 'city' ? 88 + rand() * 105 : type === 'base' ? 52 + rand() * 48 : 34 + rand() * 26) * scale;
+        const towerR = (type === 'city' ? 7.2 + rand() * 3.4 : type === 'base' ? 5.8 + rand() * 2.2 : 4.2 + rand() * 1.4) * scale;
+        const tower = new THREE.Mesh(new THREE.CylinderGeometry(towerR * 0.72, towerR, towerH, 14), modernWallMat);
+        tower.position.set(x, gy + towerH * 0.5, z);
+        tower.castShadow = true;
+        tower.receiveShadow = true;
+        group.add(tower);
+
+        const buttressCount = 4;
+        for (let b = 0; b < buttressCount; b++) {
+          const bAngle = (b / buttressCount) * Math.PI * 2;
+          const buttress = new THREE.Mesh(new THREE.BoxGeometry(1.4 * scale, towerH * 0.52, 2.2 * scale), darkTrimMat);
+          buttress.position.set(Math.cos(bAngle) * (towerR + 0.8 * scale), -towerH * 0.14, Math.sin(bAngle) * (towerR + 0.8 * scale));
+          buttress.rotation.y = -bAngle;
+          tower.add(buttress);
         }
+
+        const bandCount = type === 'city' ? 5 : 3;
+        for (let band = 1; band <= bandCount; band++) {
+          const y = -towerH * 0.45 + (band / (bandCount + 1)) * towerH * 0.84;
+          const windowRing = new THREE.Mesh(new THREE.TorusGeometry(towerR * 1.04, 0.22 * scale, 6, 36), lightMat);
+          windowRing.position.y = y;
+          windowRing.rotation.x = Math.PI / 2;
+          tower.add(windowRing);
+        }
+
+        const cap = new THREE.Mesh(new THREE.CylinderGeometry(towerR * 0.92, towerR * 1.12, 3.6 * scale, 14), darkTrimMat);
+        cap.position.y = towerH * 0.5 + 1.6 * scale;
+        tower.add(cap);
+
+        const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.35 * scale, 0.55 * scale, towerH * 0.18, 8), darkTrimMat);
+        antenna.position.y = towerH * 0.58;
+        tower.add(antenna);
+
+        const beacon = new THREE.Mesh(new THREE.SphereGeometry(1.55 * scale, 10, 8), lightMat);
+        beacon.position.y = towerH * 0.68;
+        tower.add(beacon);
+        this.registerCollidable({ x, z }, towerR + 4 * scale);
       }
+
+      const commH = (type === 'city' ? 46 : type === 'base' ? 34 : 24) * scale;
+      const comm = new THREE.Mesh(new THREE.CylinderGeometry(0.65 * scale, 1.1 * scale, commH, 8), darkTrimMat);
+      comm.position.set(cx - radius * 0.32, gy + commH * 0.5, cz + radius * 0.28);
+      group.add(comm);
+      const beaconCore = new THREE.Mesh(new THREE.OctahedronGeometry(3.8 * scale, 1), lightMat);
+      beaconCore.position.set(0, commH * 0.5 + 3.5 * scale, 0);
+      comm.add(beaconCore);
     };
 
     // Pick a sub-variant for the settlement type
@@ -4885,7 +5203,7 @@ class MarsSceneManager {
     }
 
     addFuturisticGroundLayer();
-    addModernArchitectureKit();
+    addMarsHardenedArchitectureKit();
 
     return group;
   }
@@ -4908,6 +5226,7 @@ class MarsSceneManager {
 
     // Update animated beacons, reactor rings, etc.
     this.updateAnimations(now);
+    this.updateSettlementFades(now);
 
     // Continuous rocket traffic around the colony
     this.updateRocketTraffic(now);
@@ -4950,6 +5269,9 @@ class MarsSceneManager {
         reached: this.currentWaypointIndex,
         total: this.guidedRouteWaypoints.length
       };
+      showMissionToast(this.currentWaypointIndex >= this.guidedRouteWaypoints.length
+        ? 'Route complete'
+        : `Beacon ${this.currentWaypointIndex} reached`);
     }
   }
 
@@ -4970,6 +5292,7 @@ class MarsSceneManager {
             }
           });
         }
+        showMissionToast('Anomaly scanned');
       }
       if (site.reached) reached++;
     }
