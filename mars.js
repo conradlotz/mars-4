@@ -71,7 +71,9 @@ function updateGameHUD() {
   // Update guided route HUD status
   if (hud.route && window.guidedRouteProgress) {
     const { reached, total } = window.guidedRouteProgress;
-    hud.route.textContent = reached >= total ? 'Tour: Complete' : `Tour: ${reached}/${total} beacons`;
+    const scan = window.scanSiteProgress;
+    const scanText = scan ? ` | Scans: ${scan.reached}/${scan.total}` : '';
+    hud.route.textContent = reached >= total ? `Tour: Complete${scanText}` : `Tour: ${reached}/${total} beacons${scanText}`;
   }
 }
 
@@ -82,11 +84,14 @@ let _cachedPerformanceSettings = null;
 // Day/night cycle variables - declared early to avoid temporal dead zone issues
 let lastTransitionUpdate = 0;
 let currentTimeOfDay = 0.0; // 0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk, 1 = midnight
-let dayNightCycleSpeed = 0.00001; // Speed of day/night cycle (smaller = slower)
+let dayNightCycleSpeed = 1 / 120000; // Full night-day-night cycle every 2 minutes
 let isManualTransition = false;
 let manualTransitionTarget = null;
 let manualTransitionSpeed = 0.005;
 let isDaytime = false; // Start at night so the starry sky is visible
+let sun = null;
+let sunSphere = null;
+let dayNightCycleOffset = 0;
 
 function getPerformanceSettings() {
   // Return cached settings if available (settings don't change during session)
@@ -2062,8 +2067,18 @@ class MarsSceneManager {
   }
 
   // Register a collidable object with a position and bounding radius
-  registerCollidable(position, radius) {
-    this.collidables.push({ x: position.x, z: position.z, r: radius });
+  registerCollidable(position, radius, options = {}) {
+    const rover = window.rover;
+    if (!options.force && rover && rover.position) {
+      const dx = position.x - rover.position.x;
+      const dz = position.z - rover.position.z;
+      const protectedRadius = (radius || 0) + 42;
+      if (dx * dx + dz * dz < protectedRadius * protectedRadius) {
+        return false;
+      }
+    }
+    this.collidables.push({ x: position.x, z: position.z, r: radius, dynamic: !!options.dynamic });
+    return true;
   }
 
   // Check if a world-space XZ position collides with any registered object
@@ -2072,6 +2087,12 @@ class MarsSceneManager {
     const len = this.collidables.length;
     for (let i = 0; i < len; i++) {
       const c = this.collidables[i];
+      if (c.dynamic && window.rover && window.rover.position) {
+        const rdx = window.rover.position.x - c.x;
+        const rdz = window.rover.position.z - c.z;
+        const releaseDist = c.r + 18;
+        if (rdx * rdx + rdz * rdz < releaseDist * releaseDist) continue;
+      }
       const dx = x - c.x;
       const dz = z - c.z;
       const minDist = c.r + roverRadius;
@@ -3033,6 +3054,258 @@ class MarsSceneManager {
     } catch (e) {
       console.warn('Failed to create secondary colony or bullet train system:', e);
     }
+
+    this.createColonyGroundingDetails(this.colonyCenter, groundY);
+  }
+
+  createColonyGroundingDetails(center, groundY) {
+    try {
+      if (!center) return;
+      const perfSettings = getPerformanceSettings();
+      const highDetail = perfSettings.detailLevel === 'high' && !perfSettings.isMobile;
+      const detailScale = perfSettings.isMobile ? 0.65 : highDetail ? 1 : 0.82;
+      const group = new THREE.Group();
+      group.name = 'ColonyGroundingDetails';
+
+      const serviceMat = new THREE.MeshStandardMaterial({
+        color: 0x3a302b,
+        roughness: 0.95,
+        metalness: 0.08
+      });
+      const lineMat = new THREE.MeshBasicMaterial({ color: 0xffb45a });
+      const padMat = new THREE.MeshStandardMaterial({
+        color: 0x56585d,
+        roughness: 0.7,
+        metalness: 0.35
+      });
+      const glowCyan = new THREE.MeshBasicMaterial({ color: 0x66eaff });
+      const glowAmber = new THREE.MeshBasicMaterial({ color: 0xffaa44 });
+      const cargoMat = new THREE.MeshStandardMaterial({
+        color: 0xb8c0ca,
+        roughness: 0.45,
+        metalness: 0.75
+      });
+      const darkCargoMat = new THREE.MeshStandardMaterial({
+        color: 0x303842,
+        roughness: 0.5,
+        metalness: 0.65
+      });
+      const panelMat = new THREE.MeshStandardMaterial({
+        color: 0x152d66,
+        roughness: 0.18,
+        metalness: 0.65,
+        emissive: 0x06164a,
+        emissiveIntensity: 0.28
+      });
+
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(285, 2.6, 8, 160), serviceMat);
+      ring.position.set(center.x, groundY + 0.35, center.z);
+      ring.rotation.x = Math.PI / 2;
+      ring.receiveShadow = true;
+      group.add(ring);
+
+      const ringLine = new THREE.Mesh(new THREE.TorusGeometry(285, 0.32, 6, 160), lineMat);
+      ringLine.position.set(center.x, groundY + 0.55, center.z);
+      ringLine.rotation.x = Math.PI / 2;
+      group.add(ringLine);
+
+      const serviceSpokes = [
+        { angle: -0.15, length: 560 },
+        { angle: Math.PI * 0.34, length: 430 },
+        { angle: Math.PI * 0.78, length: 470 },
+        { angle: Math.PI * 1.18, length: 410 }
+      ];
+
+      serviceSpokes.forEach((spoke, index) => {
+        const road = new THREE.Mesh(new THREE.BoxGeometry(11, 0.18, spoke.length), serviceMat);
+        road.position.set(
+          center.x + Math.sin(spoke.angle) * spoke.length * 0.5,
+          groundY + 0.18,
+          center.z + Math.cos(spoke.angle) * spoke.length * 0.5
+        );
+        road.rotation.y = spoke.angle;
+        road.receiveShadow = true;
+        group.add(road);
+
+        const line = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.08, spoke.length * 0.82), lineMat);
+        line.position.set(0, 0.2, 0);
+        road.add(line);
+
+        const pad = new THREE.Mesh(new THREE.CylinderGeometry(24, 24, 1.2, 12), padMat);
+        const padDist = spoke.length * 0.72;
+        pad.position.set(
+          center.x + Math.sin(spoke.angle) * padDist,
+          groundY + 0.65,
+          center.z + Math.cos(spoke.angle) * padDist
+        );
+        pad.rotation.y = spoke.angle;
+        pad.receiveShadow = true;
+        group.add(pad);
+
+        const padRing = new THREE.Mesh(new THREE.TorusGeometry(21, 0.55, 6, 48), index % 2 === 0 ? glowCyan : glowAmber);
+        padRing.position.set(pad.position.x, groundY + 1.35, pad.position.z);
+        padRing.rotation.x = Math.PI / 2;
+        group.add(padRing);
+        this.animatedObjects.push({ mesh: padRing, type: 'rotate', speed: index % 2 === 0 ? 0.01 : -0.012 });
+        this.registerCollidable({ x: pad.position.x, z: pad.position.z }, 23);
+      });
+
+      const lightPostGeom = new THREE.CylinderGeometry(0.45, 0.7, 9, 8);
+      const lightHeadGeom = new THREE.SphereGeometry(1.25, 10, 8);
+      const perimeterCount = Math.floor((highDetail ? 30 : 20) * detailScale);
+      for (let i = 0; i < perimeterCount; i++) {
+        const angle = (i / perimeterCount) * Math.PI * 2;
+        const radius = 318 + Math.sin(i * 2.13) * 18;
+        const x = center.x + Math.cos(angle) * radius;
+        const z = center.z + Math.sin(angle) * radius;
+        const y = this.getTerrainHeight(x, z);
+        const post = new THREE.Mesh(lightPostGeom, darkCargoMat);
+        post.position.set(x, y + 4.5, z);
+        group.add(post);
+
+        const head = new THREE.Mesh(lightHeadGeom, i % 3 === 0 ? glowCyan : glowAmber);
+        head.position.y = 4.8;
+        post.add(head);
+        this.animatedObjects.push({ mesh: head, type: 'blink', phase: i * 0.37 });
+      }
+
+      const cargoPositions = [
+        { x: -210, z: 92, yaw: 0.2 },
+        { x: 215, z: 84, yaw: -0.4 },
+        { x: -120, z: 255, yaw: 0.9 },
+        { x: 90, z: 285, yaw: -0.7 }
+      ];
+      cargoPositions.forEach((p, clusterIndex) => {
+        for (let i = 0; i < 5; i++) {
+          const crate = new THREE.Mesh(new THREE.BoxGeometry(9, 6 + (i % 2) * 3, 8), i % 2 ? cargoMat : darkCargoMat);
+          const localX = (i % 3) * 10 - 10;
+          const localZ = Math.floor(i / 3) * 12;
+          const c = Math.cos(p.yaw);
+          const s = Math.sin(p.yaw);
+          const x = center.x + p.x + localX * c - localZ * s;
+          const z = center.z + p.z + localX * s + localZ * c;
+          const y = this.getTerrainHeight(x, z);
+          crate.position.set(x, y + crate.geometry.parameters.height / 2, z);
+          crate.rotation.y = p.yaw + (i % 2) * 0.12;
+          crate.castShadow = true;
+          crate.receiveShadow = true;
+          group.add(crate);
+          if (i < 2) this.registerCollidable({ x, z }, 7);
+        }
+
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.9, 18, 8), darkCargoMat);
+        const mx = center.x + p.x + 28 * Math.cos(p.yaw + 0.8);
+        const mz = center.z + p.z + 28 * Math.sin(p.yaw + 0.8);
+        const my = this.getTerrainHeight(mx, mz);
+        mast.position.set(mx, my + 9, mz);
+        group.add(mast);
+        const mastHead = new THREE.Mesh(lightHeadGeom, glowCyan);
+        mastHead.position.y = 9.6;
+        mast.add(mastHead);
+        this.animatedObjects.push({ mesh: mastHead, type: 'blink', phase: clusterIndex * 0.9 });
+      });
+
+      const panelGeom = new THREE.BoxGeometry(18, 0.45, 9);
+      const strutGeom = new THREE.CylinderGeometry(0.35, 0.35, 5, 8);
+      for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 8; col++) {
+          if (!highDetail && col % 3 === 2) continue;
+          const x = center.x + 345 + col * 24;
+          const z = center.z - 120 + row * 32;
+          const y = this.getTerrainHeight(x, z);
+          const panel = new THREE.Mesh(panelGeom, panelMat);
+          panel.position.set(x, y + 4.2, z);
+          panel.rotation.x = -0.32;
+          panel.rotation.y = -0.18;
+          panel.castShadow = true;
+          group.add(panel);
+
+          const strut = new THREE.Mesh(strutGeom, darkCargoMat);
+          strut.position.set(x, y + 2.2, z);
+          group.add(strut);
+        }
+      }
+
+      const rockCount = Math.floor((highDetail ? 190 : 120) * detailScale);
+      const rockGeom = new THREE.DodecahedronGeometry(1, 0);
+      const rockMat = new THREE.MeshStandardMaterial({
+        color: 0x8a3f24,
+        roughness: 0.96,
+        metalness: 0.02
+      });
+      const rocks = new THREE.InstancedMesh(rockGeom, rockMat, rockCount);
+      const matrix = new THREE.Matrix4();
+      const quat = new THREE.Quaternion();
+      const scale = new THREE.Vector3();
+      const pos = new THREE.Vector3();
+      for (let i = 0; i < rockCount; i++) {
+        const angle = i * 2.399963 + Math.sin(i * 0.71) * 0.35;
+        const radius = 360 + (i % 37) * 13 + Math.sin(i * 1.91) * 26;
+        const x = center.x + Math.cos(angle) * radius;
+        const z = center.z + Math.sin(angle) * radius;
+        const y = this.getTerrainHeight(x, z);
+        pos.set(x, y + 0.55, z);
+        quat.setFromEuler(new THREE.Euler(Math.sin(i) * 0.6, angle, Math.cos(i * 0.7) * 0.35));
+        const s = 1.2 + (i % 9) * 0.24;
+        scale.set(s * (1.0 + (i % 3) * 0.18), s * 0.7, s * (0.9 + (i % 5) * 0.11));
+        matrix.compose(pos, quat, scale);
+        rocks.setMatrixAt(i, matrix);
+      }
+      rocks.castShadow = true;
+      rocks.receiveShadow = true;
+      group.add(rocks);
+
+      this.createRouteScanSites(group, center, groundY);
+      this.scene.add(group);
+    } catch (e) {
+      console.warn('Failed to create colony grounding details:', e);
+    }
+  }
+
+  createRouteScanSites(parentGroup, center, groundY) {
+    const perfSettings = getPerformanceSettings();
+    if (perfSettings.isMobile && perfSettings.mobileTier === 'low') return;
+
+    const siteOffsets = [
+      { x: -70, z: -95, color: 0x66eaff },
+      { x: -160, z: -235, color: 0xffcc66 },
+      { x: -265, z: -385, color: 0xaaff88 },
+      { x: -335, z: -525, color: 0xff88dd }
+    ];
+    const ringGeom = new THREE.TorusGeometry(10, 0.7, 8, 48);
+    const coreGeom = new THREE.OctahedronGeometry(3.2, 1);
+    const postGeom = new THREE.CylinderGeometry(0.45, 0.8, 7, 8);
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x202832, roughness: 0.5, metalness: 0.8 });
+
+    window.scanSiteProgress = window.scanSiteProgress || { reached: 0, total: siteOffsets.length };
+    this.scanSites = [];
+
+    siteOffsets.forEach((site, index) => {
+      const x = center.x + site.x;
+      const z = center.z + site.z;
+      const y = this.getTerrainHeight(x, z);
+      const group = new THREE.Group();
+      group.position.set(x, y, z);
+
+      const mat = new THREE.MeshBasicMaterial({ color: site.color });
+      const ring = new THREE.Mesh(ringGeom, mat);
+      ring.position.y = 0.55;
+      ring.rotation.x = Math.PI / 2;
+      group.add(ring);
+
+      const post = new THREE.Mesh(postGeom, postMat);
+      post.position.y = 3.5;
+      group.add(post);
+
+      const core = new THREE.Mesh(coreGeom, mat);
+      core.position.y = 9.2;
+      group.add(core);
+
+      parentGroup.add(group);
+      this.animatedObjects.push({ mesh: ring, type: 'rotate', speed: 0.018 + index * 0.004 });
+      this.animatedObjects.push({ mesh: core, type: 'blink', phase: index * 0.65 });
+      this.scanSites.push({ position: new THREE.Vector3(x, y, z), group, reached: false });
+    });
   }
 
   createLaunchSites() {
@@ -3382,6 +3655,24 @@ class MarsSceneManager {
       points.forEach((p, index) => {
         const group = new THREE.Group();
 
+        const padMaterial = new THREE.MeshStandardMaterial({
+          color: index === 0 ? 0x36505c : 0x2c3438,
+          roughness: 0.78,
+          metalness: 0.28
+        });
+        const pad = new THREE.Mesh(new THREE.CylinderGeometry(12, 12, 0.45, 16), padMaterial);
+        pad.position.y = 0.22;
+        pad.receiveShadow = true;
+        group.add(pad);
+
+        const checkpointRing = new THREE.Mesh(
+          new THREE.TorusGeometry(9.4, 0.42, 8, 48),
+          new THREE.MeshBasicMaterial({ color: index === points.length - 1 ? 0xffcc66 : 0x66ddff })
+        );
+        checkpointRing.position.y = 0.72;
+        checkpointRing.rotation.x = Math.PI / 2;
+        group.add(checkpointRing);
+
         // Base post
         const postMaterial = new THREE.MeshStandardMaterial({
           color: 0x223344,
@@ -3412,6 +3703,11 @@ class MarsSceneManager {
           mesh: light,
           type: 'blink',
           phase: index * 0.7
+        });
+        this.animatedObjects.push({
+          mesh: checkpointRing,
+          type: 'rotate',
+          speed: index % 2 === 0 ? 0.014 : -0.014
         });
 
         this.guidedRouteWaypoints.push({
@@ -3453,6 +3749,11 @@ class MarsSceneManager {
 
     const perfSettings = getPerformanceSettings();
     if (perfSettings.isMobile) return;
+
+    const roverIsDriving =
+      (typeof velocity === 'number' && Math.abs(velocity) > 0.012) ||
+      (window.keys && (window.keys.w || window.keys.a || window.keys.s || window.keys.d));
+    if (roverIsDriving) return;
 
     const px = playerPosition.x;
     const pz = playerPosition.z;
@@ -3513,6 +3814,8 @@ class MarsSceneManager {
         const dx = cx - px;
         const dz2 = cz - pz;
         if (dx * dx + dz2 * dz2 > this.settlementSpawnDist * this.settlementSpawnDist) continue;
+        const minSpawnDist = 260;
+        if (dx * dx + dz2 * dz2 < minSpawnDist * minSpawnDist) continue;
 
         // Determine settlement type from hash bits
         const typeBits = (hash >>> 24) & 0xff;
@@ -3528,6 +3831,9 @@ class MarsSceneManager {
 
         const collidableStart = this.collidables.length;
         const group = this._buildSettlement(type, center, hash);
+        for (let i = collidableStart; i < this.collidables.length; i++) {
+          this.collidables[i].dynamic = true;
+        }
         const collidableCount = this.collidables.length - collidableStart;
 
         this.scene.add(group);
@@ -3760,6 +4066,9 @@ class MarsSceneManager {
     const glow2Mat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.7 });
     const padMat  = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9, metalness: 0.2 });
     const glassMat = new THREE.MeshStandardMaterial({ color: 0x88ccff, metalness: 0.9, roughness: 0.05, transparent: true, opacity: 0.4 });
+    const plazaMat = new THREE.MeshStandardMaterial({ color: 0x31343a, roughness: 0.72, metalness: 0.32 });
+    const laneMat = new THREE.MeshBasicMaterial({ color: pal.accent, transparent: true, opacity: 0.78 });
+    const beaconMat = new THREE.MeshBasicMaterial({ color: pal.beacon });
 
     // Helper: twisted box tower
     const makeTwistedTower = (x, z, w, h, d, twist) => {
@@ -3882,6 +4191,184 @@ class MarsSceneManager {
       tunnel.position.set(mx, gy + 3, mz);
       tunnel.rotation.y = Math.atan2(dz, dx);
       group.add(tunnel);
+    };
+
+    const addFuturisticGroundLayer = () => {
+      const scale = type === 'city' ? 1.55 : type === 'base' ? 1.15 : 0.82;
+      const plazaRadius = type === 'city' ? 135 : type === 'base' ? 82 : 48;
+      const plaza = new THREE.Mesh(new THREE.CylinderGeometry(plazaRadius, plazaRadius, 0.45, 18), plazaMat);
+      plaza.position.set(cx, gy + 0.22, cz);
+      plaza.receiveShadow = true;
+      group.add(plaza);
+
+      const ringCount = type === 'city' ? 3 : 2;
+      for (let i = 0; i < ringCount; i++) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(plazaRadius * (0.46 + i * 0.22), 0.42, 8, 72), laneMat);
+        ring.position.set(cx, gy + 0.56 + i * 0.04, cz);
+        ring.rotation.x = Math.PI / 2;
+        group.add(ring);
+      }
+
+      const spokeCount = type === 'city' ? 8 : 5;
+      for (let i = 0; i < spokeCount; i++) {
+        const angle = (i / spokeCount) * Math.PI * 2;
+        const spoke = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.08, plazaRadius * 1.55), laneMat);
+        spoke.position.set(
+          cx + Math.sin(angle) * plazaRadius * 0.38,
+          gy + 0.7,
+          cz + Math.cos(angle) * plazaRadius * 0.38
+        );
+        spoke.rotation.y = angle;
+        group.add(spoke);
+      }
+
+      const markerCount = type === 'city' ? 12 : type === 'base' ? 8 : 5;
+      const markerGeom = new THREE.CylinderGeometry(0.8 * scale, 1.1 * scale, 5.5 * scale, 8);
+      for (let i = 0; i < markerCount; i++) {
+        const angle = (i / markerCount) * Math.PI * 2 + 0.15;
+        const x = cx + Math.cos(angle) * plazaRadius * 0.92;
+        const z = cz + Math.sin(angle) * plazaRadius * 0.92;
+        const marker = new THREE.Mesh(markerGeom, padMat);
+        marker.position.set(x, gy + 2.8 * scale, z);
+        group.add(marker);
+        const head = new THREE.Mesh(new THREE.SphereGeometry(1.3 * scale, 10, 8), beaconMat);
+        head.position.y = 3.1 * scale;
+        marker.add(head);
+      }
+
+      const padCount = type === 'city' ? 3 : type === 'base' ? 2 : 1;
+      for (let i = 0; i < padCount; i++) {
+        const angle = (i / padCount) * Math.PI * 2 + 0.62;
+        const dist = plazaRadius + 26 + i * 10;
+        const px = cx + Math.cos(angle) * dist;
+        const pz = cz + Math.sin(angle) * dist;
+        const pad = new THREE.Mesh(new THREE.CylinderGeometry(15 * scale, 15 * scale, 0.9, 12), padMat);
+        pad.position.set(px, gy + 0.45, pz);
+        group.add(pad);
+        const padRing = new THREE.Mesh(new THREE.TorusGeometry(12 * scale, 0.35, 8, 48), laneMat);
+        padRing.position.set(px, gy + 1.05, pz);
+        padRing.rotation.x = Math.PI / 2;
+        group.add(padRing);
+      }
+
+      const panelRows = type === 'city' ? 3 : 2;
+      const panelCols = type === 'city' ? 6 : 4;
+      const panelMat = new THREE.MeshStandardMaterial({
+        color: 0x12255d,
+        roughness: 0.16,
+        metalness: 0.75,
+        emissive: 0x061245,
+        emissiveIntensity: 0.25
+      });
+      for (let r = 0; r < panelRows; r++) {
+        for (let c = 0; c < panelCols; c++) {
+          const x = cx - plazaRadius * 0.55 + c * 10 * scale;
+          const z = cz + plazaRadius + 20 + r * 8 * scale;
+          const panel = new THREE.Mesh(new THREE.BoxGeometry(7 * scale, 0.28, 4 * scale), panelMat);
+          panel.position.set(x, gy + 3.2, z);
+          panel.rotation.x = -0.35;
+          panel.rotation.y = -0.12;
+          group.add(panel);
+          const support = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 3.3, 5), padMat);
+          support.position.set(x, gy + 1.7, z);
+          group.add(support);
+        }
+      }
+    };
+
+    const addModernArchitectureKit = () => {
+      const scale = type === 'city' ? 1.6 : type === 'base' ? 1.15 : 0.85;
+      const radius = type === 'city' ? 115 : type === 'base' ? 72 : 42;
+      const modernWallMat = new THREE.MeshStandardMaterial({
+        color: 0xe7edf5,
+        roughness: 0.16,
+        metalness: 0.92,
+        emissive: 0x101827,
+        emissiveIntensity: 0.28
+      });
+      const darkTrimMat = new THREE.MeshStandardMaterial({
+        color: 0x202833,
+        roughness: 0.28,
+        metalness: 0.88
+      });
+      const modernGlassMat = new THREE.MeshStandardMaterial({
+        color: 0x9ddfff,
+        roughness: 0.04,
+        metalness: 0.55,
+        transparent: true,
+        opacity: 0.52,
+        emissive: 0x2ca8ff,
+        emissiveIntensity: 0.42
+      });
+      const lightMat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.86 });
+
+      const commandW = 26 * scale;
+      const commandH = 12 * scale;
+      const commandD = 36 * scale;
+      const command = new THREE.Group();
+      command.position.set(cx + radius * 0.36, gy + commandH * 0.5, cz - radius * 0.34);
+      command.rotation.y = -0.42;
+      const body = new THREE.Mesh(new THREE.BoxGeometry(commandW, commandH, commandD), modernWallMat);
+      body.castShadow = true;
+      body.receiveShadow = true;
+      command.add(body);
+
+      const glassNose = new THREE.Mesh(new THREE.BoxGeometry(commandW * 0.72, commandH * 0.52, 0.7), modernGlassMat);
+      glassNose.position.set(0, commandH * 0.12, commandD * 0.5 + 0.45);
+      command.add(glassNose);
+
+      const roofBlade = new THREE.Mesh(new THREE.BoxGeometry(commandW * 0.9, 1.1, commandD * 0.72), darkTrimMat);
+      roofBlade.position.y = commandH * 0.54;
+      roofBlade.rotation.x = -0.08;
+      command.add(roofBlade);
+      group.add(command);
+      this.registerCollidable({ x: command.position.x, z: command.position.z }, Math.max(commandW, commandD) * 0.42);
+
+      const finCount = type === 'city' ? 8 : type === 'base' ? 5 : 3;
+      for (let i = 0; i < finCount; i++) {
+        const angle = (i / finCount) * Math.PI * 2 + 0.28;
+        const finH = (type === 'city' ? 56 : type === 'base' ? 38 : 24) * (0.78 + rand() * 0.44);
+        const dist = radius * (0.62 + rand() * 0.32);
+        const x = cx + Math.cos(angle) * dist;
+        const z = cz + Math.sin(angle) * dist;
+        const fin = new THREE.Mesh(new THREE.BoxGeometry(2.4 * scale, finH, 7 * scale), modernGlassMat);
+        fin.position.set(x, gy + finH * 0.5, z);
+        fin.rotation.y = -angle + Math.PI / 2;
+        fin.castShadow = true;
+        group.add(fin);
+
+        const spine = new THREE.Mesh(new THREE.BoxGeometry(0.7 * scale, finH * 0.82, 0.7 * scale), lightMat);
+        spine.position.set(0, 0, 3.9 * scale);
+        fin.add(spine);
+      }
+
+      const crownRadius = type === 'city' ? 42 : type === 'base' ? 28 : 18;
+      const crownY = gy + (type === 'city' ? 118 : type === 'base' ? 74 : 42) * scale;
+      const crown = new THREE.Mesh(new THREE.TorusGeometry(crownRadius, 0.85 * scale, 8, 72), lightMat);
+      crown.position.set(cx, crownY, cz);
+      crown.rotation.x = Math.PI / 2;
+      group.add(crown);
+
+      const beaconCore = new THREE.Mesh(new THREE.OctahedronGeometry(5.5 * scale, 1), modernGlassMat);
+      beaconCore.position.set(cx, crownY + 7 * scale, cz);
+      group.add(beaconCore);
+
+      if (type === 'city') {
+        const shardCount = 5;
+        for (let i = 0; i < shardCount; i++) {
+          const angle = (i / shardCount) * Math.PI * 2 + 0.17;
+          const h = 120 + rand() * 130;
+          const x = cx + Math.cos(angle) * (radius * 0.48);
+          const z = cz + Math.sin(angle) * (radius * 0.48);
+          const shard = new THREE.Mesh(new THREE.OctahedronGeometry(11 + rand() * 5, 0), modernGlassMat);
+          shard.scale.set(0.75, h / 22, 0.75);
+          shard.position.set(x, gy + h * 0.52, z);
+          shard.rotation.y = angle;
+          shard.rotation.z = (rand() - 0.5) * 0.12;
+          group.add(shard);
+          this.registerCollidable({ x, z }, 14);
+        }
+      }
     };
 
     // Pick a sub-variant for the settlement type
@@ -4397,6 +4884,9 @@ class MarsSceneManager {
       group.add(cityLight);
     }
 
+    addFuturisticGroundLayer();
+    addModernArchitectureKit();
+
     return group;
   }
 
@@ -4430,6 +4920,7 @@ class MarsSceneManager {
 
     // Procedural settlements â€” spawn/despawn based on proximity
     this.updateSettlements(playerPosition);
+    this.updateScanSites(playerPosition);
   }
 
   // Check if the player has reached the next guided-route waypoint
@@ -4460,6 +4951,33 @@ class MarsSceneManager {
         total: this.guidedRouteWaypoints.length
       };
     }
+  }
+
+  updateScanSites(playerPosition) {
+    if (!this.scanSites || this.scanSites.length === 0 || !playerPosition) return;
+
+    let reached = 0;
+    for (const site of this.scanSites) {
+      if (!site) continue;
+      if (!site.reached && playerPosition.distanceTo(site.position) < 24) {
+        site.reached = true;
+        if (site.group) {
+          site.group.scale.setScalar(0.72);
+          site.group.traverse(obj => {
+            if (obj.isMesh && obj.material && obj.material.color) {
+              obj.material = obj.material.clone();
+              obj.material.color.setHex(0x445566);
+            }
+          });
+        }
+      }
+      if (site.reached) reached++;
+    }
+
+    window.scanSiteProgress = {
+      reached,
+      total: this.scanSites.length
+    };
   }
 
   // Animate AI ground traffic along predefined routes
@@ -5256,6 +5774,87 @@ class MarsSceneManager {
 // Add a day/night toggle and cycle (isDaytime declared at top of file)
 console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
 
+function _smoothstep(edge0, edge1, x) {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+function _lerpColorHex(a, b, t) {
+  const ca = new THREE.Color(a);
+  const cb = new THREE.Color(b);
+  return ca.lerp(cb, t);
+}
+
+function updateDayNightCycle(time) {
+  const perfSettings = getPerformanceSettings();
+  const cycleProgress = ((time * dayNightCycleSpeed + dayNightCycleOffset) % 1 + 1) % 1;
+  currentTimeOfDay = cycleProgress;
+
+  const sunAngle = cycleProgress * Math.PI * 2;
+  const sunElevation = -Math.cos(sunAngle);
+  const dayAmount = _smoothstep(-0.22, 0.38, sunElevation);
+  const duskWarmth = 1 - Math.abs(dayAmount * 2 - 1);
+  window.dayNightBlend = dayAmount;
+  isDaytime = dayAmount > 0.08;
+
+  const nightFog = new THREE.Color(0x1a0703);
+  const dayFog = new THREE.Color(0xd06f3c);
+  const fogColor = nightFog.clone().lerp(dayFog, dayAmount).lerp(new THREE.Color(0xff8a45), duskWarmth * 0.16);
+  if (!scene.fog) {
+    scene.fog = new THREE.Fog(fogColor, 900, perfSettings.renderDistance || 5000);
+  } else {
+    scene.fog.color.copy(fogColor);
+    scene.fog.near = 700 - dayAmount * 360;
+    scene.fog.far = (perfSettings.renderDistance || 5000) * (0.72 + dayAmount * 0.32);
+  }
+  if (scene.background && scene.background.isColor) {
+    scene.background.copy(new THREE.Color(0x020308).lerp(new THREE.Color(0x87b8d8), dayAmount));
+  }
+
+  const daySunIntensity = perfSettings.isMobile ? 0.78 : 1.12;
+  const nightSunIntensity = perfSettings.isMobile ? 0.035 : 0.055;
+  const targetSunIntensity = nightSunIntensity + dayAmount * (daySunIntensity - nightSunIntensity);
+  const sunColorObj = _lerpColorHex(0x7d3c26, 0xffc06a, Math.min(1, dayAmount + duskWarmth * 0.25));
+
+  if (sunLight) {
+    sunLight.intensity = targetSunIntensity;
+    sunLight.color.copy(sunColorObj);
+    sunLight.position.set(Math.cos(sunAngle - Math.PI / 2) * 260, 90 + dayAmount * 420, Math.sin(sunAngle - Math.PI / 2) * 260);
+  }
+  if (sun) {
+    sun.intensity = targetSunIntensity * 0.82;
+    sun.color.copy(sunColorObj);
+    sun.position.copy(sunLight.position);
+  }
+
+  ambientLight.intensity = (perfSettings.samsungOptimized ? 0.18 : 0.12) + dayAmount * (perfSettings.isMobile ? 0.46 : 0.58);
+  ambientLight.color.copy(_lerpColorHex(0x3a2118, 0xffd4a0, dayAmount));
+  hemisphereLight.intensity = (perfSettings.isMobile ? 0.12 : 0.16) + dayAmount * (perfSettings.isMobile ? 0.34 : 0.46);
+  hemisphereLight.color.copy(_lerpColorHex(0x28304a, 0x8fb8ff, dayAmount));
+  hemisphereLight.groundColor.copy(_lerpColorHex(0x2a1008, 0xa64724, dayAmount));
+
+  if (sunSphere && sunSphere.material) {
+    sunSphere.visible = dayAmount > 0.015;
+    sunSphere.material.opacity = dayAmount * 0.78;
+    sunSphere.position.set(
+      Math.cos(sunAngle - Math.PI / 2) * 950,
+      160 + dayAmount * 760,
+      Math.sin(sunAngle - Math.PI / 2) * 950
+    );
+  }
+
+  if (spaceSkybox) {
+    spaceSkybox.visible = true;
+  }
+}
+
+function toggleDayNight() {
+  const now = (typeof performance !== 'undefined' && performance.now) ? performance.now() : 0;
+  const targetProgress = isDaytime ? 0.0 : 0.5;
+  dayNightCycleOffset = targetProgress - ((now * dayNightCycleSpeed) % 1);
+  updateDayNightCycle(now);
+}
+
 // Scene manager is created via loadNonEssentialComponents / initializeScene - no duplicate needed here
 let sceneManager = null;
 
@@ -5344,7 +5943,7 @@ function animate(time) {
 
   // Skip frames if browser tab is inactive or delta is too large (indicating lag)
   if (delta > 100) {
-    resetRoverMotion(true);
+    resetRoverMotion(false);
     return;
   }
   const frameScale = Math.min(delta / 16.67, 2.5);
@@ -5377,6 +5976,19 @@ function animate(time) {
                        currentPerfSettings.detailLevel === 'high' ? 1 : 
                        currentPerfSettings.detailLevel === 'normal' ? 2 : 3;
 
+  // Smooth day/night cycle: night at start, daylight after one minute.
+  if (typeof updateDayNightCycle === 'function') {
+    updateDayNightCycle(time);
+  }
+
+  // Keep the sky around the camera and update fades continuously on all devices.
+  if (spaceSkybox) {
+    spaceSkybox.position.copy(camera.position);
+    if (spaceSkybox.userData && spaceSkybox.userData.update) {
+      spaceSkybox.userData.update(time);
+    }
+  }
+
   // Optimize operations for mobile with tier-based updates
   if (currentPerfSettings.isMobile) {
     // Mobile scene manager updates - heavily throttled
@@ -5401,24 +6013,9 @@ function animate(time) {
       }
     }
   } else {
-    // Make the skybox follow the camera so the sky always surrounds the player
-    if (spaceSkybox) {
-      spaceSkybox.position.copy(camera.position);
-    }
-
     // Update meteor system if it exists and we're in night mode (throttled)
     if (window.meteorSystem && (!isDaytime || isTransitioning) && frameCount % frameThrottle === 0) {
       window.meteorSystem.update(delta);
-    }
-
-    // Update day/night cycle (throttled to every 10 frames for performance)
-    if (frameCount % 10 === 0 && typeof updateDayNightCycle === 'function') {
-      updateDayNightCycle(time);
-    }
-
-    // Update enhanced night sky (twinkling stars + shooting stars)
-    if (spaceSkybox && spaceSkybox.userData && spaceSkybox.userData.update && !isDaytime) {
-      spaceSkybox.userData.update(time);
     }
 
     // Update Mars Scene Manager if it exists (heavily throttled for performance)
@@ -6656,7 +7253,8 @@ function createSpaceSkybox() {
 
   const skyboxMaterial = new THREE.ShaderMaterial({
     uniforms: {
-      uTime: { value: 0.0 }
+      uTime: { value: 0.0 },
+      uDayAmount: { value: 0.0 }
     },
     vertexShader: `
       varying vec3 vWorldPos;
@@ -6667,6 +7265,7 @@ function createSpaceSkybox() {
     `,
     fragmentShader: `
       uniform float uTime;
+      uniform float uDayAmount;
       varying vec3 vWorldPos;
 
       // --- Hash / noise helpers (GPU-friendly) ---
@@ -6704,10 +7303,16 @@ function createSpaceSkybox() {
         vec3 dir = normalize(vWorldPos);
         float elevation = dir.y; // -1 bottom, +1 top
 
-        // --- Sky gradient: deep, dark Mars night (no blue wash) ---
-        vec3 zenith  = vec3(0.010, 0.013, 0.026); // near-black overhead
-        vec3 horizon = vec3(0.028, 0.016, 0.013); // faint dark rust at horizon
-        vec3 nadir   = vec3(0.0, 0.0, 0.0);       // black below
+        // --- Sky gradient: interpolates from deep Mars night to dusty daylight ---
+        vec3 nightZenith  = vec3(0.010, 0.013, 0.026);
+        vec3 nightHorizon = vec3(0.028, 0.016, 0.013);
+        vec3 nightNadir   = vec3(0.0, 0.0, 0.0);
+        vec3 dayZenith    = vec3(0.30, 0.47, 0.62);
+        vec3 dayHorizon   = vec3(0.86, 0.44, 0.25);
+        vec3 dayNadir     = vec3(0.33, 0.17, 0.10);
+        vec3 zenith  = mix(nightZenith, dayZenith, uDayAmount);
+        vec3 horizon = mix(nightHorizon, dayHorizon, uDayAmount);
+        vec3 nadir   = mix(nightNadir, dayNadir, uDayAmount);
 
         float t = elevation * 0.5 + 0.5; // remap to 0..1
         vec3 sky = mix(nadir, horizon, smoothstep(0.0, 0.45, t));
@@ -6745,7 +7350,7 @@ function createSpaceSkybox() {
 
           // Desaturated, dim so it's a hint of galaxy, not a glowing cloud
           vec3 milkyColor = vec3(0.28, 0.32, 0.44);
-          sky += milkyColor * milky * 0.26;
+          sky += milkyColor * milky * 0.26 * (1.0 - uDayAmount);
         }
 
         // Stars are drawn by the dedicated particle layer (createTwinklingStars),
@@ -6787,6 +7392,9 @@ function createSpaceSkybox() {
   skyboxGroup.userData.update = function(time) {
     // Update shader time uniform
     skyboxMaterial.uniforms.uTime.value = time;
+    if (typeof window.dayNightBlend === 'number') {
+      skyboxMaterial.uniforms.uDayAmount.value = window.dayNightBlend;
+    }
     // Twinkle stars
     if (starSystem && starSystem.update) starSystem.update(time);
     // Shooting stars
@@ -6906,7 +7514,8 @@ function createTwinklingStars() {
     uniforms: {
       uTime: { value: 0.0 },
       uTexture: { value: starTexture },
-      uScale: { value: window.innerHeight * dpr * 0.5 } // matches three.js size attenuation
+      uScale: { value: window.innerHeight * dpr * 0.5 }, // matches three.js size attenuation
+      uVisibility: { value: 1.0 }
     },
     vertexShader: `
       attribute float aSize;
@@ -6935,11 +7544,12 @@ function createTwinklingStars() {
     `,
     fragmentShader: `
       uniform sampler2D uTexture;
+      uniform float uVisibility;
       varying vec3 vColor;
       varying float vTwinkle;
       void main() {
         vec4 tex = texture2D(uTexture, gl_PointCoord);
-        gl_FragColor = vec4(vColor, 1.0) * tex * (0.45 + vTwinkle);
+        gl_FragColor = vec4(vColor, 1.0) * tex * (0.45 + vTwinkle) * uVisibility;
       }
     `,
     transparent: true,
@@ -6955,6 +7565,8 @@ function createTwinklingStars() {
     points,
     update(time) {
       material.uniforms.uTime.value = time;
+      const dayBlend = typeof window.dayNightBlend === 'number' ? window.dayNightBlend : 0;
+      material.uniforms.uVisibility.value = Math.max(0.04, 1.0 - dayBlend * 0.96);
       // Keep size attenuation correct if the window was resized
       const d = (renderer && renderer.getPixelRatio) ? renderer.getPixelRatio() : (window.devicePixelRatio || 1);
       material.uniforms.uScale.value = window.innerHeight * d * 0.5;

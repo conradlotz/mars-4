@@ -1433,7 +1433,8 @@
             if (typeof this.player.pauseVideo === 'function') {
               this.player.pauseVideo();
               this.isPlaying = false;
-              document.getElementById('youtube-play-pause').textContent = 'Play';
+              const playPauseButton = document.getElementById('youtube-play-pause');
+              if (playPauseButton) playPauseButton.textContent = 'Play';
               console.log('YouTube playback paused');
             } else {
               console.error('pauseVideo method not available on player object');
@@ -1443,7 +1444,8 @@
               console.log('Starting YouTube playback...');
               this.player.playVideo();
               this.isPlaying = true;
-              document.getElementById('youtube-play-pause').textContent = 'Pause';
+              const playPauseButton = document.getElementById('youtube-play-pause');
+              if (playPauseButton) playPauseButton.textContent = 'Pause';
               console.log('YouTube playback started');
             } else {
               console.error('playVideo method not available on player object');
@@ -1466,7 +1468,8 @@
             console.log('Force starting YouTube playback...');
             this.player.playVideo();
             this.isPlaying = true;
-            document.getElementById('youtube-play-pause').textContent = 'Pause';
+            const playPauseButton = document.getElementById('youtube-play-pause');
+            if (playPauseButton) playPauseButton.textContent = 'Pause';
             console.log('YouTube playback force started');
           } else {
             console.error('playVideo method not available for force play');
