@@ -474,6 +474,11 @@ const terrainSystem = {
 const COLONY_SITE_X = -400;
 const COLONY_SITE_Z = -600;
 
+// Spaceport ~1.1 km west-north-west of the colony: far enough that engine
+// blast and flying regolith never reach the habitats
+const SPACEPORT_X = -1350;
+const SPACEPORT_Z = -1000;
+
 // Create and add the realistic Mars terrain
 const marsSurface = createRealisticMarsTerrain();
 scene.add(marsSurface);
@@ -1967,8 +1972,14 @@ class TrafficPath {
 // Suspended regolith kicked up by the trucks. Mars' thin air carries little
 // dust, so plumes are faint and settle under 0.38 g rather than billowing.
 class TruckDust {
-  constructor(scene, capacity) {
+  // options: size/grow (m), opacity, gravity (fraction of g), drag (1/s)
+  constructor(scene, capacity, options = {}) {
     this.capacity = capacity;
+    this.sizeBase = options.size ?? 0.8;
+    this.sizeGrow = options.grow ?? 3.2;
+    this.opacity = options.opacity ?? 0.32;
+    this.gravity = options.gravity ?? 0.25;
+    this.dragRate = options.drag ?? 1.2;
     this.next = 0;
     this.pos = new Float32Array(capacity * 3);
     this.vel = new Float32Array(capacity * 3);
@@ -2030,19 +2041,19 @@ class TruckDust {
   }
 
   update(dt, lightLevel) {
-    const drag = Math.max(0, 1 - 1.2 * dt);
+    const drag = Math.max(0, 1 - this.dragRate * dt);
     for (let i = 0; i < this.capacity; i++) {
       const t = this.life[i] / this.maxLife[i];
       if (t >= 1) { this.alpha[i] = 0; continue; }
       this.life[i] += dt;
-      this.vel[i * 3 + 1] -= MARS_GRAVITY * 0.25 * dt; // fines stay aloft longer than grit
+      this.vel[i * 3 + 1] -= MARS_GRAVITY * this.gravity * dt; // fines stay aloft longer than grit
       this.vel[i * 3] *= drag; this.vel[i * 3 + 1] *= drag; this.vel[i * 3 + 2] *= drag;
       this.pos[i * 3] += this.vel[i * 3] * dt;
       this.pos[i * 3 + 1] += this.vel[i * 3 + 1] * dt;
       this.pos[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
       const fadeIn = Math.min(1, t * 8);
-      this.alpha[i] = fadeIn * Math.pow(1 - t, 1.6) * 0.32;
-      this.size[i] = 0.8 + t * 3.2;
+      this.alpha[i] = fadeIn * Math.pow(1 - t, 1.6) * this.opacity;
+      this.size[i] = this.sizeBase + t * this.sizeGrow;
     }
     this.posAttr.needsUpdate = true;
     this.alphaAttr.needsUpdate = true;
@@ -2166,7 +2177,9 @@ class CybertruckFleet {
     ];
   }
 
-  // options: { lane, cruise, s, dir, uturnReach, tag }
+  // options: { lane, cruise, s, dir, uturnReach, tag, dwell }
+  // dwell: [min, max] seconds parked at each end of an open road (loading at
+  // the mine, unloading at the plant) before turning round
   addVehicle(path, options = {}) {
     if (this.vehicles.length >= this.capacity) return null;
     const v = {
@@ -2191,6 +2204,8 @@ class CybertruckFleet {
       spin: Math.random() * Math.PI * 2,
       finish: this.finishes[Math.floor(Math.random() * this.finishes.length)],
       dustCarry: 0,
+      dwell: options.dwell || null,
+      wait: 0,
       initialised: false
     };
     this.vehicles.push(v);
@@ -2253,19 +2268,37 @@ class CybertruckFleet {
         const path = v.path;
         if (!path.closed) {
           const remain = v.dir > 0 ? path.length - v.s : v.s;
+          // Stopping at the bay, or rolling into the U-turn
+          const endSpeed = v.dwell ? 0 : UTURN_SPEED;
           targetSpeed = Math.min(targetSpeed,
-            Math.sqrt(UTURN_SPEED * UTURN_SPEED + 2 * BRAKE * Math.max(0, remain - 1)));
+            Math.sqrt(endSpeed * endSpeed + 2 * BRAKE * Math.max(0, remain - 1)));
+          if (v.dwell && remain < 1.5 && v.speed < 0.6) {
+            v.mode = 'dwell';
+            v.wait = v.dwell[0] + Math.random() * (v.dwell[1] - v.dwell[0]);
+            targetSpeed = 0;
+          }
         }
 
         // Car following: keep a two-second gap to the truck ahead in lane
         for (const u of this.vehicles) {
-          if (u === v || u.path !== path || u.dir !== v.dir || u.mode !== 'drive') continue;
+          if (u === v || u.path !== path || u.dir !== v.dir || (u.mode !== 'drive' && u.mode !== 'dwell')) continue;
           let gap = (u.s - v.s) * v.dir;
           if (path.closed && gap < 0) gap += path.length;
           if (gap > 0 && gap < 45) {
             const safe = 8 + v.speed * 1.2;
             targetSpeed = Math.min(targetSpeed, Math.max(0, u.speed + (gap - safe) * 0.6));
           }
+        }
+      } else if (v.mode === 'dwell') {
+        targetSpeed = 0;
+        v.wait -= dt;
+        if (v.wait <= 0) {
+          // Loaded (or emptied): swing round and head back
+          const smp = v.path.sample(v.s, this._sample);
+          const tfx = smp.tx * v.dir, tfz = smp.tz * v.dir;
+          v.turn = { cx: smp.x, cz: smp.z, fx: tfx, fz: tfz, rx: -tfz, rz: tfx };
+          v.mode = 'uturn';
+          v.theta = 0;
         }
       } else {
         targetSpeed = UTURN_SPEED;
@@ -2321,7 +2354,7 @@ class CybertruckFleet {
           fx /= len; fz /= len;
         }
       }
-      if (v.mode === 'drive') {
+      if (v.mode === 'drive' || v.mode === 'dwell') {
         this._placeOnPath(v, place);
         v.position.x = place.x;
         v.position.z = place.z;
@@ -2524,25 +2557,6 @@ function resamplePath(controlPoints, spacing, closed = false) {
   return pts;
 }
 
-// Dashed centre line as separate short ribbons
-function buildDashedLine(points, dash, gap, halfWidth, lift) {
-  const parts = [];
-  let run = [];
-  let travelled = 0;
-  for (let i = 0; i < points.length; i++) {
-    if (i > 0) travelled += Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z);
-    const onDash = travelled % (dash + gap) < dash;
-    if (onDash) run.push(points[i]);
-    if ((!onDash || i === points.length - 1) && run.length >= 2) {
-      parts.push(buildDrapedRibbon(run, halfWidth, lift));
-      run = [];
-    } else if (!onDash) {
-      run = [];
-    }
-  }
-  return parts;
-}
-
 // Round turnaround pad draped over the terrain
 function buildDrapedDisc(cx, cz, radius, lift) {
   const rings = 4, sectors = 24;
@@ -2567,6 +2581,668 @@ function buildDrapedDisc(cx, cz, radius, lift) {
 }
 
 
+// ---------------------------------------------------------------------------
+// Shared helpers for merged, low-draw-call architecture
+// ---------------------------------------------------------------------------
+
+// Transform matrix from position, Euler rotation and scale
+function _xf(x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1, order = 'XYZ') {
+  return new THREE.Matrix4().compose(
+    new THREE.Vector3(x, y, z),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz, order)),
+    new THREE.Vector3(sx, sy, sz)
+  );
+}
+
+// Merge [{ geometry, matrix }] into one non-indexed geometry, keeping each
+// part's own (smooth) normals and UVs. Source geometries are disposed.
+function mergeGeometryList(parts) {
+  const prepared = [];
+  let count = 0;
+  for (const { geometry, matrix } of parts) {
+    const g = geometry.index ? geometry.toNonIndexed() : geometry.clone();
+    geometry.dispose();
+    if (!g.attributes.normal) g.computeVertexNormals();
+    if (matrix) g.applyMatrix4(matrix);
+    prepared.push(g);
+    count += g.attributes.position.count;
+  }
+  const pos = new Float32Array(count * 3);
+  const nor = new Float32Array(count * 3);
+  const uv = new Float32Array(count * 2);
+  let o = 0;
+  for (const g of prepared) {
+    pos.set(g.attributes.position.array, o * 3);
+    nor.set(g.attributes.normal.array, o * 3);
+    if (g.attributes.uv) uv.set(g.attributes.uv.array, o * 2);
+    o += g.attributes.position.count;
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  out.computeBoundingSphere();
+  return out;
+}
+
+// Roughen a geometry so regolith berms and shielding mounds read as heaped
+// soil rather than machined shapes. Displacement is a function of position,
+// so coincident vertices move together and no cracks open.
+function lumpify(geometry, amount, scale = 0.35) {
+  const p = geometry.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const n = Math.sin(x * scale * 1.3 + z * scale * 0.7) * Math.cos(z * scale * 1.1 - y * scale * 0.9) +
+              0.5 * Math.sin(x * scale * 3.1 - y * scale * 2.3 + z * scale * 2.7);
+    const len = Math.hypot(x, y, z) || 1;
+    const k = 1 + (n * amount) / len;
+    p.setXYZ(i, x * k, y * k, z * k);
+  }
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+// ---------------------------------------------------------------------------
+// Starship spaceport
+// ---------------------------------------------------------------------------
+
+// Ship proportions (m). gear = height of the thrust puck above the landing
+// feet; the ship stands 52.8 m tall on its legs, 9 m in diameter.
+const STARSHIP = { radius: 4.5, gear: 2.8, barrel: 39, nose: 11 };
+
+// Geometries for one ship: stainless (leeward), black heat-shield tiles
+// (windward, local +Z) and engines.
+function buildStarshipGeometries() {
+  const R = STARSHIP.radius, G = STARSHIP.gear, B = STARSHIP.barrel, N = STARSHIP.nose;
+  const steel = [], tiles = [], engines = [];
+  const add = (list, geometry, matrix = null) => list.push({ geometry, matrix });
+
+  // Barrel, split down the middle: tiles on the belly, bare steel on the back
+  add(tiles, new THREE.CylinderGeometry(R, R, B, 48, 1, true, -Math.PI / 2, Math.PI), _xf(0, G + B / 2, 0));
+  add(steel, new THREE.CylinderGeometry(R, R, B, 48, 1, true, Math.PI / 2, Math.PI), _xf(0, G + B / 2, 0));
+
+  // Ogive nose
+  const profile = [];
+  for (let i = 0; i <= 14; i++) {
+    const t = i / 14;
+    profile.push(new THREE.Vector2(Math.max(0.2, R * Math.pow(1 - t * t, 0.55)), G + B + t * N));
+  }
+  add(tiles, new THREE.LatheGeometry(profile, 48, -Math.PI / 2, Math.PI));
+  add(steel, new THREE.LatheGeometry(profile, 48, Math.PI / 2, Math.PI));
+
+  // Flaps: plates on either side, tiled on their windward face
+  for (const side of [-1, 1]) {
+    // forward flaps, near the nose
+    add(tiles, new THREE.BoxGeometry(2.6, 7, 0.2), _xf(side * (R + 1.0), G + B + 1.5, R * 0.35 + 0.1, 0, 0, side * -0.18));
+    add(steel, new THREE.BoxGeometry(2.6, 7, 0.2), _xf(side * (R + 1.0), G + B + 1.5, R * 0.35 - 0.1, 0, 0, side * -0.18));
+    // aft flaps
+    add(tiles, new THREE.BoxGeometry(3.8, 11, 0.25), _xf(side * (R + 1.6), G + 8, R * 0.35 + 0.12));
+    add(steel, new THREE.BoxGeometry(3.8, 11, 0.25), _xf(side * (R + 1.6), G + 8, R * 0.35 - 0.12));
+  }
+
+  // Six landing legs (Mars ships land on unprepared ground)
+  const legTop = G + 3, legOut = 1.3;
+  const legLen = Math.hypot(legOut, legTop);
+  const tilt = Math.atan2(legOut, legTop);
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * Math.PI * 2 + Math.PI / 6;
+    const midR = R - 0.4 + legOut / 2;
+    add(steel, new THREE.BoxGeometry(0.5, legLen, 0.7),
+      _xf(Math.cos(a) * midR, legTop / 2, -Math.sin(a) * midR, 0, a, tilt, 1, 1, 1, 'YXZ'));
+    const footR = R - 0.4 + legOut;
+    add(steel, new THREE.CylinderGeometry(0.8, 0.9, 0.3, 12), _xf(Math.cos(a) * footR, 0.15, -Math.sin(a) * footR));
+  }
+
+  // Thrust puck and six Raptors: three sea-level, three vacuum bells
+  add(engines, new THREE.CircleGeometry(R, 40), _xf(0, G, 0, Math.PI / 2));
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2;
+    add(engines, new THREE.CylinderGeometry(0.34, 0.66, 1.5, 18, 1, true), _xf(Math.cos(a) * 1.25, G - 0.75, Math.sin(a) * 1.25));
+    const b = a + Math.PI / 3;
+    add(engines, new THREE.CylinderGeometry(0.5, 1.2, 2.4, 20, 1, true), _xf(Math.cos(b) * 2.9, G - 1.2, Math.sin(b) * 2.9));
+  }
+
+  return {
+    steel: mergeGeometryList(steel),
+    tiles: mergeGeometryList(tiles),
+    engines: mergeGeometryList(engines)
+  };
+}
+
+// Engine plume: an open cone widened in the vertex shader, glowing from a
+// blue-white core to a faint orange tail. Mars' thin air lets it fan out.
+function createPlumeMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uLen: { value: 40 },
+      uR0: { value: 3.2 },
+      uR1: { value: 9 },
+      uThrottle: { value: 0 },
+      uCore: { value: new THREE.Color(2.2, 2.1, 2.4) },
+      uOuter: { value: new THREE.Color(1.5, 0.62, 0.22) }
+    },
+    vertexShader: `
+      uniform float uLen, uR0, uR1;
+      varying float vT;
+      varying vec3 vN;
+      varying vec3 vV;
+      void main() {
+        float t = clamp(-position.y, 0.0, 1.0);
+        vT = t;
+        vec3 p = position;
+        p.xz *= mix(uR0, uR1, pow(t, 0.7));
+        p.y *= uLen;
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        vV = -mv.xyz;
+        vN = normalMatrix * normal;
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: `
+      uniform float uThrottle;
+      uniform vec3 uCore, uOuter;
+      varying float vT;
+      varying vec3 vN;
+      varying vec3 vV;
+      void main() {
+        float facing = abs(dot(normalize(vN), normalize(vV)));
+        float a = pow(facing, 1.5) * pow(1.0 - vT, 1.7) * uThrottle;
+        vec3 col = mix(uCore, uOuter, smoothstep(0.03, 0.5, vT));
+        gl_FragColor = vec4(col, a);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    fog: false
+  });
+}
+
+// Entry plasma sheath hugging the heat shield
+function createPlasmaMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: { uHeat: { value: 0 } },
+    vertexShader: `
+      varying vec3 vN;
+      varying vec3 vV;
+      void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vV = -mv.xyz;
+        vN = normalMatrix * normal;
+        gl_Position = projectionMatrix * mv;
+      }
+    `,
+    fragmentShader: `
+      uniform float uHeat;
+      varying vec3 vN;
+      varying vec3 vV;
+      void main() {
+        float facing = abs(dot(normalize(vN), normalize(vV)));
+        float a = uHeat * (0.25 + 0.75 * pow(1.0 - facing, 1.4));
+        gl_FragColor = vec4(1.0, 0.45 + 0.2 * facing, 0.22, a);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    fog: false
+  });
+}
+
+// A fleet of Starships flying real mission profiles from a spaceport a safe
+// distance from the colony: refuel on the pad, ignite, climb vertically and
+// pitch over downrange; returning ships fall belly-first through entry,
+// flip upright and land on a landing burn. Every ship keeps its own
+// schedule, so launches and landings interleave.
+class StarshipSpaceport {
+  // site: { x, z, y, ux, uz } - centre, ground height and unit vector
+  // pointing from the spaceport toward the colony
+  constructor(scene, site, options = {}) {
+    this.scene = scene;
+    this.site = site;
+    // Scratch objects (no per-frame allocation)
+    this._yAxis = new THREE.Vector3(0, 1, 0);
+    this._axis = new THREE.Vector3();
+    this._qYaw = new THREE.Quaternion();
+    this._qTilt = new THREE.Quaternion();
+    this._down = new THREE.Vector3();
+    const perf = getPerformanceSettings();
+    this.isMobile = !!perf.isMobile;
+    const shipCount = options.shipCount || (this.isMobile ? 3 : 6);
+
+    const U = { x: site.ux, z: site.uz };
+    const V = { x: -site.uz, z: site.ux };
+    this.U = U;
+    this.V = V;
+    this.local = (u, v) => ({ x: site.x + U.x * u + V.x * v, z: site.z + U.z * u + V.z * v });
+
+    // Launches head away from the colony, never over it
+    this.downrange = { x: -U.x, z: -U.z };
+
+    // Six pads in a line, a service spine behind them, the hub toward the colony
+    this.padSpacing = 120;
+    this.pads = [];
+    for (let i = 0; i < 6; i++) {
+      const p = this.local(-60, (i - 2.5) * this.padSpacing);
+      this.pads.push({ x: p.x, z: p.z, y: sampleTerrainHeight(p.x, p.z) + 0.7 });
+    }
+
+    this._buildGround(options.roadMaterials);
+    this._buildFacilities();
+
+    // Ships
+    const geoms = buildStarshipGeometries();
+    const steelMat = new THREE.MeshStandardMaterial({
+      color: 0xa4a7aa,
+      metalness: 1.0,
+      roughness: 0.3,
+      roughnessMap: createBrushedSteelTexture(),
+      envMapIntensity: 1.1,
+      fog: false
+    });
+    const tileMat = new THREE.MeshStandardMaterial({ color: 0x0a0a0c, metalness: 0.0, roughness: 0.82, fog: false });
+    const engineMat = new THREE.MeshStandardMaterial({
+      color: 0x3a3632, metalness: 0.85, roughness: 0.45, side: THREE.DoubleSide, fog: false
+    });
+
+    // Engine glow: a constant-screen-size flare, so a launch or landing
+    // burn reads from the colony kilometres away, like the real thing
+    const flareCanvas = document.createElement('canvas');
+    flareCanvas.width = flareCanvas.height = 64;
+    const fctx = flareCanvas.getContext('2d');
+    const grad = fctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, 'rgba(255,255,255,1)');
+    grad.addColorStop(0.2, 'rgba(255,228,190,0.85)');
+    grad.addColorStop(0.5, 'rgba(255,150,70,0.25)');
+    grad.addColorStop(1, 'rgba(255,120,40,0)');
+    fctx.fillStyle = grad;
+    fctx.fillRect(0, 0, 64, 64);
+    const flareTex = new THREE.CanvasTexture(flareCanvas);
+
+    const plumeGeom = new THREE.CylinderGeometry(1, 1, 1, 28, 12, true);
+    plumeGeom.translate(0, -0.5, 0);
+    const plasmaGeom = new THREE.SphereGeometry(1, 28, 18);
+
+    this.ships = [];
+    for (let i = 0; i < shipCount; i++) {
+      const group = new THREE.Group();
+      const steel = new THREE.Mesh(geoms.steel, steelMat);
+      const tiles = new THREE.Mesh(geoms.tiles, tileMat);
+      const engines = new THREE.Mesh(geoms.engines, engineMat);
+      steel.castShadow = tiles.castShadow = true;
+      steel.receiveShadow = tiles.receiveShadow = true;
+      group.add(steel, tiles, engines);
+
+      const plumeMat = createPlumeMaterial();
+      const plume = new THREE.Mesh(plumeGeom, plumeMat);
+      plume.position.y = STARSHIP.gear - 1.6;
+      plume.frustumCulled = false;
+      plume.visible = false;
+      group.add(plume);
+
+      const plasmaMat = createPlasmaMaterial();
+      const plasma = new THREE.Mesh(plasmaGeom, plasmaMat);
+      plasma.position.set(0, STARSHIP.gear + (STARSHIP.barrel + STARSHIP.nose) / 2, STARSHIP.radius * 0.45);
+      plasma.scale.set(STARSHIP.radius * 1.55, (STARSHIP.barrel + STARSHIP.nose) * 0.62, STARSHIP.radius * 1.55);
+      plasma.visible = false;
+      group.add(plasma);
+
+      const flare = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: flareTex, color: 0xffe2c0, blending: THREE.AdditiveBlending,
+        depthWrite: false, transparent: true, sizeAttenuation: false, fog: false
+      }));
+      flare.position.y = STARSHIP.gear - 4;
+      flare.visible = false;
+      group.add(flare);
+
+      scene.add(group);
+
+      const pad = this.pads[i % this.pads.length];
+      // Stagger: most ships start on the pad refuelling, a few are inbound
+      const inbound = i % 3 === 1;
+      const ship = {
+        group, plume, plumeMat, plasma, plasmaMat, flare, pad,
+        state: inbound ? 'away' : 'pad',
+        t: 0,
+        timer: inbound ? 4 + i * 9 : 10 + i * 17 + Math.random() * 10,
+        throttle: 0,
+        heat: 0,
+        pos: new THREE.Vector3(pad.x, pad.y, pad.z),
+        vel: new THREE.Vector3(),
+        approach: this._approachDir(),
+        // On the pad the bare steel faces the colony
+        belly: { x: this.downrange.x, z: this.downrange.z },
+        dustCarry: 0
+      };
+      this._pose(ship, this.downrange, 0, ship.belly);
+      group.visible = !inbound;
+      this.ships.push(ship);
+    }
+
+    // One shared engine light (a fixed light count avoids shader recompiles)
+    this.engineLight = new THREE.PointLight(0xffc48a, 0, 900, 1.2);
+    scene.add(this.engineLight);
+
+    this.dust = new TruckDust(scene, this.isMobile ? 500 : 1600,
+      { size: 4, grow: 38, opacity: 0.42, gravity: 0.02, drag: 0.45 });
+
+  }
+
+  // Returning ships come in from the far side, spread over a 50 degree arc
+  _approachDir() {
+    const a = (Math.random() - 0.5) * 0.9;
+    const c = Math.cos(a), s = Math.sin(a);
+    return { x: this.downrange.x * c - this.downrange.z * s, z: this.downrange.x * s + this.downrange.z * c };
+  }
+
+  // Orient a ship: nose tilted by `tilt` radians from vertical toward the
+  // horizontal direction d. The tiled belly (+Z) faces `belly`; by default
+  // opposite d, which puts it on the underside when the ship lies flat.
+  _pose(ship, d, tilt, belly = null) {
+    const yaw = belly ? Math.atan2(belly.x, belly.z) : Math.atan2(-d.x, -d.z);
+    this._qYaw.setFromAxisAngle(this._yAxis, yaw);
+    const axis = this._axis.set(d.z, 0, -d.x); // up x d
+    if (axis.lengthSq() < 1e-8) axis.set(1, 0, 0);
+    axis.normalize();
+    this._qTilt.setFromAxisAngle(axis, tilt);
+    ship.group.quaternion.copy(this._qTilt).multiply(this._qYaw);
+    ship.group.position.copy(ship.pos);
+  }
+
+  _buildGround(roadMaterials) {
+    const site = this.site;
+    const padSurface = [], berms = [], markings = [];
+    const padMat = new THREE.MeshStandardMaterial({ color: 0x3a302b, roughness: 0.92, metalness: 0.05 });
+    const bermMat = new THREE.MeshStandardMaterial({ color: 0x8f3416, roughness: 1.0, metalness: 0.0 });
+    const markMat = new THREE.MeshStandardMaterial({ color: 0x8a8580, roughness: 0.7, metalness: 0.0 });
+    const toColony = Math.atan2(this.U.z, this.U.x);
+
+    for (const pad of this.pads) {
+      // Sintered-regolith landing pad
+      padSurface.push({ geometry: new THREE.CylinderGeometry(24, 27, 1.4, 48), matrix: _xf(pad.x, pad.y - 0.7, pad.z) });
+      markings.push({ geometry: new THREE.RingGeometry(15, 16.2, 64), matrix: _xf(pad.x, pad.y + 0.02, pad.z, -Math.PI / 2) });
+      markings.push({ geometry: new THREE.RingGeometry(21.5, 22.2, 64), matrix: _xf(pad.x, pad.y + 0.02, pad.z, -Math.PI / 2) });
+
+      // Horseshoe blast berm, open toward the service road
+      const arc = Math.PI * 1.45;
+      const gap = arc + (Math.PI * 2 - arc) / 2;
+      const yaw = -gap - toColony;
+      const berm = lumpify(new THREE.TorusGeometry(46, 6, 10, 72, arc), 1.2, 0.25);
+      berms.push({ geometry: berm, matrix: _xf(pad.x, pad.y - 2.2, pad.z, -Math.PI / 2, yaw, 0, 1, 1, 0.75, 'YXZ') });
+    }
+
+    const padMesh = new THREE.Mesh(mergeGeometryList(padSurface), padMat);
+    padMesh.receiveShadow = true;
+    const bermMesh = new THREE.Mesh(mergeGeometryList(berms), bermMat);
+    bermMesh.receiveShadow = bermMesh.castShadow = true;
+    const markMesh = new THREE.Mesh(mergeGeometryList(markings), markMat);
+    this.scene.add(padMesh, bermMesh, markMesh);
+
+    // Service roads: a spine behind the pads, a spur to each pad and a link
+    // to the hub where the haul road from the colony arrives
+    if (roadMaterials) {
+      const roads = [];
+      const n = this.pads.length;
+      const spine = [];
+      for (let i = 0; i <= 20; i++) {
+        const v = ((i / 20) - 0.5) * (n - 1) * this.padSpacing;
+        const p = this.local(15, v);
+        spine.push(new THREE.Vector3(p.x, 0, p.z));
+      }
+      roads.push(spine);
+      this.pads.forEach((pad, i) => {
+        const v = (i - 2.5) * this.padSpacing;
+        const a = this.local(15, v), b = this.local(-28, v);
+        roads.push(resamplePath([new THREE.Vector3(a.x, 0, a.z), new THREE.Vector3(b.x, 0, b.z)], 4, false));
+      });
+      const h0 = this.local(15, 0), h1 = this.local(this.hubU, 0);
+      roads.push(resamplePath([new THREE.Vector3(h0.x, 0, h0.z), new THREE.Vector3(h1.x, 0, h1.z)], 4, false));
+      roads.forEach(points => {
+        const mesh = new THREE.Mesh(buildDrapedRibbon(points, 4, 0.1, false), roadMaterials.surface);
+        mesh.receiveShadow = true;
+        this.scene.add(mesh);
+      });
+    }
+  }
+
+  get hubU() { return 150; }
+
+  _buildFacilities() {
+    const white = [], bands = [], regolith = [], metal = [], lamps = [];
+    const ground = (u, v) => { const p = this.local(u, v); return { x: p.x, z: p.z, y: sampleTerrainHeight(p.x, p.z) }; };
+    const yawU = Math.atan2(this.U.x, this.U.z);
+
+    // Propellant farm: methane and oxygen made by the colony's ISRU plant
+    for (let row = 0; row < 2; row++) {
+      for (let k = 0; k < 4; k++) {
+        const g = ground(this.hubU + 30 + k * 14, -55 - row * 15);
+        white.push({ geometry: new THREE.CylinderGeometry(5, 5, 24, 24), matrix: _xf(g.x, g.y + 12, g.z) });
+        white.push({ geometry: new THREE.SphereGeometry(5, 24, 8, 0, Math.PI * 2, 0, Math.PI / 2), matrix: _xf(g.x, g.y + 24, g.z) });
+        bands.push({ geometry: new THREE.CylinderGeometry(5.06, 5.06, 1.4, 24, 1, true), matrix: _xf(g.x, g.y + 17, g.z) });
+        metal.push({ geometry: new THREE.CylinderGeometry(5.4, 5.6, 1.2, 24), matrix: _xf(g.x, g.y + 0.6, g.z) });
+      }
+    }
+    // Launch control: a regolith-shielded bunker with a lit window slot
+    {
+      const g = ground(this.hubU + 20, 55);
+      const dome = lumpify(new THREE.SphereGeometry(14, 28, 10, 0, Math.PI * 2, 0, Math.PI / 2), 0.9);
+      regolith.push({ geometry: dome, matrix: _xf(g.x, g.y - 1, g.z, 0, 0, 0, 1, 0.55, 1) });
+      lamps.push({ geometry: new THREE.BoxGeometry(9, 1.1, 0.5), matrix: _xf(g.x + this.V.x * -13.2, g.y + 3.2, g.z + this.V.z * -13.2, 0, yawU + Math.PI / 2, 0) });
+    }
+    // Floodlight masts beside each pad
+    this.pads.forEach((pad, i) => {
+      const v = (i - 2.5) * this.padSpacing;
+      const g = ground(-10, v + 34);
+      metal.push({ geometry: new THREE.BoxGeometry(0.9, 32, 0.9), matrix: _xf(g.x, g.y + 16, g.z) });
+      lamps.push({ geometry: new THREE.BoxGeometry(3.2, 1.2, 1.4), matrix: _xf(g.x, g.y + 32.4, g.z, 0, yawU, 0) });
+    });
+
+    const whiteMat = new THREE.MeshStandardMaterial({ color: 0xb8b6b0, roughness: 0.45, metalness: 0.2 });
+    const bandMat = new THREE.MeshStandardMaterial({ color: 0x0b1e55, roughness: 0.5, metalness: 0.2 });
+    const regolithMat = new THREE.MeshStandardMaterial({ color: 0x8f3416, roughness: 1.0, metalness: 0.0 });
+    const metalMat = new THREE.MeshStandardMaterial({ color: 0x4a4c50, roughness: 0.5, metalness: 0.8 });
+    this.lampMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffd9a8, emissiveIntensity: 0.3 });
+    [[white, whiteMat, true], [bands, bandMat, false], [regolith, regolithMat, true], [metal, metalMat, true], [lamps, this.lampMat, false]]
+      .forEach(([list, mat, shadow]) => {
+        const mesh = new THREE.Mesh(mergeGeometryList(list), mat);
+        mesh.castShadow = shadow;
+        mesh.receiveShadow = true;
+        this.scene.add(mesh);
+      });
+  }
+
+  // Collision circles for the rover
+  collidables() {
+    const out = this.pads.map(p => ({ x: p.x, z: p.z, r: 27 }));
+    for (let row = 0; row < 2; row++) {
+      for (let k = 0; k < 4; k++) {
+        const p = this.local(this.hubU + 30 + k * 14, -55 - row * 15);
+        out.push({ x: p.x, z: p.z, r: 6 });
+      }
+    }
+    const b = this.local(this.hubU + 20, 55);
+    out.push({ x: b.x, z: b.z, r: 14 });
+    return out;
+  }
+
+  update(dt, dayAmount) {
+    if (dt <= 0) return;
+    let lightShip = null, lightScore = 0;
+
+    for (const ship of this.ships) {
+      ship.t += dt;
+      const pad = ship.pad;
+      let throttle = 0, heat = 0;
+
+      switch (ship.state) {
+        case 'pad': {
+          ship.pos.set(pad.x, pad.y, pad.z);
+          this._pose(ship, this.downrange, 0, ship.belly);
+          if (ship.t >= ship.timer) { ship.state = 'ignition'; ship.t = 0; }
+          break;
+        }
+        case 'ignition': {
+          // Engine start: throttle up on the pad before release
+          throttle = Math.min(1, ship.t / 3) * 0.9;
+          if (ship.t >= 3) { ship.state = 'ascent'; ship.t = 0; ship.vel.set(0, 0, 0); }
+          break;
+        }
+        case 'ascent': {
+          throttle = 1;
+          const t = ship.t;
+          // Vertical rise, then a gravity turn downrange
+          const pitch = t < 8 ? 0 : Math.min(1.2, 0.025 * (t - 8) + 0.0005 * (t - 8) * (t - 8));
+          const accel = 8.5 + 0.2 * t; // T/W climbs as propellant burns off
+          const d = this.downrange;
+          const ax = Math.sin(pitch) * d.x, ay = Math.cos(pitch), az = Math.sin(pitch) * d.z;
+          ship.vel.x += ax * accel * dt;
+          ship.vel.y += (ay * accel - MARS_GRAVITY) * dt;
+          ship.vel.z += az * accel * dt;
+          ship.pos.addScaledVector(ship.vel, dt);
+          this._pose(ship, d, pitch, ship.belly);
+          const far = Math.hypot(ship.pos.x - pad.x, ship.pos.z - pad.z) + ship.pos.y;
+          if (t > 80 || far > 9000) {
+            ship.state = 'away';
+            ship.t = 0;
+            ship.timer = 45 + Math.random() * 70;
+            ship.group.visible = false;
+          }
+          break;
+        }
+        case 'away': {
+          if (ship.t >= ship.timer) {
+            ship.state = 'entry';
+            ship.t = 0;
+            ship.approach = this._approachDir();
+            ship.group.visible = true;
+          }
+          break;
+        }
+        case 'entry': {
+          // Belly-first fall: most of the speed is shed by the heat shield
+          const T = 28, u = Math.min(1, ship.t / T);
+          const s = 1 - (1 - u) * (1 - u);
+          const alt = 5200 + (850 - 5200) * s;
+          const dist = 6500 + (320 - 6500) * s;
+          ship.pos.set(pad.x + ship.approach.x * dist, pad.y + alt, pad.z + ship.approach.z * dist);
+          this._pose(ship, { x: -ship.approach.x, z: -ship.approach.z }, Math.PI / 2 - 0.12);
+          heat = Math.max(0, 1 - u / 0.7);
+          if (u >= 1) { ship.state = 'flip'; ship.t = 0; }
+          break;
+        }
+        case 'flip': {
+          // Engines relight and swing the ship upright, slightly past vertical
+          const T = 4.5, u = Math.min(1, ship.t / T);
+          const alt = 850 + (600 - 850) * u;
+          const dist = 320 + (140 - 320) * u;
+          ship.pos.set(pad.x + ship.approach.x * dist, pad.y + alt, pad.z + ship.approach.z * dist);
+          const c1 = 1.70158, c3 = c1 + 1;
+          const back = 1 + c3 * Math.pow(u - 1, 3) + c1 * Math.pow(u - 1, 2); // easeOutBack
+          this._pose(ship, { x: -ship.approach.x, z: -ship.approach.z }, (Math.PI / 2 - 0.12) * (1 - back));
+          throttle = Math.min(1, ship.t / 1.0) * 0.85;
+          if (u >= 1) { ship.state = 'landing'; ship.t = 0; }
+          break;
+        }
+        case 'landing': {
+          // Landing burn: height and drift both decay to zero at touchdown
+          const T = 15, u = Math.min(1, ship.t / T);
+          const k = (1 - u) * (1 - u);
+          const dist = 140 * k;
+          ship.pos.set(pad.x + ship.approach.x * dist, pad.y + 600 * k, pad.z + ship.approach.z * dist);
+          this._pose(ship, { x: -ship.approach.x, z: -ship.approach.z }, 0.22 * k);
+          throttle = 0.55 + 0.3 * (1 - u);
+          if (u >= 1) {
+            ship.state = 'pad';
+            ship.belly = { x: ship.approach.x, z: ship.approach.z }; // as it touched down
+            ship.t = 0;
+            ship.timer = 40 + Math.random() * 80; // turnaround: detank, refuel
+          }
+          break;
+        }
+      }
+
+      ship.throttle += (throttle - ship.throttle) * Math.min(1, dt * 6);
+      ship.heat = heat;
+      this._updateEffects(ship, dt);
+
+      if (ship.throttle > 0.05 && ship.group.visible) {
+        const dx = ship.pos.x - camera.position.x, dz = ship.pos.z - camera.position.z;
+        const score = ship.throttle / (1 + Math.hypot(dx, dz, ship.pos.y - camera.position.y) / 500);
+        if (score > lightScore) { lightScore = score; lightShip = ship; }
+      }
+    }
+
+    // Engine light on the ship that matters most to the viewer; it only
+    // shows near the ground, where there is something for it to light
+    if (lightShip && lightShip.pos.y - lightShip.pad.y < 400) {
+      const s = lightShip;
+      this._down.set(0, -1, 0).applyQuaternion(s.group.quaternion);
+      this.engineLight.position.copy(s.pos).addScaledVector(this._down, 12);
+      this.engineLight.intensity = 5 * s.throttle * (1 - 0.6 * dayAmount);
+    } else {
+      this.engineLight.intensity = 0;
+    }
+
+    // Floodlights
+    this.lampMat.emissiveIntensity = 0.3 + 2.2 * (1 - dayAmount);
+    this.dust.update(dt, 0.12 + 0.88 * dayAmount);
+  }
+
+  _updateEffects(ship, dt) {
+    const firing = ship.throttle > 0.02;
+    ship.plume.visible = firing && ship.group.visible;
+    if (ship.plume.visible) {
+      const alt = Math.max(0, ship.pos.y - ship.pad.y);
+      // Near the ground the plume splashes; higher up it lengthens and, in
+      // the near-vacuum, balloons outward
+      const spread = Math.min(1, alt / 2500);
+      const u = ship.plumeMat.uniforms;
+      u.uThrottle.value = ship.throttle * (0.9 + Math.random() * 0.15);
+      u.uLen.value = (30 + 220 * spread) * (0.6 + 0.4 * ship.throttle);
+      u.uR0.value = 3.0;
+      u.uR1.value = 7 + 60 * spread;
+    }
+    // The flare marks engine burns, and during entry the glowing plasma
+    // (the only part of an inbound ship visible from the ground)
+    const entryGlow = ship.heat > 0.01 && ship.group.visible;
+    ship.flare.visible = ship.plume.visible || entryGlow;
+    if (ship.flare.visible) {
+      let f;
+      if (entryGlow && !ship.plume.visible) {
+        ship.flare.material.color.setRGB(1.0, 0.5, 0.32);
+        f = 0.1 * Math.min(1, 0.3 + ship.heat) * (0.85 + Math.random() * 0.3);
+      } else {
+        ship.flare.material.color.setRGB(1.0, 0.89, 0.75);
+        f = 0.075 * ship.throttle * (0.9 + Math.random() * 0.2);
+      }
+      ship.flare.scale.set(f, f, 1);
+    }
+    ship.plasma.visible = ship.heat > 0.01;
+    if (ship.plasma.visible) ship.plasmaMat.uniforms.uHeat.value = ship.heat * (0.85 + Math.random() * 0.15);
+
+    // Regolith blasted off the pad when the engines fire close to the ground
+    const alt = ship.pos.y - ship.pad.y;
+    if (firing && alt < 150) {
+      const strength = ship.throttle * (1 - alt / 150);
+      ship.dustCarry += strength * (this.isMobile ? 35 : 110) * dt;
+      while (ship.dustCarry >= 1) {
+        ship.dustCarry -= 1;
+        const a = Math.random() * Math.PI * 2;
+        const r = 4 + Math.random() * 10;
+        const speed = (22 + Math.random() * 34) * (0.4 + 0.6 * strength);
+        this.dust.emit(
+          ship.pos.x + Math.cos(a) * r, ship.pad.y + 1, ship.pos.z + Math.sin(a) * r,
+          Math.cos(a) * speed, 2 + Math.random() * 9, Math.sin(a) * speed,
+          4 + Math.random() * 5
+        );
+      }
+    }
+  }
+}
+
+
 // Mars Background Scene Manager
 class MarsSceneManager {
   constructor(scene, terrainSize) {
@@ -2577,6 +3253,7 @@ class MarsSceneManager {
     this.sceneRepeatDistance = 5000;
     this.animatedObjects = []; // Track animated elements for update loop
     this.nightLights = []; // Artificial lights that fade out in daylight
+    this.nightEmissives = []; // Window, lamp and grow-light glow that rises at night
     this.guidedRouteWaypoints = []; // Beacons for optional guided driving route
     this.currentWaypointIndex = 0;
     this.fleet = null;      // CybertruckFleet (desktop only)
@@ -2593,13 +3270,10 @@ class MarsSceneManager {
     this.roads = new Map();             // key "from→to" → { group }
     this.fadingSettlements = [];
 
-    // Lightweight colony + rocket traffic system
-    this.rockets = [];
+    // Starship spaceport (built in initializeRocketLaunchSystem)
+    this.spaceport = null;
     this.rocketTrafficEnabled = true;
-    this.rocketSystemStartTime = (typeof performance !== 'undefined' && performance.now)
-      ? performance.now()
-      : Date.now();
-    this.rocketCycleDuration = 60000; // one full launch+arrival cycle per minute
+    this.rocketCycleDuration = 60000; // legacy setting, see setRocketLaunchInterval
 
     console.log('🏗️ MARS SCENE MANAGER: About to create colony infrastructure');
     this.createColonyInfrastructure();
@@ -2621,6 +3295,7 @@ class MarsSceneManager {
   _isSettlementSiteClear(x, z) {
     const near = (c, r) => c && (c.x - x) * (c.x - x) + (c.z - z) * (c.z - z) < r * r;
     if (near(this.colonyCenter, 480) || near(this.secondaryColonyCenter, 420)) return false;
+    if (this.spaceportSite && near(this.spaceportSite, 650)) return false;
     for (const route of this.aiRoutes || []) {
       for (let i = 0; i < route.points.length; i += 4) {
         if (near(route.points[i], 120)) return false;
@@ -2668,56 +3343,33 @@ class MarsSceneManager {
     return false;
   }
 
+  // Level the spaceport site. Runs before the haul roads are graded so the
+  // spaceport road meets the finished plateau.
+  prepareSpaceportSite() {
+    const x = SPACEPORT_X, z = SPACEPORT_Z;
+    let sum = 0, n = 0;
+    for (let dx = -200; dx <= 200; dx += 50) {
+      for (let dz = -200; dz <= 200; dz += 50) { sum += sampleTerrainHeight(x + dx, z + dz); n++; }
+    }
+    const y = sum / n;
+    flattenMarsTerrain(x, z, 470, y);
+    const ux = COLONY_SITE_X - x, uz = COLONY_SITE_Z - z;
+    const len = Math.hypot(ux, uz) || 1;
+    this.spaceportSite = { x, z, y, ux: ux / len, uz: uz / len };
+  }
+
   initializeRocketLaunchSystem() {
-    if (this.rockets && this.rockets.length > 0) return;
-
-    // Position rocket pads near the futuristic colony
-    const padPositions = [
-      new THREE.Vector3(-540, 0, -480),
-      new THREE.Vector3(-440, 0, -520),
-      new THREE.Vector3(-340, 0, -520),
-      new THREE.Vector3(-240, 0, -480),
-      new THREE.Vector3(-390, 0, -570)
-    ];
-
-    this.rockets = [];
-
-    padPositions.forEach((padPos, index) => {
-      // For reliability, keep pads near nominal ground level; terrain is centered at y≈0
-      const groundY = 0;
-
-      // Simple hex pad
-      const padGeometry = new THREE.CylinderGeometry(22, 22, 3, 6);
-      const padMaterial = new THREE.MeshStandardMaterial({
-        color: 0x555555,
-        roughness: 0.9,
-        metalness: 0.2
+    if (this.spaceport) return;
+    try {
+      if (!this.spaceportSite) this.prepareSpaceportSite();
+      this.spaceport = new StarshipSpaceport(this.scene, this.spaceportSite, {
+        roadMaterials: this.getRoadMaterials()
       });
-      const pad = new THREE.Mesh(padGeometry, padMaterial);
-      pad.position.set(padPos.x, groundY + 1.5, padPos.z);
-      pad.receiveShadow = true;
-      this.scene.add(pad);
-
-      // Register rocket pad as collidable (radius 22 + padding)
-      this.registerCollidable(padPos, 25);
-      const rocket = this.createSimpleRocket();
-      rocket.position.set(padPos.x, groundY, padPos.z);
-      this.addRocketEffects(rocket, 'launch');
-      this.scene.add(rocket);
-
-      // Phase offset so rockets are staggered in the cycle
-      const phaseOffset = index / padPositions.length;
-
-      this.rockets.push({
-        mesh: rocket,
-        padY: groundY,
-        phaseOffset,
-        maxHeight: 650 + Math.random() * 150
-      });
-    });
-
-    if (typeof console !== 'undefined') {
-      console.log('MarsSceneManager: created rocket pads and rockets:', this.rockets.length);
+      this.spaceport.collidables().forEach(c => this.registerCollidable({ x: c.x, z: c.z }, c.r));
+      console.log('MarsSceneManager: spaceport ready with', this.spaceport.ships.length, 'Starships');
+    } catch (e) {
+      console.warn('Failed to build spaceport:', e);
+      this.spaceport = null;
     }
   }
 
@@ -2733,7 +3385,7 @@ class MarsSceneManager {
       this.fleet = new CybertruckFleet(this.scene, 32);
       this.createTrafficRoutes();
 
-      const routeTrucks = perf.detailLevel === 'high' ? 10 : 7;
+      const routeTrucks = perf.detailLevel === 'high' ? 12 : 8;
       for (let i = 0; i < routeTrucks; i++) {
         const route = this.aiRoutes[i % this.aiRoutes.length];
         const slot = Math.floor(i / this.aiRoutes.length);
@@ -2741,6 +3393,7 @@ class MarsSceneManager {
           tag: 'route',
           lane: route.lane,
           uturnReach: route.uturnReach,
+          dwell: route.dwell,
           cruise: 11 + Math.random() * 7, // 40-65 km/h on graded regolith
           s: ((slot * 0.37 + Math.random() * 0.2) % 1) * route.path.length,
           dir: (i + slot) % 2 === 0 ? 1 : -1
@@ -2775,12 +3428,24 @@ class MarsSceneManager {
       ring.push(rel(Math.cos(a) * 285, Math.sin(a) * 285));
     }
 
+    // Mine-A hauls ice to the ISRU plant's hopper; Mine-B hauls regolith to
+    // the construction yard; propellant and cargo go out to the spaceport.
+    // Trucks park at each end to load or unload (dwell, seconds).
     const defs = [
       { name: 'Colony-Ring', closed: true, points: ring },
-      { name: 'Colony-Mine-A', points: [rel(200, -205), rel(255, -300), rel(300, -380), rel(345, -450), rel(380, -520)] },
-      { name: 'Colony-Mine-B', points: [rel(-200, 205), rel(-235, 290), rel(-280, 380), rel(-330, 470), rel(-420, 620)] },
+      { name: 'Ice-Mine', dwell: [7, 13], points: [rel(163, -193), rel(200, -205), rel(255, -300), rel(300, -380), rel(345, -450), rel(380, -520)] },
+      { name: 'Regolith-Quarry', dwell: [7, 13], points: [rel(-172, 180), rel(-200, 205), rel(-235, 290), rel(-280, 380), rel(-330, 470), rel(-420, 620)] },
       { name: 'Colony-Landing-Site', points: [rel(185, 217), rel(270, 320), rel(340, 420), rel(400, 520)] }
     ];
+    const site = this.spaceportSite;
+    if (site) {
+      // Toward the spaceport hub, with a gentle bend
+      const hub = new THREE.Vector3(site.x + site.ux * 150, 0, site.z + site.uz * 150);
+      const dir = new THREE.Vector3(hub.x - c.x, 0, hub.z - c.z).normalize();
+      const start = rel(dir.x * 287, dir.z * 287);
+      const mid = start.clone().lerp(hub, 0.5).add(new THREE.Vector3(-dir.z * 45, 0, dir.x * 45));
+      defs.push({ name: 'Spaceport', dwell: [9, 16], points: [start, mid, hub] });
+    }
 
     this.aiRoutes = defs.map(def => {
       const closed = !!def.closed;
@@ -2791,7 +3456,8 @@ class MarsSceneManager {
         points,
         path: new TrafficPath(points, closed),
         lane: 2.0,
-        uturnReach: 7
+        uturnReach: 7,
+        dwell: def.dwell || null
       };
     });
   }
@@ -2948,7 +3614,7 @@ class MarsSceneManager {
 
   // Control methods for rocket launch system
   setRocketLaunchInterval(milliseconds) {
-    // Kept for API compatibility; rocket system uses fixed 60s cycle
+    // Kept for API compatibility; each Starship keeps its own schedule
     this.rocketCycleDuration = Math.max(15000, milliseconds || this.rocketCycleDuration);
   }
 
@@ -2958,20 +3624,16 @@ class MarsSceneManager {
 
   disableRocketLaunches() {
     this.rocketTrafficEnabled = false;
-    if (this.rockets) {
-      this.rockets.forEach(r => {
-        if (r && r.mesh) {
-          r.mesh.visible = false;
-        }
-      });
-    }
   }
 
-  triggerManualLaunch(patternType = 'random') {
-    // Optional hook for future manual launch patterns
-    this.rocketSystemStartTime = (typeof performance !== 'undefined' && performance.now)
-      ? performance.now()
-      : Date.now();
+  // Launch the grounded Starship that is closest to its scheduled launch
+  triggerManualLaunch() {
+    if (!this.spaceport) return;
+    let best = null;
+    for (const ship of this.spaceport.ships) {
+      if (ship.state === 'pad' && (!best || ship.timer - ship.t < best.timer - best.t)) best = ship;
+    }
+    if (best) best.timer = best.t;
   }
 
   startRocketLaunchCycle() {
@@ -2996,6 +3658,21 @@ class MarsSceneManager {
     for (const light of this.nightLights) {
       if (light.userData.baseIntensity === undefined) light.userData.baseIntensity = light.intensity;
       light.intensity = light.userData.baseIntensity * nightLevel;
+    }
+    const night = 1 - (typeof window.dayNightBlend === 'number' ? window.dayNightBlend : 0);
+    for (const e of this.nightEmissives) {
+      e.material.emissiveIntensity = e.day + (e.night - e.day) * night;
+    }
+
+    // Gantry printer laying the top course of a regolith habitat shell
+    if (this.printers) {
+      for (const p of this.printers) {
+        p.angle += dt * 0.3;
+        const nx = Math.cos(p.angle) * p.radius, nz = Math.sin(p.angle) * p.radius;
+        p.bridge.position.z = nz;
+        p.pillars.forEach(pillar => { pillar.position.z = nz; });
+        p.carriage.position.set(nx, p.top - 10.7, 0);
+      }
     }
 
     for (const anim of this.animatedObjects) {
@@ -3085,6 +3762,7 @@ class MarsSceneManager {
     // The pad reaches out to the ring road, which then blends into the
     // surrounding ground.
     flattenMarsTerrain(colonyOffsetX, colonyOffsetZ, 330, groundY);
+    this.prepareSpaceportSite();
 
     // Grade the haul roads into the ground before anything else is placed on
     // it, so lamps, crates and pads all stand on the final surface
@@ -3094,493 +3772,29 @@ class MarsSceneManager {
       marsSurface.geometry.computeVertexNormals();
     }
 
-    // Shared materials for colony infrastructure (avoid duplicates)
-    const windowMaterial = new THREE.MeshStandardMaterial({
-      color: 0x4488ff,
-      roughness: 0.05,
-      metalness: 0.95,
-      transparent: true,
-      opacity: 0.7,
-      emissive: 0x2244ff,
-      emissiveIntensity: 0.4
-    });
-    const beamMaterial = new THREE.MeshStandardMaterial({
-      color: 0x334455,
-      roughness: 0.4,
-      metalness: 0.9
-    });
+    // Realistic near-future base: shielded habitats, greenhouses, an ISRU
+    // propellant plant, power and comms (see buildColonyArchitecture)
+    this.buildColonyArchitecture(this.colonyCenter)
+      .forEach(c => this.registerCollidable({ x: c.x, z: c.z }, c.r));
 
-    // === MAIN COMMAND CENTER - Ultra-modern multi-level structure ===
-    const commandCenterLevels = 3;
-    for (let level = 0; level < commandCenterLevels; level++) {
-      const levelHeight = 35;
-      const levelRadius = 70 - level * 8;
-      
-      // Main level structure
-      const levelGeometry = new THREE.CylinderGeometry(levelRadius, levelRadius + 5, levelHeight, 32);
-      const levelMaterial = new THREE.MeshStandardMaterial({
-        color: level === 0 ? 0xe8f0ff : level === 1 ? 0xd5e5ff : 0xc2d9ff,
-        roughness: 0.15,
-        metalness: 0.85,
-        envMapIntensity: 2
-      });
-      const levelMesh = new THREE.Mesh(levelGeometry, levelMaterial);
-      levelMesh.position.set(
-        colonyOffsetX,
-        groundY + levelHeight / 2 + level * levelHeight,
-        colonyOffsetZ
-      );
-      levelMesh.castShadow = true;
-      levelMesh.receiveShadow = true;
-      this.scene.add(levelMesh);
-      structures.push(levelMesh);
-      
-      // Glass observation windows (ring around each level)
-      const windowCount = 8;
-      for (let i = 0; i < windowCount; i++) {
-        const angle = (i / windowCount) * Math.PI * 2;
-        const windowGeometry = new THREE.BoxGeometry(8, 4, 0.5);
-        const window = new THREE.Mesh(windowGeometry, windowMaterial);
-        window.position.set(
-          Math.cos(angle) * (levelRadius + 2),
-          0,
-          Math.sin(angle) * (levelRadius + 2)
-        );
-        window.rotation.y = angle;
-        levelMesh.add(window);
-      }
-      
-      // Structural support beams
-      const beamCount = 4;
-      for (let i = 0; i < beamCount; i++) {
-        const angle = (i / beamCount) * Math.PI * 2;
-        const beamGeometry = new THREE.BoxGeometry(3, levelHeight + 2, 3);
-        const beam = new THREE.Mesh(beamGeometry, beamMaterial);
-        beam.position.set(
-          Math.cos(angle) * (levelRadius - 2),
-          1,
-          Math.sin(angle) * (levelRadius - 2)
-        );
-        levelMesh.add(beam);
-      }
-    }
-    
-    // Top dome with holographic display
-    const topDomeGeometry = new THREE.SphereGeometry(55, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    const topDomeMaterial = new THREE.MeshStandardMaterial({
-      color: 0x88bbff,
-      roughness: 0.08,
-      metalness: 0.6,
-      transparent: true,
-      opacity: 0.65,
-      side: THREE.DoubleSide
-    });
-    const topDome = new THREE.Mesh(topDomeGeometry, topDomeMaterial);
-    topDome.position.set(
-      colonyOffsetX,
-      groundY + commandCenterLevels * 35 + 25,
-      colonyOffsetZ
-    );
-    topDome.castShadow = true;
-    this.scene.add(topDome);
-    structures.push(topDome);
-    
-    // Holographic projection beams
-    for (let i = 0; i < 4; i++) {
-      const angle = (i / 4) * Math.PI * 2 + Math.PI / 4;
-      const beamGeometry = new THREE.CylinderGeometry(0.5, 0.5, 60, 8);
-      const beamMaterial = new THREE.MeshBasicMaterial({
-        color: 0x00ffff,
-        transparent: true,
-        opacity: 0.5,
-        blending: THREE.AdditiveBlending
-      });
-      const beam = new THREE.Mesh(beamGeometry, beamMaterial);
-      beam.position.set(
-        Math.cos(angle) * 30,
-        30,
-        Math.sin(angle) * 30
-      );
-      topDome.add(beam);
-    }
-    
-    // === RESIDENTIAL TOWERS - Sleek twisted skyscrapers ===
-    const towerPositions = [
-      { x: -140, z: -100, twist: 0.3 },
-      { x: -100, z: -160, twist: -0.25 },
-      { x: 100, z: -100, twist: 0.35 },
-      { x: 140, z: -160, twist: -0.3 }
-    ];
-    
-    towerPositions.forEach((pos, index) => {
-      const towerHeight = 140 + Math.random() * 30;
-      const segments = 6;
-      
-      // Create twisted tower with segments
-      for (let seg = 0; seg < segments; seg++) {
-        const segHeight = towerHeight / segments;
-        const segY = groundY + seg * segHeight + segHeight / 2;
-        const twist = (seg / segments) * Math.PI * pos.twist;
-        
-        const segGeometry = new THREE.CylinderGeometry(16, 17, segHeight, 16);
-        const segMaterial = new THREE.MeshStandardMaterial({
-          color: seg % 2 === 0 ? 0xc8d4e0 : 0xb5c5d8,
-          roughness: 0.25,
-          metalness: 0.85,
-          envMapIntensity: 1.5
-        });
-        const segment = new THREE.Mesh(segGeometry, segMaterial);
-        segment.position.set(
-          colonyOffsetX + pos.x,
-          segY,
-          colonyOffsetZ + pos.z
-        );
-        segment.rotation.y = twist;
-        segment.castShadow = true;
-        segment.receiveShadow = true;
-        this.scene.add(segment);
-        structures.push(segment);
-        
-        // LED strips on each segment (reduced for performance)
-        const stripGeometry = new THREE.BoxGeometry(1, segHeight, 1);
-        const stripMaterial = new THREE.MeshBasicMaterial({
-          color: 0x00ffff
-        });
-        for (let i = 0; i < 2; i++) {
-          const angle = (i / 2) * Math.PI;
-          const strip = new THREE.Mesh(stripGeometry, stripMaterial);
-          strip.position.set(
-            Math.cos(angle + twist) * 18,
-            0,
-            Math.sin(angle + twist) * 18
-          );
-          segment.add(strip);
-        }
-      }
-      
-      // Crown at the top
-      const crownGeometry = new THREE.ConeGeometry(20, 15, 8);
-      const crownMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffd700,
-        roughness: 0.2,
-        metalness: 0.9,
-        emissive: 0x886600,
-        emissiveIntensity: 0.3
-      });
-      const crown = new THREE.Mesh(crownGeometry, crownMaterial);
-      crown.position.set(
-        colonyOffsetX + pos.x,
-        groundY + towerHeight + 7,
-        colonyOffsetZ + pos.z
-      );
-      this.scene.add(crown);
-      structures.push(crown);
-      
-      // Pulsing beacon on top
-      const beaconGeometry = new THREE.SphereGeometry(2, 16, 16);
-      const beaconMaterial = new THREE.MeshBasicMaterial({
-        color: 0xff0000,
-        emissive: 0xff0000,
-        emissiveIntensity: 1
-      });
-      const beacon = new THREE.Mesh(beaconGeometry, beaconMaterial);
-      beacon.position.y = 8;
-      crown.add(beacon);
-      
-      // Use emissive beacon mesh for blinking instead of expensive PointLight
-      this.animatedObjects.push({
-        mesh: beacon,
-        type: 'blink',
-        phase: index * Math.PI / 2
-      });
-    });
-    
-    // === ENERGY GENERATION - Advanced fusion reactors ===
-    const reactorCount = 3;
-    for (let i = 0; i < reactorCount; i++) {
-      const angle = (i / reactorCount) * Math.PI * 2;
-      const reactorX = colonyOffsetX + Math.cos(angle) * 180;
-      const reactorZ = colonyOffsetZ + Math.sin(angle) * 180;
-      
-      // Reactor core sphere
-      const coreGeometry = new THREE.SphereGeometry(18, 32, 32);
-      const coreMaterial = new THREE.MeshStandardMaterial({
-        color: 0x00ffff,
-        roughness: 0.1,
-        metalness: 0.9,
-        emissive: 0x00aaff,
-        emissiveIntensity: 0.8,
-        transparent: true,
-        opacity: 0.9
-      });
-      const core = new THREE.Mesh(coreGeometry, coreMaterial);
-      core.position.set(reactorX, groundY + 25, reactorZ);
-      this.scene.add(core);
-      structures.push(core);
-      
-      // Rotating energy rings
-      for (let r = 0; r < 3; r++) {
-        const ringGeometry = new THREE.TorusGeometry(22 + r * 6, 1.5, 16, 32);
-        const ringMaterial = new THREE.MeshStandardMaterial({
-          color: 0x00ffff,
-          roughness: 0.2,
-          metalness: 0.95,
-          emissive: 0x0088ff,
-          emissiveIntensity: 0.6
-        });
-        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-        ring.rotation.x = Math.PI / 2;
-        core.add(ring);
-        
-        this.animatedObjects.push({
-          mesh: ring,
-          type: 'rotate',
-          speed: 0.01 * (r + 1) * (i % 2 === 0 ? 1 : -1)
-        });
-      }
-      
-      // Support pylons
-      const pylonPositions = [
-        { x: -15, z: -15 },
-        { x: 15, z: -15 },
-        { x: -15, z: 15 },
-        { x: 15, z: 15 }
-      ];
-      
-      pylonPositions.forEach(pylon => {
-        const pylonGeometry = new THREE.CylinderGeometry(2, 3, 30, 8);
-        const pylonMaterial = new THREE.MeshStandardMaterial({
-          color: 0x556677,
-          roughness: 0.4,
-          metalness: 0.8
-        });
-        const pylonMesh = new THREE.Mesh(pylonGeometry, pylonMaterial);
-        pylonMesh.position.set(reactorX + pylon.x, groundY + 15, reactorZ + pylon.z);
-        this.scene.add(pylonMesh);
-      });
-      
-      // Reactor glow handled by emissive materials above — no additional PointLight needed
-    }
-    
-    // === ADVANCED SOLAR FARM - Hexagonal mirror array ===
-    // Two instanced draw calls (it used to be 40 panels with 80 unique
-    // materials). Kept inside the ring road, which it used to straddle.
-    {
-      const solarCenterX = colonyOffsetX + 160;
-      const solarCenterZ = colonyOffsetZ - 100;
-      const hexRadius = 6;
-      const hexRows = 5;
-      const hexCols = 8;
-      const count = hexRows * hexCols;
-      const hexes = new THREE.InstancedMesh(
-        new THREE.CylinderGeometry(hexRadius, hexRadius, 0.5, 6),
-        new THREE.MeshStandardMaterial({
-          color: 0x1a2844,
-          roughness: 0.1,
-          metalness: 0.95,
-          emissive: 0x0a1a44,
-          emissiveIntensity: 0.3
-        }),
-        count
-      );
-      const glows = new THREE.InstancedMesh(
-        new THREE.CircleGeometry(hexRadius * 0.8, 6),
-        new THREE.MeshBasicMaterial({
-          color: 0x2266ff,
-          transparent: true,
-          opacity: 0.4,
-          side: THREE.DoubleSide
-        }),
-        count
-      );
-      const panel = new THREE.Object3D();
-      panel.rotation.x = -Math.PI / 8;
-      const glowLocal = new THREE.Matrix4().compose(
-        new THREE.Vector3(0, 0.3, 0),
-        new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0)),
-        new THREE.Vector3(1, 1, 1)
-      );
-      const glowMatrix = new THREE.Matrix4();
-      let k = 0;
-      for (let row = 0; row < hexRows; row++) {
-        for (let col = 0; col < hexCols; col++) {
-          panel.position.set(
-            solarCenterX + col * hexRadius * 1.8,
-            groundY + 2,
-            solarCenterZ + row * hexRadius * 1.6 + (col % 2) * hexRadius * 0.8
-          );
-          panel.updateMatrix();
-          hexes.setMatrixAt(k, panel.matrix);
-          glows.setMatrixAt(k, glowMatrix.multiplyMatrices(panel.matrix, glowLocal));
-          k++;
-        }
-      }
-      hexes.castShadow = true;
-      // r140 culls instances against the single panel's bounds
-      hexes.frustumCulled = false;
-      glows.frustumCulled = false;
-      this.scene.add(hexes, glows);
-    }
-    
-    // === TRANSPORTATION HUB - Magnetic rail station ===
-    const stationGeometry = new THREE.BoxGeometry(100, 20, 35);
-    const stationMaterial = new THREE.MeshStandardMaterial({
-      color: 0xddeeff,
-      roughness: 0.2,
-      metalness: 0.85
-    });
-    const station = new THREE.Mesh(stationGeometry, stationMaterial);
-    station.position.set(colonyOffsetX + 180, groundY + 10, colonyOffsetZ + 100);
-    station.castShadow = true;
-    station.receiveShadow = true;
-    this.scene.add(station);
-    structures.push(station);
-    
-    // Glass canopy
-    const canopyGeometry = new THREE.CylinderGeometry(50, 50, 25, 32, 1, true, 0, Math.PI);
-    const canopyMaterial = new THREE.MeshStandardMaterial({
-      color: 0x88ccff,
-      roughness: 0.1,
-      metalness: 0.5,
-      transparent: true,
-      opacity: 0.5,
-      side: THREE.DoubleSide
-    });
-    const canopy = new THREE.Mesh(canopyGeometry, canopyMaterial);
-    canopy.position.y = 12;
-    canopy.rotation.z = Math.PI / 2;
-    station.add(canopy);
-    
-    // === COMMUNICATION ARRAY - Multiple rotating dishes ===
-    const dishCount = 4;
-    for (let i = 0; i < dishCount; i++) {
-      const angle = (i / dishCount) * Math.PI * 2;
-      const dishX = colonyOffsetX + Math.cos(angle) * 150;
-      const dishZ = colonyOffsetZ + Math.sin(angle) * 150;
-      
-      const dishBaseGeometry = new THREE.CylinderGeometry(5, 7, 18, 16);
-      const dishBaseMaterial = new THREE.MeshStandardMaterial({
-        color: 0x7788aa,
-        roughness: 0.45,
-        metalness: 0.8
-      });
-      const dishBase = new THREE.Mesh(dishBaseGeometry, dishBaseMaterial);
-      dishBase.position.set(dishX, groundY + 9, dishZ);
-      this.scene.add(dishBase);
-      
-      const dishGeometry = new THREE.CylinderGeometry(20, 20, 2, 32);
-      const dishMaterial = new THREE.MeshStandardMaterial({
-        color: 0xbbccdd,
-        roughness: 0.25,
-        metalness: 0.9
-      });
-      const dish = new THREE.Mesh(dishGeometry, dishMaterial);
-      dish.position.y = 15;
-      dish.rotation.x = Math.PI / 4;
-      dishBase.add(dish);
-      
-      this.animatedObjects.push({
-        mesh: dishBase,
-        type: 'rotate',
-        speed: 0.003 * (i % 2 === 0 ? 1 : -1)
-      });
-    }
-    
-    // === ATMOSPHERIC LIGHTING - Enhanced dramatic effects ===
-    // Main colony central light
-    const centralLight = new THREE.PointLight(0xffffff, 3, 500);
-    centralLight.position.set(colonyOffsetX, groundY + 150, colonyOffsetZ);
-    this.scene.add(centralLight);
-    this.nightLights.push(centralLight);
-    
-    // Spotlight beams removed — emissive materials and central light provide sufficient effect
-    
-    
-    // Perimeter lighting system (reduced for performance)
-    const perimeterRadius = 250;
-    const perimeterLights = 6;
-    for (let i = 0; i < perimeterLights; i++) {
-      const angle = (i / perimeterLights) * Math.PI * 2;
-      const x = colonyOffsetX + Math.cos(angle) * perimeterRadius;
-      const z = colonyOffsetZ + Math.sin(angle) * perimeterRadius;
-      
-      // Light post
-      const postGeometry = new THREE.CylinderGeometry(1, 1.5, 12, 8);
-      const postMaterial = new THREE.MeshStandardMaterial({
-        color: 0x445566,
-        roughness: 0.5,
-        metalness: 0.8
-      });
-      const post = new THREE.Mesh(postGeometry, postMaterial);
-      post.position.set(x, groundY + 6, z);
-      this.scene.add(post);
-      
-      // Light head
-      const headGeometry = new THREE.SphereGeometry(2.5, 16, 16);
-      const headMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffaa44
-      });
-      const head = new THREE.Mesh(headGeometry, headMaterial);
-      head.position.y = 7;
-      post.add(head);
-      
-      // Emissive mesh is visible enough; skip PointLight for performance
-      this.animatedObjects.push({
-        mesh: head,
-        type: 'blink',
-        phase: i * Math.PI / 10
-      });
-    }
-    
-    console.log('✅ Ultra high-definition futuristic colony created:', structures.length, 'main structures');
+    // Floodlights over the core (fades out in daylight)
+    const floodLight = new THREE.PointLight(0xffd2a0, 1.6, 420);
+    floodLight.position.set(colonyOffsetX, groundY + 40, colonyOffsetZ);
+    this.scene.add(floodLight);
+    this.nightLights.push(floodLight);
 
-    // Register collidable bounding volumes for the primary colony
-    // Command center levels (3 stacked cylinders at colony center, radius ~70-80)
-    this.registerCollidable({ x: colonyOffsetX, z: colonyOffsetZ }, 80);
-    // Top dome above command center
-    this.registerCollidable({ x: colonyOffsetX, z: colonyOffsetZ }, 60);
-    // Register individual structures that sit away from the center
-    structures.forEach(s => {
-      if (!s || !s.position) return;
-      const p = s.geometry && s.geometry.parameters;
-      if (!p) return;
-      // Determine a bounding radius from the geometry
-      const r = p.radiusTop || p.radiusBottom || p.radius ||
-                (p.width ? Math.max(p.width, p.depth || p.width) / 2 : 0);
-      if (r > 5) { // Only register structures large enough to matter
-        this.registerCollidable(s.position, r + 2); // +2 padding
-      }
-    });
-
-    // Create a lightweight secondary colony (not a full deep-clone — saves hundreds of objects)
+    // Secondary colony 2.6 km east (habitat core only), joined by maglev
     try {
       const perfSettings = getPerformanceSettings();
       if (!perfSettings.isMobile) {
-        const replicaOffset = new THREE.Vector3(2600, 0, 0);
-        this.secondaryColonyCenter = this.colonyCenter.clone().add(replicaOffset);
+        const sc = this.colonyCenter.clone().add(new THREE.Vector3(2600, 0, 0));
+        sc.y = this.getTerrainHeight(sc.x, sc.z);
+        flattenMarsTerrain(sc.x, sc.z, 240, sc.y);
+        this.secondaryColonyCenter = sc;
+        this.buildColonyArchitecture(sc, { core: true })
+          .forEach(c => this.registerCollidable({ x: c.x, z: c.z }, c.r));
+        console.log('✅ Secondary colony created at', sc.x, sc.z);
 
-        // Clone only the main large structures (command center levels + dome + station)
-        // Skip small details like windows, beams, solar panels
-        const mainStructures = structures.filter(s => {
-          if (!s || !s.geometry || !s.geometry.parameters) return false;
-          const p = s.geometry.parameters;
-          // Only clone structures with significant radius/size
-          return (p.radiusTop && p.radiusTop > 15) || (p.width && p.width > 50) || (p.radius && p.radius > 15);
-        });
-        mainStructures.forEach(original => {
-          if (!original) return;
-          const clone = original.clone(false); // shallow clone — no children (skips windows/beams)
-          clone.position.x += replicaOffset.x;
-          clone.position.z += replicaOffset.z;
-          this.scene.add(clone);
-        });
-
-        console.log('✅ Lightweight secondary colony created at', this.secondaryColonyCenter.x, this.secondaryColonyCenter.z);
-
-        // Register secondary colony as collidable (mirror the primary colony center)
-        this.registerCollidable(this.secondaryColonyCenter, 80);
-
-        // Build elevated rail and bullet train between the two colonies
         this.createBulletTrainSystem();
 
         // Queue creation of the third futuristic city node in the background
@@ -3606,6 +3820,367 @@ class MarsSceneManager {
     }
 
     this.createColonyGroundingDetails(this.colonyCenter, groundY);
+  }
+
+  // Shared materials for the colony architecture. Colours are linear (three
+  // r140 legacy colour mode). Night-lit materials register themselves so
+  // updateAnimations can bring their glow up after dark.
+  getColonyMaterials() {
+    if (this._colonyMats) return this._colonyMats;
+    const std = (params, night) => {
+      const m = new THREE.MeshStandardMaterial(params);
+      if (night) this.nightEmissives.push({ material: m, day: night[0], night: night[1] });
+      return m;
+    };
+    this._colonyMats = {
+      // Habitats are buried under ~2 m of regolith for radiation shielding
+      regolith: std({ color: 0x8f3416, roughness: 1.0, metalness: 0.0 }),
+      printed: std({ color: 0x5c220e, roughness: 0.95, metalness: 0.0 }),
+      white: std({ color: 0xb8b6b0, roughness: 0.5, metalness: 0.15 }),
+      metal: std({ color: 0x4a4c50, roughness: 0.5, metalness: 0.8 }),
+      dark: std({ color: 0x0c0d0f, roughness: 0.7, metalness: 0.2 }),
+      band: std({ color: 0x0b1e55, roughness: 0.5, metalness: 0.2 }),
+      lamp: std({ color: 0x151412, emissive: 0xffc68a, emissiveIntensity: 0.25 }, [0.25, 2.4]),
+      // Greenhouse film glows magenta from the LED grow lights at night
+      glass: std({
+        color: 0x8fb0a8, roughness: 0.12, metalness: 0.0, transparent: true, opacity: 0.3,
+        depthWrite: false, side: THREE.DoubleSide, emissive: 0xb040ff, emissiveIntensity: 0.0
+      }, [0.0, 0.55]),
+      plants: std({ color: 0x0f3a0a, roughness: 0.85, metalness: 0.0, emissive: 0x6a1a70, emissiveIntensity: 0.0 }, [0.0, 0.8]),
+      pv: std({ color: 0x02081a, roughness: 0.22, metalness: 0.4, envMapIntensity: 1.2 })
+    };
+    return this._colonyMats;
+  }
+
+  // Build a realistic near-future Mars base around `center`. Everything is
+  // merged per material, so the whole colony costs about ten draw calls.
+  // Returns collision circles. options.core: habitats, greenhouses, hangar
+  // and comms only (the secondary colony).
+  buildColonyArchitecture(center, options = {}) {
+    const mats = this.getColonyMaterials();
+    const parts = {};
+    for (const key of Object.keys(mats)) parts[key] = [];
+    const add = (mat, geometry, matrix) => parts[mat].push({ geometry, matrix });
+    const cx = center.x, cz = center.z;
+    const gy = (x, z) => this.getTerrainHeight(cx + x, cz + z);
+    const at = (x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1, order) =>
+      _xf(cx + x, y, cz + z, rx, ry, rz, sx, sy, sz, order);
+    const collide = [];
+    const circle = (x, z, r) => collide.push({ x: cx + x, z: cz + z, r });
+    const core = !!options.core;
+
+    // --- Habitat core: a shielded hub and four vaults joined by pressurised
+    // tunnels. Only the white end walls, airlocks and a cupola show.
+    {
+      const y0 = gy(0, 0);
+      add('regolith', lumpify(new THREE.SphereGeometry(20, 36, 12, 0, Math.PI * 2, 0, Math.PI / 2), 0.8),
+        at(0, y0 - 0.8, 0, 0, 0, 0, 1, 0.62, 1));
+      add('white', new THREE.CylinderGeometry(3.6, 4, 2.2, 20), at(0, y0 + 11.2, 0));
+      add('lamp', new THREE.SphereGeometry(3.2, 20, 8, 0, Math.PI * 2, 0, Math.PI / 2), at(0, y0 + 12.3, 0));
+      circle(0, 0, 22);
+
+      const vaults = [
+        { x: -55, z: 0, alongX: true }, { x: 55, z: 0, alongX: true },
+        { x: 0, z: -55, alongX: false }, { x: 0, z: 55, alongX: false }
+      ];
+      // Each vault is a long module under a broad, low regolith mound (sides
+      // near the angle of repose) that runs into the hub; only the entry
+      // vestibule at the outer end is exposed.
+      const W = 1.5, Hs = 0.7; // mound width / height relative to a 9 m module
+      vaults.forEach(vault => {
+        const y = gy(vault.x, vault.z);
+        const ox = vault.alongX ? Math.sign(vault.x) : 0;
+        const oz = vault.alongX ? 0 : Math.sign(vault.z);
+        const tube = lumpify(new THREE.CylinderGeometry(9, 9, 50, 28, 6, true), 0.7);
+        const capOut = lumpify(new THREE.SphereGeometry(9, 28, 10, 0, Math.PI * 2, 0, Math.PI / 2), 0.6);
+        const capIn = lumpify(new THREE.SphereGeometry(9, 28, 10, 0, Math.PI * 2, 0, Math.PI / 2), 0.6);
+        const ex = vault.x + ox * 25, ez = vault.z + oz * 25; // outer end of the tube
+        const ix = vault.x - ox * 25, iz = vault.z - oz * 25; // inner end
+        if (vault.alongX) {
+          add('regolith', tube, at(vault.x, y - 1, vault.z, 0, 0, Math.PI / 2, Hs, 1, W));
+          add('regolith', capOut, at(ex, y - 1, ez, 0, 0, -ox * Math.PI / 2, Hs, 1, W));
+          add('regolith', capIn, at(ix, y - 1, iz, 0, 0, ox * Math.PI / 2, Hs, 1, W));
+        } else {
+          add('regolith', tube, at(vault.x, y - 1, vault.z, Math.PI / 2, 0, 0, W, 1, Hs));
+          add('regolith', capOut, at(ex, y - 1, ez, oz * Math.PI / 2, 0, 0, W, 1, Hs));
+          add('regolith', capIn, at(ix, y - 1, iz, -oz * Math.PI / 2, 0, 0, W, 1, Hs));
+        }
+
+        // Entry vestibule: airlock door and window band facing outward
+        const vx = vault.x + ox * 33.5, vz = vault.z + oz * 33.5;
+        const ry = Math.atan2(ox, oz);
+        const vy = gy(vx, vz);
+        add('white', new THREE.BoxGeometry(6, 4.4, 6), at(vx, vy + 2.2, vz, 0, ry, 0));
+        const fx = vault.x + ox * 36.6, fz = vault.z + oz * 36.6;
+        add('dark', new THREE.BoxGeometry(2.4, 3, 0.3), at(fx, vy + 1.5, fz, 0, ry, 0));
+        add('lamp', new THREE.BoxGeometry(4.6, 0.5, 0.3), at(fx, vy + 3.7, fz, 0, ry, 0));
+        for (let k = -3; k <= 3; k++) {
+          const d = k * 11;
+          circle(vault.x + ox * d, vault.z + oz * d, 12);
+        }
+        circle(vx, vz, 4.5);
+      });
+    }
+
+    // --- Greenhouses: five inflatable tunnels on the west side, linked by a
+    // pressurised spine to the west habitat
+    {
+      const zLen = 60;
+      for (let k = 0; k < 5; k++) {
+        const x = -120 - k * 16;
+        const y = gy(x, 0);
+        add('glass', new THREE.CylinderGeometry(6, 6, zLen, 28, 1, true, Math.PI / 2, Math.PI), at(x, y, 0, Math.PI / 2));
+        for (const end of [-1, 1]) {
+          add('glass', new THREE.CircleGeometry(6, 24, 0, Math.PI), at(x, y, end * zLen / 2));
+        }
+        for (let r = 0; r <= 10; r++) {
+          add('metal', new THREE.TorusGeometry(6.05, 0.1, 4, 20, Math.PI), at(x, y, -zLen / 2 + r * 6));
+        }
+        for (const off of [-3, 0, 3]) {
+          add('plants', new THREE.BoxGeometry(1.5, 0.9, zLen - 4), at(x + off, y + 0.45, 0));
+        }
+        for (let j = -2; j <= 2; j++) circle(x, j * 12, 6.5);
+      }
+      const ySpine = gy(-140, -34) + 2.2;
+      add('white', new THREE.CylinderGeometry(2.2, 2.2, 90, 16), at(-145, ySpine, -34, 0, 0, Math.PI / 2));
+      add('white', new THREE.CylinderGeometry(2.2, 2.2, 10, 16), at(-96.5, gy(-96.5, 0) + 2.2, 0, 0, 0, Math.PI / 2));
+      add('white', new THREE.CylinderGeometry(2.2, 2.2, 36, 16), at(-101, gy(-101, -17) + 2.2, -17, Math.PI / 2));
+    }
+
+    // --- Garage hangar for rovers and trucks, shielded like the habitats
+    {
+      const x = 120, z = 150, y = gy(x, z);
+      add('regolith', lumpify(new THREE.CylinderGeometry(12, 12, 36, 28, 6, true), 0.8),
+        at(x, y - 1.5, z, 0, 0, Math.PI / 2, 0.85, 1, 1));
+      add('white', new THREE.CircleGeometry(10.2, 28, 0, Math.PI), at(x - 18.1, y - 1.5, z, 0, -Math.PI / 2, 0, 1, 0.85, 1));
+      add('dark', new THREE.BoxGeometry(0.4, 6.5, 12), at(x - 18.4, y + 3.25, z));
+      add('lamp', new THREE.BoxGeometry(0.4, 0.6, 12), at(x - 18.5, y + 7.1, z));
+      for (let k = -1; k <= 1; k++) circle(x + k * 12, z, 12);
+    }
+
+    // --- Deep-space antenna: tracks Earth and the relay orbiters
+    {
+      const x = -150, z = -110, y = gy(x, z);
+      add('white', new THREE.CylinderGeometry(2.2, 2.8, 8, 16), at(x, y + 4, z));
+      circle(x, z, 7);
+      const dishGroup = new THREE.Group();
+      dishGroup.position.set(cx + x, y + 8, cz + z);
+      const alidade = new THREE.Mesh(new THREE.BoxGeometry(5, 4, 3), mats.white);
+      alidade.position.y = 2;
+      const profile = [];
+      for (let i = 0; i <= 10; i++) { const r = (i / 10) * 9; profile.push(new THREE.Vector2(r, (r * r) / (4 * 9.2))); }
+      const dish = new THREE.Mesh(new THREE.LatheGeometry(profile, 40), new THREE.MeshStandardMaterial({
+        color: 0xc4c4be, roughness: 0.45, metalness: 0.2, side: THREE.DoubleSide
+      }));
+      dish.position.y = 5;
+      dish.rotation.x = -0.75; // elevation
+      const feed = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 9.2, 6), mats.metal);
+      feed.position.y = 4.6;
+      dish.add(feed);
+      dish.castShadow = alidade.castShadow = true;
+      dishGroup.add(alidade, dish);
+      this.scene.add(dishGroup);
+      this.animatedObjects.push({ mesh: dishGroup, type: 'rotate', speed: 0.0009 });
+
+      const mx = x - 15, mz = z + 15, my = gy(mx, mz);
+      add('metal', new THREE.BoxGeometry(0.8, 30, 0.8), at(mx, my + 15, mz));
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.6, 10, 8), new THREE.MeshBasicMaterial({ color: 0xff2a1a }));
+      beacon.position.set(cx + mx, my + 30.5, cz + mz);
+      this.scene.add(beacon);
+      this.animatedObjects.push({ mesh: beacon, type: 'blink', phase: 0.4 });
+    }
+
+    if (!core) {
+      // --- ISRU propellant plant: mined ice -> water -> electrolysis; CO2
+      // from the air + H2 -> Sabatier reactors -> methane. Stored cryogenic
+      // in the tank farm and trucked to the spaceport.
+      {
+        const hx = 125, hz = -165, hy = gy(hx, hz);
+        add('white', new THREE.BoxGeometry(36, 11, 18), at(hx, hy + 5.5, hz));
+        add('metal', new THREE.BoxGeometry(36.6, 0.8, 18.6), at(hx, hy + 11.2, hz));
+        add('dark', new THREE.BoxGeometry(0.4, 5, 7), at(hx + 18.1, hy + 2.5, hz));
+        add('lamp', new THREE.BoxGeometry(0.3, 0.6, 30), at(hx - 18.2, hy + 8, hz));
+        for (let k = -1; k <= 1; k++) circle(hx + k * 12, hz, 11);
+
+        // Sabatier reactors
+        for (let k = 0; k < 4; k++) {
+          const z = hz + 7 - k * 5;
+          add('metal', new THREE.CylinderGeometry(1.6, 1.6, 9, 16), at(hx - 22, gy(hx - 22, z) + 4.5, z));
+        }
+        circle(hx - 22, hz, 5);
+
+        // Radiators rejecting the reactors' waste heat
+        for (let k = 0; k < 6; k++) {
+          const x = hx + 26 + k * 4, z = hz + 25;
+          const y = gy(x, z);
+          add('white', new THREE.BoxGeometry(0.25, 7, 14), at(x, y + 5, z));
+          add('metal', new THREE.BoxGeometry(0.3, 1.5, 0.3), at(x, y + 0.75, z - 6));
+          add('metal', new THREE.BoxGeometry(0.3, 1.5, 0.3), at(x, y + 0.75, z + 6));
+        }
+        circle(hx + 36, hz + 25, 11);
+
+        // Cryogenic tank farm: methane (blue band) and oxygen
+        for (let row = 0; row < 2; row++) {
+          for (let k = 0; k < 4; k++) {
+            const x = 95 + k * 11, z = -118 - row * 12;
+            const y = gy(x, z);
+            add('white', new THREE.CylinderGeometry(4, 4, 15, 20), at(x, y + 7.5, z));
+            add('white', new THREE.SphereGeometry(4, 20, 8, 0, Math.PI * 2, 0, Math.PI / 2), at(x, y + 15, z));
+            add(row === 0 ? 'band' : 'metal', new THREE.CylinderGeometry(4.05, 4.05, 1.1, 20, 1, true), at(x, y + 11, z));
+            circle(x, z, 5);
+          }
+        }
+        // Pipe rack from the plant to the tanks
+        for (const px of [118, 121]) {
+          add('metal', new THREE.CylinderGeometry(0.35, 0.35, 28, 8), at(px, gy(px, -142) + 4, -142, Math.PI / 2));
+        }
+        for (let k = 0; k < 4; k++) add('metal', new THREE.BoxGeometry(5, 0.4, 0.4), at(119.5, gy(119.5, -130 - k * 8) + 3.6, -130 - k * 8));
+
+        // Ice hopper at the unloading bay (end of the Mine-A haul road), with
+        // a covered conveyor up to the plant
+        const bx = 172, bz = -182, by = gy(bx, bz);
+        add('metal', new THREE.CylinderGeometry(6, 1.6, 6, 20, 1, true), at(bx, by + 7.5, bz));
+        for (const [lx, lz] of [[-3, -3], [3, -3], [-3, 3], [3, 3]]) {
+          add('metal', new THREE.BoxGeometry(0.4, 5, 0.4), at(bx + lx, by + 2.5, bz + lz));
+        }
+        const c0 = new THREE.Vector3(bx - 3, by + 4, bz + 2), c1 = new THREE.Vector3(hx + 18, hy + 9, hz - 4);
+        const cLen = c0.distanceTo(c1);
+        const cyaw = Math.atan2(c1.x - c0.x, c1.z - c0.z);
+        const cpitch = Math.asin((c1.y - c0.y) / cLen);
+        add('white', new THREE.BoxGeometry(2, 1.6, cLen), at((c0.x + c1.x) / 2, (c0.y + c1.y) / 2, (c0.z + c1.z) / 2, -cpitch, cyaw, 0, 1, 1, 1, 'YXZ'));
+        circle(bx, bz, 7);
+      }
+
+      // --- Construction yard at the end of the Mine-B road: sintered
+      // regolith bricks and a gantry printer building a new habitat shell
+      {
+        const x = -140, z = 150, y = gy(x, z);
+        for (let k = 0; k < 12; k++) {
+          const h = 0.25 + k * 0.5;
+          const r = Math.sqrt(Math.max(0, 100 - h * h * 1.6));
+          add('printed', new THREE.TorusGeometry(r, 0.3, 5, 48), at(x, y + h, z, Math.PI / 2));
+        }
+        circle(x, z, 11);
+        for (const side of [-1, 1]) add('metal', new THREE.BoxGeometry(0.6, 0.5, 34), at(x + side * 14, gy(x + side * 14, z) + 0.25, z));
+        for (let k = 0; k < 6; k++) {
+          const px = -165 + (k % 3) * 4, pz = 183 + Math.floor(k / 3) * 4;
+          add('printed', new THREE.BoxGeometry(3, 1.4 + (k % 2) * 0.7, 3), at(px, gy(px, pz) + 0.8, pz));
+        }
+        circle(-161, 185, 6);
+
+        // Moving gantry (animated)
+        const gantry = new THREE.Group();
+        gantry.position.set(cx + x, y, cz + z);
+        const pillarGeom = new THREE.BoxGeometry(0.8, 15, 0.8);
+        const pillars = [-1, 1].map(side => {
+          const p = new THREE.Mesh(pillarGeom, mats.metal);
+          p.position.set(side * 14, 7.5, 0);
+          gantry.add(p);
+          return p;
+        });
+        const bridge = new THREE.Mesh(new THREE.BoxGeometry(29, 1, 1.2), mats.metal);
+        bridge.position.y = 15;
+        const carriage = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.8, 1.8), mats.white);
+        const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 8, 8), mats.metal);
+        carriage.add(nozzle);
+        bridge.add(carriage);
+        gantry.add(bridge);
+        gantry.traverse(o => { if (o.isMesh) o.castShadow = true; });
+        this.scene.add(gantry);
+        this.printers = this.printers || [];
+        this.printers.push({ pillars, bridge, carriage, nozzle, angle: 0, radius: 7.2, top: 6.2 });
+      }
+
+      // --- Solar field north of the ring road and two small fission
+      // reactors behind a berm, cabled into the colony grid
+      {
+        const panelGeom = new THREE.BoxGeometry(10, 0.12, 4);
+        const legGeom = new THREE.BoxGeometry(0.25, 1.9, 0.25);
+        const rows = 10, cols = 16;
+        const panels = new THREE.InstancedMesh(panelGeom, mats.pv, rows * cols);
+        const legs = new THREE.InstancedMesh(legGeom, mats.metal, rows * cols * 2);
+        const m = new THREE.Matrix4(), q = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.44, 0, 0));
+        const one = new THREE.Vector3(1, 1, 1), p = new THREE.Vector3(), noRot = new THREE.Quaternion();
+        let n = 0;
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const x = -70 + c * 12, z = -335 - r * 10;
+            const y = gy(x, z);
+            panels.setMatrixAt(n, m.compose(p.set(cx + x, y + 2.0, cz + z), q, one));
+            legs.setMatrixAt(n * 2, m.compose(p.set(cx + x - 4, y + 0.95, cz + z), noRot, one));
+            legs.setMatrixAt(n * 2 + 1, m.compose(p.set(cx + x + 4, y + 0.95, cz + z), noRot, one));
+            n++;
+          }
+        }
+        panels.receiveShadow = true;
+        panels.frustumCulled = legs.frustumCulled = false;
+        this.scene.add(panels, legs);
+        for (let r = 0; r < rows; r += 1) {
+          for (let c = 0; c < cols; c += 2) circle(-64 + c * 12, -335 - r * 10, 6.5);
+        }
+
+        // Inverter shed and cable trench to the north habitat
+        add('white', new THREE.BoxGeometry(6, 3, 4), at(20, gy(20, -322) + 1.5, -322));
+        const cableMat = mats.dark;
+        const cable = resamplePath([new THREE.Vector3(cx + 20, 0, cz - 320), new THREE.Vector3(cx, 0, cz - 82)], 4, false);
+        const cableMesh = new THREE.Mesh(buildDrapedRibbon(cable, 0.5, 0.06, false), cableMat);
+        this.scene.add(cableMesh);
+
+        for (const rx of [-30, 40]) {
+          const rz = -505;
+          const ry = gy(rx, rz);
+          flattenMarsTerrain(cx + rx, cz + rz, 30, ry);
+          add('metal', new THREE.CylinderGeometry(1.4, 1.6, 4.5, 16), at(rx, ry + 2.25, rz));
+          add('white', new THREE.ConeGeometry(5.5, 4.5, 18, 1, true), at(rx, ry + 7, rz, Math.PI));
+          add('regolith', lumpify(new THREE.TorusGeometry(12, 3.4, 10, 40), 0.6), at(rx, ry - 1.2, rz, Math.PI / 2, 0, 0, 1, 1, 0.8));
+          const warn = new THREE.Mesh(new THREE.SphereGeometry(0.45, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff2a1a }));
+          warn.position.set(cx + rx, ry + 9.8, cz + rz);
+          this.scene.add(warn);
+          this.animatedObjects.push({ mesh: warn, type: 'blink', phase: rx * 0.1 });
+          circle(rx, rz, 14);
+          const lead = resamplePath([new THREE.Vector3(cx + rx, 0, cz + rz + 12), new THREE.Vector3(cx + 20, 0, cz - 430)], 4, false);
+          this.scene.add(new THREE.Mesh(buildDrapedRibbon(lead, 0.35, 0.06, false), cableMat));
+        }
+      }
+    }
+
+    // Build one merged mesh per material
+    for (const [key, list] of Object.entries(parts)) {
+      if (list.length === 0) continue;
+      const mesh = new THREE.Mesh(mergeGeometryList(list), mats[key]);
+      const opaque = key !== 'glass' && key !== 'lamp';
+      mesh.castShadow = opaque;
+      mesh.receiveShadow = opaque;
+      mesh.name = 'Colony-' + key;
+      this.scene.add(mesh);
+    }
+    return collide;
+  }
+
+  // Elevated maglev terminal. dir = +1 if the line leaves toward +x.
+  buildRailTerminal(x, z, dir, platformHeight) {
+    const mats = this.getColonyMaterials();
+    const white = [], metal = [], lamp = [];
+    const y = this.getTerrainHeight(x, z);
+    const H = platformHeight;
+    for (const px of [5, 20, 35, 50]) {
+      for (const pz of [-4, 4]) {
+        metal.push({ geometry: new THREE.BoxGeometry(1.6, H, 1.6), matrix: _xf(x + dir * px, y + H / 2, z + pz) });
+      }
+    }
+    metal.push({ geometry: new THREE.BoxGeometry(56, 1.4, 13), matrix: _xf(x + dir * 28, y + H, z) });
+    white.push({ geometry: new THREE.CylinderGeometry(3.4, 3.4, 40, 20), matrix: _xf(x + dir * 30, y + H + 4.2, z + 3, 0, 0, Math.PI / 2) });
+    lamp.push({ geometry: new THREE.BoxGeometry(36, 0.8, 0.3), matrix: _xf(x + dir * 30, y + H + 4.6, z - 0.45) });
+    white.push({ geometry: new THREE.CylinderGeometry(3, 3, H + 5, 20), matrix: _xf(x, y + (H + 5) / 2, z) });
+    [[white, mats.white], [metal, mats.metal], [lamp, mats.lamp]].forEach(([list, mat]) => {
+      const mesh = new THREE.Mesh(mergeGeometryList(list), mat);
+      mesh.castShadow = mat !== mats.lamp;
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+    });
+    this.registerCollidable({ x, z }, 3.5);
+    for (const px of [5, 20, 35, 50]) this.registerCollidable({ x: x + dir * px, z }, 5);
+    return new THREE.Vector3(x + dir * 55, y + H + 2, z);
   }
 
   createColonyGroundingDetails(center, groundY) {
@@ -3640,14 +4215,6 @@ class MarsSceneManager {
         roughness: 0.5,
         metalness: 0.65
       });
-      const panelMat = new THREE.MeshStandardMaterial({
-        color: 0x152d66,
-        roughness: 0.18,
-        metalness: 0.65,
-        emissive: 0x06164a,
-        emissiveIntensity: 0.28
-      });
-
       // On desktop the Cybertruck ring road (createTrafficRoutes) is draped
       // over the terrain on this radius; the flat torus stays for mobile.
       if (perfSettings.isMobile) {
@@ -3686,8 +4253,8 @@ class MarsSceneManager {
         flattenMarsTerrain(padX, padZ, 44, padY);
 
         const pieces = perfSettings.isMobile
-          ? [[0, spoke.length]]
-          : [[0, ringRadius - ringGap], [ringRadius + ringGap, spoke.length]];
+          ? [[110, spoke.length]]
+          : [[110, ringRadius - ringGap], [ringRadius + ringGap, spoke.length]];
         pieces.forEach(([from, to]) => {
           const pts = resamplePath([at(from), at(to)], 4, false);
           const road = new THREE.Mesh(buildDrapedRibbon(pts, 5.5, 0.08, false), roadMats.surface);
@@ -3778,27 +4345,6 @@ class MarsSceneManager {
         mast.add(mastHead);
         this.animatedObjects.push({ mesh: mastHead, type: 'blink', phase: clusterIndex * 0.9 });
       });
-
-      const panelGeom = new THREE.BoxGeometry(18, 0.45, 9);
-      const strutGeom = new THREE.CylinderGeometry(0.35, 0.35, 5, 8);
-      for (let row = 0; row < 3; row++) {
-        for (let col = 0; col < 8; col++) {
-          if (!highDetail && col % 3 === 2) continue;
-          const x = center.x + 345 + col * 24;
-          const z = center.z - 120 + row * 32;
-          const y = this.getTerrainHeight(x, z);
-          const panel = new THREE.Mesh(panelGeom, panelMat);
-          panel.position.set(x, y + 4.2, z);
-          panel.rotation.x = -0.32;
-          panel.rotation.y = -0.18;
-          panel.castShadow = true;
-          group.add(panel);
-
-          const strut = new THREE.Mesh(strutGeom, darkCargoMat);
-          strut.position.set(x, y + 2.2, z);
-          group.add(strut);
-        }
-      }
 
       const rockCount = Math.floor((highDetail ? 190 : 120) * detailScale);
       const rockGeom = new THREE.DodecahedronGeometry(1, 0);
@@ -5380,8 +5926,8 @@ class MarsSceneManager {
     this.updateAnimations(now, dt);
     this.updateSettlementFades(now);
 
-    // Continuous rocket traffic around the colony
-    this.updateRocketTraffic(now);
+    // Starship launches and landings at the spaceport
+    this.updateRocketTraffic(dt);
 
     // Cybertruck traffic
     this.updateTraffic(dt);
@@ -5481,14 +6027,19 @@ class MarsSceneManager {
       if (perfSettings.isMobile) return;
       if (!this.colonyCenter || !this.secondaryColonyCenter) return;
 
-      const start = this.colonyCenter.clone();
-      const end = this.secondaryColonyCenter.clone();
-
-      // Elevate the track above the terrain
-      const startY = this.getTerrainHeight(start.x, start.z) + 45;
-      const endY = this.getTerrainHeight(end.x, end.z) + 45;
-      start.y = startY;
-      end.y = endY;
+      // Terminals at the facing edges of the two colonies, with the deck
+      // high enough to clear every rise in between
+      const ax = this.colonyCenter.x + 150, az = this.colonyCenter.z;
+      const bx = this.secondaryColonyCenter.x - 230, bz = this.secondaryColonyCenter.z;
+      const ga = this.getTerrainHeight(ax, az), gb = this.getTerrainHeight(bx, bz);
+      let platformHeight = 24;
+      for (let i = 1; i < 60; i++) {
+        const t = i / 60;
+        const ground = this.getTerrainHeight(ax + (bx - ax) * t, az + (bz - az) * t);
+        platformHeight = Math.max(platformHeight, ground - (ga + (gb - ga) * t) + 14);
+      }
+      const start = this.buildRailTerminal(ax, az, 1, platformHeight);
+      const end = this.buildRailTerminal(bx, bz, -1, platformHeight);
 
       // Build elevated pylons along the route (reduced for performance)
       const segmentCount = 12;
@@ -5766,125 +6317,11 @@ class MarsSceneManager {
   }
 
   // Simple time-based rocket launch/arrival cycles using the pre-created rockets
-  updateRocketTraffic(currentTime) {
-    if (!this.rocketTrafficEnabled || !this.rockets || this.rockets.length === 0) return;
-
-    const cycle = this.rocketCycleDuration || 60000;
-    const baseTime = (currentTime - this.rocketSystemStartTime) % cycle;
-    const tGlobal = baseTime / cycle; // 0..1 over one minute
-
-    this.rockets.forEach(rocketInfo => {
-      const { mesh, padY, phaseOffset, maxHeight } = rocketInfo;
-      if (!mesh) return;
-
-      // Each rocket runs through a full launch + cruise + landing every cycle,
-      // staggered by phaseOffset so there's always traffic.
-      let t = (tGlobal + phaseOffset) % 1;
-
-      // Timeline with 10-second pauses:
-      // 0.0 - 0.17: Grounded before launch (10s pause at 60s cycle)
-      // 0.17 - 0.35: Launch (ascending)
-      // 0.35 - 0.65: Cruise (coasting high)
-      // 0.65 - 0.83: Landing (descending)
-      // 0.83 - 1.0: Grounded after landing (10s pause)
-      
-      let height;
-      let isLaunching = false;
-      let isLanding = false;
-      
-      if (t < 0.17) {
-        // Grounded before launch - 10 second pause
-        height = 0;
-      } else if (t < 0.35) {
-        // Launch phase
-        isLaunching = true;
-        const local = (t - 0.17) / 0.18;
-        // Ease out for powerful start, then gradual acceleration
-        const eased = local < 0.5 ? 2 * local * local : 1 - Math.pow(-2 * local + 2, 2) / 2;
-        height = maxHeight * eased;
-      } else if (t < 0.65) {
-        // Cruise phase
-        height = maxHeight;
-      } else if (t < 0.83) {
-        // Landing phase
-        isLanding = true;
-        const local = (t - 0.65) / 0.18;
-        // Ease in for controlled descent
-        const eased = local < 0.5 ? 2 * local * local : 1 - Math.pow(-2 * local + 2, 2) / 2;
-        height = maxHeight * (1 - eased);
-      } else {
-        // Grounded after landing - 10 second pause
-        height = 0;
-      }
-
-      mesh.visible = true;
-      mesh.position.y = padY + height;
-
-      // Gentle roll during flight
-      if (height > 20) {
-        mesh.rotation.z = Math.sin(t * Math.PI * 4) * 0.06;
-      } else {
-        mesh.rotation.z = 0;
-      }
-
-      // Animate exhaust particles with BIGGER effect during launch/landing
-      if (mesh.userData && typeof mesh.userData.animateParticles === 'function') {
-        if (isLaunching || isLanding || height < 50) {
-          mesh.userData.animateParticles();
-          // Intensify effects during initial blast-off
-          if (isLaunching && height < maxHeight * 0.3) {
-            mesh.userData.animateParticles(); // Call twice for double intensity
-          }
-        }
-      }
-      
-      // Control exhaust visibility and intensity
-      if (mesh.userData.exhaustCone) {
-        if (isLaunching && height < maxHeight * 0.4) {
-          // BIG blast-off effect
-          mesh.userData.exhaustCone.visible = true;
-          mesh.userData.exhaustCone.scale.set(2.5, 2.5, 2.5);
-          if (mesh.userData.exhaustGlow) {
-            mesh.userData.exhaustGlow.visible = true;
-            mesh.userData.exhaustGlow.scale.set(2.5, 2.5, 2.5);
-          }
-          if (mesh.userData.engineLight) {
-            mesh.userData.engineLight.intensity = 4;
-          }
-        } else if (isLanding && height < maxHeight * 0.3) {
-          // Landing burn
-          mesh.userData.exhaustCone.visible = true;
-          mesh.userData.exhaustCone.scale.set(1.5, 1.5, 1.5);
-          if (mesh.userData.exhaustGlow) {
-            mesh.userData.exhaustGlow.visible = true;
-            mesh.userData.exhaustGlow.scale.set(1.5, 1.5, 1.5);
-          }
-          if (mesh.userData.engineLight) {
-            mesh.userData.engineLight.intensity = 2;
-          }
-        } else if (height > 50) {
-          // In flight - minimal exhaust
-          mesh.userData.exhaustCone.visible = false;
-          if (mesh.userData.exhaustGlow) {
-            mesh.userData.exhaustGlow.visible = false;
-          }
-          if (mesh.userData.engineLight) {
-            mesh.userData.engineLight.intensity = 0.5;
-          }
-        } else {
-          // Grounded - no exhaust
-          mesh.userData.exhaustCone.visible = false;
-          if (mesh.userData.exhaustGlow) {
-            mesh.userData.exhaustGlow.visible = false;
-          }
-          if (mesh.userData.engineLight) {
-            mesh.userData.engineLight.intensity = 0;
-          }
-        }
-      }
-    });
+  updateRocketTraffic(dt) {
+    if (!this.rocketTrafficEnabled || !this.spaceport) return;
+    const day = typeof window.dayNightBlend === 'number' ? window.dayNightBlend : 0;
+    this.spaceport.update(dt, day);
   }
-
   repositionSceneElements(playerPosition) {
     // No bases to reposition
   }
@@ -5963,136 +6400,6 @@ class MarsSceneManager {
 
   //   this.scene.add(rangeGroup);
   // }
-
-  addRocketEffects(rocket, type) {
-    // Create BIG engine exhaust cone
-    const exhaustGeometry = new THREE.ConeGeometry(8, 35, 16);
-    const exhaustMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff4400,
-      transparent: true,
-      opacity: 0.8,
-      blending: THREE.AdditiveBlending
-    });
-
-    const exhaust = new THREE.Mesh(exhaustGeometry, exhaustMaterial);
-    exhaust.position.y = -50;
-    exhaust.rotation.x = Math.PI;
-    rocket.add(exhaust);
-    rocket.userData.exhaustCone = exhaust; // Store reference for dynamic control
-
-    // Add BIGGER engine glow sphere
-    const glowGeometry = new THREE.SphereGeometry(15, 16, 16);
-    const glowMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff6600,
-      transparent: true,
-      opacity: 0.6,
-      blending: THREE.AdditiveBlending
-    });
-
-    const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-    glow.position.y = -45;
-    rocket.add(glow);
-    rocket.userData.exhaustGlow = glow; // Store reference
-
-    // Add BRIGHTER point light for engine
-    const engineLight = new THREE.PointLight(0xff4400, 4, 150);
-    engineLight.position.y = -45;
-    rocket.add(engineLight);
-    rocket.userData.engineLight = engineLight; // Store reference
-
-    // Add particle system for smoke
-    const particleCount = 100;
-    const particles = new THREE.BufferGeometry();
-    const positions = new Float32Array(particleCount * 3);
-
-    for (let i = 0; i < particleCount; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * 10;
-      positions[i * 3 + 1] = -50 - Math.random() * 20;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 10;
-    }
-
-    particles.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-    const particleMaterial = new THREE.PointsMaterial({
-      color: 0x888888,
-      size: 2,
-      transparent: true,
-      opacity: 0.5,
-      sizeAttenuation: true
-    });
-
-    const particleSystem = new THREE.Points(particles, particleMaterial);
-    rocket.add(particleSystem);
-
-    // Animate particles
-    const animateParticles = () => {
-      const positions = particles.attributes.position.array;
-
-      for (let i = 0; i < particleCount; i++) {
-        positions[i * 3 + 1] -= 0.5; // Move down
-
-        // Reset particle if too far down
-        if (positions[i * 3 + 1] < -100) {
-          positions[i * 3] = (Math.random() - 0.5) * 10;
-          positions[i * 3 + 1] = -50;
-          positions[i * 3 + 2] = (Math.random() - 0.5) * 10;
-        }
-      }
-
-      particles.attributes.position.needsUpdate = true;
-    };
-
-    // Store animation function for later use
-    rocket.userData.animateParticles = animateParticles;
-  }
-
-  // Create a lightweight Starship-like rocket for colony traffic
-  createSimpleRocket() {
-    const rocketGroup = new THREE.Group();
-
-    // Main body - BIGGER
-    const bodyGeometry = new THREE.CylinderGeometry(9, 9, 90, 24);
-    const bodyMaterial = new THREE.MeshStandardMaterial({
-      color: 0xe6e6e6,
-      metalness: 0.8,
-      roughness: 0.2
-    });
-    const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-    body.position.y = 45; // base at y=0
-    body.castShadow = true;
-    body.receiveShadow = true;
-
-    // Nose - BIGGER
-    const noseGeometry = new THREE.ConeGeometry(9, 22, 24);
-    const nose = new THREE.Mesh(noseGeometry, bodyMaterial);
-    nose.position.y = 101;
-    nose.castShadow = true;
-
-    // Simple fins - BIGGER
-    const finGeometry = new THREE.BoxGeometry(4, 14, 14);
-    const finMaterial = new THREE.MeshStandardMaterial({
-      color: 0xd0d0d0,
-      metalness: 0.7,
-      roughness: 0.25
-    });
-    const finOffsets = [
-      new THREE.Vector3(0, 18, 12),
-      new THREE.Vector3(0, 18, -12),
-      new THREE.Vector3(12, 18, 0),
-      new THREE.Vector3(-12, 18, 0)
-    ];
-    finOffsets.forEach(offset => {
-      const fin = new THREE.Mesh(finGeometry, finMaterial);
-      fin.position.copy(offset);
-      fin.castShadow = true;
-      rocketGroup.add(fin);
-    });
-
-    rocketGroup.add(body, nose);
-    rocketGroup.castShadow = true;
-
-    return rocketGroup;
-  }
 
 
 
