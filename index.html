@@ -436,17 +436,15 @@
     }
   </style>
   <!-- Preload Three.js for faster discovery -->
-  <link rel="preload" href="https://cdn.jsdelivr.net/npm/three@0.140.2/build/three.min.js" as="script" crossorigin>
-  <link rel="preload" href="https://cdn.jsdelivr.net/npm/three@0.140.2/examples/js/loaders/GLTFLoader.js" as="script" crossorigin>
-  <link rel="preload" href="https://cdn.jsdelivr.net/npm/three@0.140.2/examples/js/controls/OrbitControls.js" as="script" crossorigin>
+  <link rel="preload" href="https://cdn.jsdelivr.net/npm/three@0.140.2/build/three.min.js" as="script" crossorigin="anonymous">
+  <link rel="preload" href="https://cdn.jsdelivr.net/npm/three@0.140.2/examples/js/controls/OrbitControls.js" as="script" crossorigin="anonymous">
   <!-- Also preload the game script so browser starts fetching it early -->
   <!-- preload removed to prevent caching issues -->
   <!-- <link rel="preload" href="mars.js" as="script"> -->
   <!-- Load Three.js libraries (must load in order) -->
   <!-- Use defer so HTML and preloader render quickly before heavy JS executes -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.140.2/build/three.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.140.2/examples/js/loaders/GLTFLoader.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.140.2/examples/js/controls/OrbitControls.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.140.2/build/three.min.js" crossorigin="anonymous" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.140.2/examples/js/controls/OrbitControls.js" crossorigin="anonymous" defer></script>
 </head>
 <body>
   <!-- Preloader -->
@@ -471,29 +469,7 @@
       <option value="high">High (Powerful PC)</option>
       <option value="auto">Auto Detect</option>
     </select>
-    
-    <label>Texture Quality:</label>
-    <select id="texture-quality">
-      <option value="low">Low (512px)</option>
-      <option value="medium">Medium (1024px)</option>
-      <option value="high">High (2048px)</option>
-      <option value="ultra">Ultra (4096px)</option>
-    </select>
-    
-    <label>Particle Count:</label>
-    <select id="particle-count">
-      <option value="low">Low (100)</option>
-      <option value="medium">Medium (500)</option>
-      <option value="high">High (1000)</option>
-    </select>
-    
-    <label>Render Distance:</label>
-    <select id="render-distance">
-      <option value="low">Low (3000m)</option>
-      <option value="medium">Medium (5000m)</option>
-      <option value="high">High (7000m)</option>
-    </select>
-    
+
     <button id="apply-settings">Apply Settings</button>
   </div>
 
@@ -606,8 +582,46 @@
         
         specs.performanceScore = performanceScore;
         specs.performanceLevel = this.getPerformanceLevel(performanceScore);
-        
+
+        // A quality level picked in the settings panel overrides auto-detection
+        try {
+          const saved = localStorage.getItem('mars_graphics_quality');
+          if (saved === 'low' || saved === 'medium' || saved === 'high') {
+            specs.performanceLevel = saved;
+          }
+        } catch (e) {
+          // Storage unavailable - keep the detected level
+        }
+
+        specs.mobileTier = specs.isMobile ? this.getMobileTier() : null;
+
         return specs;
+      }
+
+      getMobileTier() {
+        const deviceMemory = navigator.deviceMemory || 4;
+        const hardwareConcurrency = navigator.hardwareConcurrency || 4;
+        const screenSize = Math.max(window.screen.width, window.screen.height);
+        const pixelRatio = window.devicePixelRatio || 1;
+
+        let mobileScore = 0;
+        if (deviceMemory >= 8) mobileScore += 30;
+        else if (deviceMemory >= 6) mobileScore += 20;
+        else if (deviceMemory >= 4) mobileScore += 10;
+
+        if (hardwareConcurrency >= 8) mobileScore += 25;
+        else if (hardwareConcurrency >= 6) mobileScore += 15;
+        else if (hardwareConcurrency >= 4) mobileScore += 10;
+
+        if (screenSize >= 1920) mobileScore += 20;
+        else if (screenSize >= 1440) mobileScore += 15;
+        else if (screenSize >= 1080) mobileScore += 10;
+
+        if (pixelRatio >= 3) mobileScore += 10;
+        else if (pixelRatio >= 2) mobileScore += 5;
+
+        this.mobileScore = mobileScore;
+        return mobileScore >= 60 ? 'high' : mobileScore >= 30 ? 'medium' : 'low';
       }
       
       getPerformanceLevel(score) {
@@ -674,29 +688,8 @@
         // Get mobile tier if applicable
         let mobileTierInfo = '';
         if (this.deviceSpecs.isMobile) {
-          // Simulate mobile tier detection (matching the logic in mars.js)
-          const deviceMemory = navigator.deviceMemory || 4;
-          const hardwareConcurrency = navigator.hardwareConcurrency || 4;
-          const screenSize = Math.max(window.screen.width, window.screen.height);
-          const pixelRatio = window.devicePixelRatio || 1;
-          
-          let mobileScore = 0;
-          if (deviceMemory >= 8) mobileScore += 30;
-          else if (deviceMemory >= 6) mobileScore += 20;
-          else if (deviceMemory >= 4) mobileScore += 10;
-          
-          if (hardwareConcurrency >= 8) mobileScore += 25;
-          else if (hardwareConcurrency >= 6) mobileScore += 15;
-          else if (hardwareConcurrency >= 4) mobileScore += 10;
-          
-          if (screenSize >= 1920) mobileScore += 20;
-          else if (screenSize >= 1440) mobileScore += 15;
-          else if (screenSize >= 1080) mobileScore += 10;
-          
-          if (pixelRatio >= 3) mobileScore += 10;
-          else if (pixelRatio >= 2) mobileScore += 5;
-          
-          const mobileTier = mobileScore >= 60 ? 'high' : mobileScore >= 30 ? 'medium' : 'low';
+          const mobileTier = this.deviceSpecs.mobileTier;
+          const mobileScore = this.mobileScore;
           const tierEmoji = mobileTier === 'high' ? '🔥' : mobileTier === 'medium' ? '⚡' : '📱';
           const tierName = mobileTier === 'high' ? 'High-End' : mobileTier === 'medium' ? 'Mid-Range' : 'Budget';
           
@@ -739,11 +732,10 @@
         const applySettings = document.getElementById('apply-settings');
         
         // Set default values based on device
-        document.getElementById('graphics-quality').value = this.deviceSpecs.performanceLevel;
-        document.getElementById('texture-quality').value = this.deviceSpecs.performanceLevel;
-        document.getElementById('particle-count').value = this.deviceSpecs.performanceLevel;
-        document.getElementById('render-distance').value = this.deviceSpecs.performanceLevel;
-        
+        let savedQuality = null;
+        try { savedQuality = localStorage.getItem('mars_graphics_quality'); } catch (e) {}
+        document.getElementById('graphics-quality').value = savedQuality ? this.deviceSpecs.performanceLevel : 'auto';
+
         settingsToggle.addEventListener('click', () => {
           performanceSettings.style.display = performanceSettings.style.display === 'none' ? 'block' : 'none';
         });
@@ -756,20 +748,17 @@
       
       applyPerformanceSettings() {
         const graphicsQuality = document.getElementById('graphics-quality').value;
-        const textureQuality = document.getElementById('texture-quality').value;
-        const particleCount = document.getElementById('particle-count').value;
-        const renderDistance = document.getElementById('render-distance').value;
-        
-        // Update global performance settings
-        window.GAME_PERFORMANCE_SETTINGS = {
-          graphicsQuality,
-          textureQuality,
-          particleCount,
-          renderDistance,
-          ...this.performanceSettings
-        };
-        
-        console.log('Performance settings applied:', window.GAME_PERFORMANCE_SETTINGS);
+
+        // The scene is built once at load, so a new quality level only takes
+        // effect after a reload. Persist the choice so the reload honours it.
+        try {
+          if (graphicsQuality === 'auto') localStorage.removeItem('mars_graphics_quality');
+          else localStorage.setItem('mars_graphics_quality', graphicsQuality);
+        } catch (e) {
+          // Storage unavailable (private mode) - the choice applies to this load only
+        }
+
+        console.log('Graphics quality selected:', graphicsQuality);
         
         // Show restart notification
         this.showRestartNotification();
@@ -824,13 +813,14 @@
           return;
         }
         
-        // Set initial global settings
+        // Set initial global settings. Numeric fields (particleCount,
+        // renderDistance, ...) must stay numeric - mars.js feeds them straight
+        // into buffer sizes and fog distances.
         window.GAME_PERFORMANCE_SETTINGS = {
           ...this.performanceSettings,
           graphicsQuality: this.deviceSpecs.performanceLevel,
-          textureQuality: this.deviceSpecs.performanceLevel,
-          particleCount: this.deviceSpecs.performanceLevel,
-          renderDistance: this.deviceSpecs.performanceLevel
+          isMobile: this.deviceSpecs.isMobile,
+          mobileTier: this.deviceSpecs.mobileTier
         };
         
         // Show loading steps quickly without artificial delays
