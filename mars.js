@@ -150,7 +150,7 @@ function updateGameHUD() {
     let degrees = (window.roverYaw * 180 / Math.PI) % 360;
     if (degrees < 0) degrees += 360;
     const idx = Math.round(degrees / 45) % 8;
-    hud.compass.textContent = `${_compassDirs[idx]} (${degrees.toFixed(0)}Â°)`;
+    hud.compass.textContent = `${_compassDirs[idx]} (${degrees.toFixed(0)}°)`;
   }
 
   // Update guided route HUD status
@@ -375,10 +375,10 @@ const cleanup = () => {
   }
 };
 
-// Multiple cleanup event listeners
+// Only release GPU resources when the page is really going away. 'pagehide'
+// also fires when the page enters the back/forward cache, and disposing the
+// renderer there left a dead canvas when the user navigated back.
 window.addEventListener('beforeunload', cleanup);
-window.addEventListener('pagehide', cleanup);
-window.addEventListener('unload', cleanup);
 
 // Cleanup on visibility change (when tab becomes hidden)
 document.addEventListener('visibilitychange', () => {
@@ -395,11 +395,11 @@ document.addEventListener('visibilitychange', () => {
 });
 document.body.appendChild(renderer.domElement);
 
-// Pure black background behind everything â€” the skybox paints over this
+// Pure black background behind everything — the skybox paints over this
 renderer.setClearColor(0x000000, 1);
 scene.background = new THREE.Color(0x000000);
 
-// Night skybox â€” create immediately since the game starts at night
+// Night skybox — create immediately since the game starts at night
 let spaceSkybox = null;
 let _spaceSkyboxCreating = false;
 
@@ -411,7 +411,7 @@ function ensureSpaceSkybox() {
   console.log('Skybox created (night start)');
 }
 
-// Create skybox right away â€” night mode needs it visible from frame 1
+// Create skybox right away — night mode needs it visible from frame 1
 ensureSpaceSkybox();
 
 // Fog fades distant terrain to black, matching the void behind everything
@@ -422,7 +422,7 @@ scene.fog = new THREE.Fog(fogColor, perfSettings.fogDistance * 0.2 * fogDensity,
 // Endless terrain system with reduced complexity
 const terrainSystem = {
   chunkSize: 200, // Size of each terrain chunk
-  visibleRadius: 50, // Large radius â€” allow free exploration across the terrain
+  visibleRadius: 50, // Large radius — allow free exploration across the terrain
   chunks: new Map(), // Store active chunks
   currentChunk: { x: 0, z: 0 }, // Current chunk coordinates
   lastUpdateTime: 0, // Track last update time for throttling
@@ -467,6 +467,12 @@ const terrainSystem = {
     }
   },
 };
+
+// Command colony site. The terrain generator keeps its set-piece features
+// (mesas, craters, canyons) away from here so the colony, its ring road and
+// the haul roads sit on open, gently rolling ground.
+const COLONY_SITE_X = -400;
+const COLONY_SITE_Z = -600;
 
 // Create and add the realistic Mars terrain
 const marsSurface = createRealisticMarsTerrain();
@@ -770,10 +776,11 @@ function createRealisticRover() {
   });
 
   // === Night driving headlights (the rover's front faces local -Z) ===
-  // Emissive lamp meshes so the headlights are visible on the rover itself.
+  // Emissive lamps mounted on the front of the chassis (they used to float
+  // 1.4 m ahead of the rover, past the front edge at z = -1.6).
   const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfff6e0 });
-  const headlightGeom = new THREE.SphereGeometry(0.2, 10, 10);
-  const lampPositions = [[-1.15, 1.25, -3.0], [1.15, 1.25, -3.0]];
+  const headlightGeom = new THREE.SphereGeometry(0.12, 10, 10);
+  const lampPositions = [[-0.75, 0.95, -1.62], [0.75, 0.95, -1.62]];
   lampPositions.forEach(([lx, ly, lz]) => {
     const lamp = new THREE.Mesh(headlightGeom, headlightMat);
     lamp.position.set(lx, ly, lz);
@@ -839,7 +846,7 @@ function createSolarPanelTexture() {
   canvas.height = 256;
   const context = canvas.getContext('2d');
 
-  // Deep blue base â€” photovoltaic substrate
+  // Deep blue base — photovoltaic substrate
   context.fillStyle = '#112266';
   context.fillRect(0, 0, 256, 256);
 
@@ -853,7 +860,7 @@ function createSolarPanelTexture() {
     for (let y = 0; y < cellsY; y++) {
       const px = x * cellW;
       const py = y * cellH;
-      // Cell body â€” alternating shade for monocrystalline look
+      // Cell body — alternating shade for monocrystalline look
       const shade = (x + y) % 2 === 0 ? '#152d8a' : '#1a3580';
       context.fillStyle = shade;
       context.fillRect(px + 1, py + 1, cellW - 2, cellH - 2);
@@ -882,6 +889,8 @@ function createSolarPanelTexture() {
 }
 
 const { rover, wheels, originalWheelPositions } = createRealisticRover();
+// Collision helpers in MarsSceneManager look the rover up here
+window.rover = rover;
 // Set initial rotation to face away from the screen
 rover.rotation.y = 0;
 scene.add(rover);
@@ -1073,22 +1082,26 @@ const sunIntensity = perfSettings.samsungOptimized ? 0.16 * perfSettings.materia
                      perfSettings.isMobile ? 0.14 : 0.12;
 const sunColor = 0xb96a45;
 const sunLight = new THREE.DirectionalLight(sunColor, sunIntensity);
-// Low-angle Mars sun â€” long shadows, dramatic look
+// Low-angle Mars sun — long shadows, dramatic look
 sunLight.position.set(-120, 55, 80);
 if (!perfSettings.isMobile) {
   sunLight.castShadow = true;
   sunLight.shadow.mapSize.width = 2048;
   sunLight.shadow.mapSize.height = 2048;
   sunLight.shadow.camera.near = 1;
+  // Tight frustum that follows the rover (see updateDayNightCycle):
+  // 240 m across at 2048 px is ~12 cm per texel, crisp enough for the
+  // rover and trucks, instead of 800 m of blurry coverage fixed at spawn
   sunLight.shadow.camera.far = 1200;
-  sunLight.shadow.camera.left = -400;
-  sunLight.shadow.camera.right = 400;
-  sunLight.shadow.camera.top = 400;
-  sunLight.shadow.camera.bottom = -400;
-  sunLight.shadow.bias = -0.0005;
-  sunLight.shadow.normalBias = 0.02;
+  sunLight.shadow.camera.left = -120;
+  sunLight.shadow.camera.right = 120;
+  sunLight.shadow.camera.top = 120;
+  sunLight.shadow.camera.bottom = -120;
+  sunLight.shadow.bias = -0.0004;
+  sunLight.shadow.normalBias = 0.03;
 }
 scene.add(sunLight);
+scene.add(sunLight.target);
 
 // Secondary fill light - barely lifts silhouettes at night
 if (!perfSettings.isMobile) {
@@ -1187,10 +1200,6 @@ if (!window.gameEventListeners) {
   };
 }
 
-// Konami code sequence
-const konamiCode = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyA'];
-let konamiIndex = 0;
-
 // Combined keydown handler to prevent duplicate listeners
 const keydownHandler = (event) => {
   keys[event.key.toLowerCase()] = true;
@@ -1223,19 +1232,6 @@ const keydownHandler = (event) => {
     }
   }
   
-  // Photo mode toggle
-  if (event.key.toLowerCase() === 'p') {
-    const perfSettings = getPerformanceSettings();
-    if (perfSettings.enablePhotoMode) {
-      togglePhotoMode();
-    }
-  }
-  
-  // Help system toggle
-  if (event.key.toLowerCase() === 'h') {
-    toggleHelpSystem();
-  }
-
   // Dev road/vehicle debug visualizer (V key)
   if (event.key.toLowerCase() === 'v') {
     window.showRoadDebug = !window.showRoadDebug;
@@ -1250,20 +1246,6 @@ const keydownHandler = (event) => {
         }
       });
       _roadDebugGroup = null;
-    }
-  }
-  
-  // Konami code easter egg
-  if (getPerformanceSettings().enableEasterEggs) {
-    if (event.code === konamiCode[konamiIndex]) {
-      konamiIndex++;
-      if (konamiIndex === konamiCode.length) {
-        // Konami code completed!
-        activateKonamiCode();
-        konamiIndex = 0;
-      }
-    } else {
-      konamiIndex = 0; // Reset on wrong key
     }
   }
 };
@@ -1426,474 +1408,6 @@ let transitionStartTime = 0;
 let transitionDuration = 10000; // 10 seconds in milliseconds
 let transitionStartState = 'day'; // or 'night'
 
-// Add a new state variable for realistic mode
-let isRealisticMode = true; // Default to realistic mode
-
-// Add a function to toggle between stylized and realistic mode
-function toggleRealisticMode() {
-  isRealisticMode = !isRealisticMode;
-  console.log(`Realistic mode: ${isRealisticMode ? 'ON' : 'OFF'}`);
-  updateSkyAppearance();
-}
-
-// Meteor System - Create shooting stars in the night sky
-class MeteorSystem {
-  constructor(skyRadius = 5000, count = null) {
-    const perfSettings = getPerformanceSettings();
-    const adaptiveCount = count || Math.floor((perfSettings.particleCount || 300) / 8); // More meteors for better effect
-    
-    this.skyRadius = skyRadius;
-    this.meteors = [];
-    this.meteorPool = [];
-    this.maxMeteors = adaptiveCount;
-    this.activeMeteors = 0;
-    this.meteorProbability = perfSettings.detailLevel === 'high' ? 0.05 : 
-                           perfSettings.detailLevel === 'normal' ? 0.03 : 0.02;
-
-    // Meteor shower system
-    this.meteorShowerActive = false;
-    this.meteorShowerDuration = 0;
-    this.meteorShowerMaxDuration = 30; // 30 seconds
-    this.meteorShowerCooldown = 0;
-    this.meteorShowerMaxCooldown = 120; // 2 minutes between showers
-    this.meteorShowerIntensity = 1.0;
-    this.lastMeteorShowerTime = 0;
-
-    // Create meteor textures
-    this.createMeteorTextures();
-
-    // Create the meteor pool
-    this.createMeteorPool();
-  }
-
-  createMeteorTextures() {
-    // Create a glow texture for the meteor head
-    const glowSize = 128;
-    const glowCanvas = document.createElement('canvas');
-    glowCanvas.width = glowSize;
-    glowCanvas.height = glowSize;
-    const glowContext = glowCanvas.getContext('2d');
-
-    // Create radial gradient for glow
-    const gradient = glowContext.createRadialGradient(
-      glowSize / 2, glowSize / 2, 0,
-      glowSize / 2, glowSize / 2, glowSize / 2
-    );
-    gradient.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
-    gradient.addColorStop(0.2, 'rgba(255, 240, 220, 0.9)');
-    gradient.addColorStop(0.5, 'rgba(255, 220, 200, 0.5)');
-    gradient.addColorStop(0.8, 'rgba(255, 180, 150, 0.2)');
-    gradient.addColorStop(1, 'rgba(255, 120, 100, 0.0)');
-
-    glowContext.fillStyle = gradient;
-    glowContext.fillRect(0, 0, glowSize, glowSize);
-
-    this.glowTexture = new THREE.CanvasTexture(glowCanvas);
-
-    // Create a fireball texture for special meteors
-    const fireballSize = 128;
-    const fireballCanvas = document.createElement('canvas');
-    fireballCanvas.width = fireballSize;
-    fireballCanvas.height = fireballSize;
-    const fireballContext = fireballCanvas.getContext('2d');
-
-    // Create fireball gradient
-    const fireballGradient = fireballContext.createRadialGradient(
-      fireballSize / 2, fireballSize / 2, 0,
-      fireballSize / 2, fireballSize / 2, fireballSize / 2
-    );
-    fireballGradient.addColorStop(0, 'rgba(255, 255, 255, 1.0)');
-    fireballGradient.addColorStop(0.1, 'rgba(255, 255, 200, 0.9)');
-    fireballGradient.addColorStop(0.3, 'rgba(255, 200, 100, 0.8)');
-    fireballGradient.addColorStop(0.6, 'rgba(255, 100, 50, 0.5)');
-    fireballGradient.addColorStop(0.9, 'rgba(255, 50, 0, 0.2)');
-    fireballGradient.addColorStop(1, 'rgba(255, 0, 0, 0.0)');
-
-    fireballContext.fillStyle = fireballGradient;
-    fireballContext.fillRect(0, 0, fireballSize, fireballSize);
-
-    this.fireballTexture = new THREE.CanvasTexture(fireballCanvas);
-
-    // Create a spark texture for trail effects
-    const sparkSize = 32;
-    const sparkCanvas = document.createElement('canvas');
-    sparkCanvas.width = sparkSize;
-    sparkCanvas.height = sparkSize;
-    const sparkContext = sparkCanvas.getContext('2d');
-
-    // Create spark gradient
-    const sparkGradient = sparkContext.createRadialGradient(
-      sparkSize / 2, sparkSize / 2, 0,
-      sparkSize / 2, sparkSize / 2, sparkSize / 2
-    );
-    sparkGradient.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
-    sparkGradient.addColorStop(0.3, 'rgba(255, 220, 150, 0.6)');
-    sparkGradient.addColorStop(0.7, 'rgba(255, 180, 100, 0.3)');
-    sparkGradient.addColorStop(1, 'rgba(255, 150, 50, 0.0)');
-
-    sparkContext.fillStyle = sparkGradient;
-    sparkContext.fillRect(0, 0, sparkSize, sparkSize);
-
-    this.sparkTexture = new THREE.CanvasTexture(sparkCanvas);
-  }
-
-  createMeteorPool() {
-    // Create a pool of meteors to reuse
-    for (let i = 0; i < this.maxMeteors; i++) {
-      // Create meteor trail geometry - a line with trail
-      const meteorGeometry = new THREE.BufferGeometry();
-      const positions = new Float32Array(20 * 3); // 20 points for the trail
-
-      // Initialize all positions to zero
-      for (let j = 0; j < positions.length; j++) {
-        positions[j] = 0;
-      }
-
-      meteorGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-      // Create meteor trail material with glow effect
-      const meteorMaterial = new THREE.LineBasicMaterial({
-        color: 0xffddaa,
-        transparent: true,
-        opacity: 0.8,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        linewidth: 2 // Note: linewidth may not work in all browsers
-      });
-
-      // Create the meteor trail line
-      const meteorTrail = new THREE.Line(meteorGeometry, meteorMaterial);
-      meteorTrail.frustumCulled = false; // Ensure it's always rendered
-      meteorTrail.visible = false; // Start invisible
-
-      // Create meteor head (glowing point)
-      const headGeometry = new THREE.PlaneGeometry(20, 20);
-      const headMaterial = new THREE.MeshBasicMaterial({
-        map: this.glowTexture,
-        transparent: true,
-        opacity: 1.0,
-        blending: THREE.AdditiveBlending,
-        depthWrite: false,
-        side: THREE.DoubleSide
-      });
-
-      const meteorHead = new THREE.Mesh(headGeometry, headMaterial);
-      meteorHead.frustumCulled = false;
-      meteorHead.visible = false;
-
-      // Group the trail and head together
-      const meteorGroup = new THREE.Group();
-      meteorGroup.add(meteorTrail);
-      meteorGroup.add(meteorHead);
-
-      // Add meteor data
-      meteorGroup.userData = {
-        active: false,
-        speed: 0,
-        direction: new THREE.Vector3(),
-        positions: [],
-        life: 0,
-        maxLife: 0,
-        size: 0,
-        trail: meteorTrail,
-        head: meteorHead
-      };
-
-      // Add to scene and pool
-      scene.add(meteorGroup);
-      this.meteorPool.push(meteorGroup);
-    }
-  }
-
-  activateMeteor(meteorType = 'normal') {
-    // Find an inactive meteor from the pool
-    for (let i = 0; i < this.meteorPool.length; i++) {
-      const meteorGroup = this.meteorPool[i];
-
-      if (!meteorGroup.userData.active) {
-        // Determine meteor properties based on type
-        let speed, size, brightness, color, texture, lifespan;
-        
-        switch (meteorType) {
-          case 'fireball':
-            speed = 80 + Math.random() * 200;
-            size = 3 + Math.random() * 5;
-            brightness = 1.5 + Math.random() * 1.5;
-            color = new THREE.Color(`hsl(${15 + Math.random() * 15}, 90%, 80%)`); // Red-orange
-            texture = this.fireballTexture;
-            lifespan = 2 + Math.random() * 3;
-            break;
-          case 'bright':
-            speed = 100 + Math.random() * 300;
-            size = 2 + Math.random() * 3;
-            brightness = 2 + Math.random() * 2;
-            color = new THREE.Color(`hsl(${200 + Math.random() * 60}, 70%, 85%)`); // Blue-white
-            texture = this.glowTexture;
-            lifespan = 1 + Math.random() * 2;
-            break;
-          case 'shower':
-            speed = 60 + Math.random() * 150;
-            size = 1 + Math.random() * 2;
-            brightness = 1 + Math.random() * 1;
-            color = new THREE.Color(`hsl(${30 + Math.random() * 30}, 80%, 75%)`); // Yellow-orange
-            texture = this.sparkTexture;
-            lifespan = 1 + Math.random() * 1.5;
-            break;
-          default: // normal
-            speed = 50 + Math.random() * 200;
-            size = 1 + Math.random() * 2.5;
-            brightness = 0.8 + Math.random() * 1.2;
-            color = new THREE.Color(`hsl(${30 + Math.random() * 20}, 80%, 70%)`); // Orange-yellow
-            texture = this.glowTexture;
-            lifespan = 1.5 + Math.random() * 2;
-        }
-
-        // Randomize meteor trajectory
-        let phi, theta;
-        if (this.meteorShowerActive && meteorType === 'shower') {
-          // During shower, meteors come from specific radiant point
-          const radiantPhi = Math.PI * 0.75; // Northeast sky
-          const radiantTheta = Math.PI * 0.3;
-          phi = radiantPhi + (Math.random() - 0.5) * Math.PI * 0.3;
-          theta = radiantTheta + (Math.random() - 0.5) * Math.PI * 0.2;
-        } else {
-          // Random positioning for normal meteors
-          phi = Math.random() * Math.PI * 2;
-          theta = Math.random() * Math.PI * 0.5;
-        }
-
-                  // Calculate start position on the sky dome
-          const startX = this.skyRadius * Math.sin(theta) * Math.cos(phi);
-          const startY = this.skyRadius * Math.cos(theta);
-          const startZ = this.skyRadius * Math.sin(theta) * Math.sin(phi);
-
-        // Calculate end position (opposite side but lower)
-        const endPhi = (phi + Math.PI + (Math.random() - 0.5) * Math.PI * 0.5) % (Math.PI * 2);
-        const endTheta = Math.min(Math.PI * 0.9, theta + Math.random() * Math.PI * 0.4);
-
-        const endX = this.skyRadius * Math.sin(endTheta) * Math.cos(endPhi);
-        const endY = this.skyRadius * Math.cos(endTheta);
-        const endZ = this.skyRadius * Math.sin(endTheta) * Math.sin(endPhi);
-
-        // Calculate direction vector
-        const direction = new THREE.Vector3(endX - startX, endY - startY, endZ - startZ).normalize();
-
-        // Set meteor properties
-        meteorGroup.userData.active = true;
-        meteorGroup.userData.speed = speed;
-        meteorGroup.userData.direction = direction;
-        meteorGroup.userData.positions = [];
-        meteorGroup.userData.positions.push(new THREE.Vector3(startX, startY, startZ));
-        meteorGroup.userData.life = 0;
-        meteorGroup.userData.maxLife = lifespan;
-        meteorGroup.userData.size = size;
-        meteorGroup.userData.brightness = brightness;
-        meteorGroup.userData.meteorType = meteorType;
-
-        // Set meteor color and texture
-        meteorGroup.userData.trail.material.color = color;
-        meteorGroup.userData.head.material.map = texture;
-        meteorGroup.userData.head.material.needsUpdate = true;
-
-        // Initialize the trail with the start position
-        const positions = meteorGroup.userData.trail.geometry.attributes.position.array;
-        for (let j = 0; j < 20; j++) {
-          positions[j * 3] = startX;
-          positions[j * 3 + 1] = startY;
-          positions[j * 3 + 2] = startZ;
-        }
-        meteorGroup.userData.trail.geometry.attributes.position.needsUpdate = true;
-
-        // Position the head at the start
-        meteorGroup.userData.head.position.set(startX, startY, startZ);
-
-        // Scale the head based on meteor size and brightness
-        const headSize = (5 + size * 8) * brightness;
-        meteorGroup.userData.head.scale.set(headSize, headSize, headSize);
-
-        // Make meteor visible
-        meteorGroup.userData.trail.visible = true;
-        meteorGroup.userData.head.visible = true;
-
-        // Increase active meteor count
-        this.activeMeteors++;
-
-        // Add to active meteors list
-        this.meteors.push(meteorGroup);
-
-        return true;
-      }
-    }
-
-    return false; // No inactive meteors available
-  }
-
-  update(delta) {
-    // Update meteor shower system
-    this.updateMeteorShower(delta);
-
-    // Calculate current meteor probability
-    let currentProbability = this.meteorProbability;
-    
-    if (this.meteorShowerActive) {
-      // During shower, significantly increase meteor frequency
-      currentProbability *= (3 + this.meteorShowerIntensity * 2);
-    }
-
-    // Try to activate a new meteor based on probability
-    if (Math.random() < currentProbability && this.activeMeteors < this.maxMeteors) {
-      // Determine meteor type based on current conditions
-      let meteorType = 'normal';
-      
-      if (this.meteorShowerActive) {
-        // During shower, mostly shower meteors with occasional special ones
-        const rand = Math.random();
-        if (rand < 0.7) {
-          meteorType = 'shower';
-        } else if (rand < 0.85) {
-          meteorType = 'bright';
-        } else {
-          meteorType = 'fireball';
-        }
-      } else {
-        // Normal time - rare special meteors
-        const rand = Math.random();
-        if (rand < 0.9) {
-          meteorType = 'normal';
-        } else if (rand < 0.97) {
-          meteorType = 'bright';
-        } else {
-          meteorType = 'fireball';
-        }
-      }
-      
-      this.activateMeteor(meteorType);
-    }
-
-    // Update active meteors
-    for (let i = this.meteors.length - 1; i >= 0; i--) {
-      const meteorGroup = this.meteors[i];
-
-      if (meteorGroup.userData.active) {
-        // Update life
-        meteorGroup.userData.life += delta / 1000; // Convert delta to seconds
-
-        // Check if meteor should be deactivated
-        if (meteorGroup.userData.life >= meteorGroup.userData.maxLife) {
-          meteorGroup.userData.active = false;
-          meteorGroup.userData.trail.visible = false;
-          meteorGroup.userData.head.visible = false;
-          this.activeMeteors--;
-          this.meteors.splice(i, 1);
-          continue;
-        }
-
-        // Calculate progress (0 to 1)
-        const progress = meteorGroup.userData.life / meteorGroup.userData.maxLife;
-
-        // Calculate opacity based on life (fade in and out)
-        let opacity = 1.0;
-        if (progress < 0.2) {
-          // Fade in
-          opacity = progress / 0.2;
-        } else if (progress > 0.8) {
-          // Fade out
-          opacity = (1 - progress) / 0.2;
-        }
-
-        meteorGroup.userData.trail.material.opacity = opacity * 0.8;
-        meteorGroup.userData.head.material.opacity = opacity;
-
-        // Calculate new position
-        const lastPos = meteorGroup.userData.positions[meteorGroup.userData.positions.length - 1];
-        const newPos = new THREE.Vector3(
-          lastPos.x + meteorGroup.userData.direction.x * meteorGroup.userData.speed * delta / 1000,
-          lastPos.y + meteorGroup.userData.direction.y * meteorGroup.userData.speed * delta / 1000,
-          lastPos.z + meteorGroup.userData.direction.z * meteorGroup.userData.speed * delta / 1000
-        );
-
-        // Add new position to the trail
-        meteorGroup.userData.positions.push(newPos);
-
-        // Keep only the last 20 positions
-        if (meteorGroup.userData.positions.length > 20) {
-          meteorGroup.userData.positions.shift();
-        }
-
-        // Update trail geometry with trail positions
-        const positions = meteorGroup.userData.trail.geometry.attributes.position.array;
-        for (let j = 0; j < meteorGroup.userData.positions.length; j++) {
-          const pos = meteorGroup.userData.positions[j];
-          positions[j * 3] = pos.x;
-          positions[j * 3 + 1] = pos.y;
-          positions[j * 3 + 2] = pos.z;
-        }
-
-        meteorGroup.userData.trail.geometry.attributes.position.needsUpdate = true;
-
-        // Update head position to the latest position
-        meteorGroup.userData.head.position.copy(newPos);
-
-        // Make the head always face the camera
-        meteorGroup.userData.head.lookAt(camera.position);
-      }
-    }
-  }
-
-  updateMeteorShower(delta) {
-    const deltaSeconds = delta / 1000;
-    
-    if (this.meteorShowerActive) {
-      // Update shower duration
-      this.meteorShowerDuration += deltaSeconds;
-      
-      // Calculate shower intensity (starts low, peaks in middle, ends low)
-      const progress = this.meteorShowerDuration / this.meteorShowerMaxDuration;
-      if (progress < 0.3) {
-        this.meteorShowerIntensity = progress / 0.3; // Ramp up
-      } else if (progress < 0.7) {
-        this.meteorShowerIntensity = 1.0; // Peak
-      } else {
-        this.meteorShowerIntensity = (1.0 - progress) / 0.3; // Ramp down
-      }
-      
-      // End shower when duration exceeded
-      if (this.meteorShowerDuration >= this.meteorShowerMaxDuration) {
-        this.meteorShowerActive = false;
-        this.meteorShowerDuration = 0;
-        this.meteorShowerCooldown = 0;
-        this.meteorShowerIntensity = 0;
-        
-        // Show notification (if HUD system exists)
-        if (window.showNotification) {
-          window.showNotification('Meteor shower ended', 3000);
-        }
-      }
-    } else {
-      // Update cooldown
-      this.meteorShowerCooldown += deltaSeconds;
-      
-      // Start new shower when cooldown finished
-      if (this.meteorShowerCooldown >= this.meteorShowerMaxCooldown) {
-        this.startMeteorShower();
-      }
-    }
-  }
-
-  startMeteorShower() {
-    this.meteorShowerActive = true;
-    this.meteorShowerDuration = 0;
-    this.meteorShowerIntensity = 0;
-    this.meteorShowerMaxDuration = 20 + Math.random() * 30; // 20-50 seconds
-    this.meteorShowerMaxCooldown = 60 + Math.random() * 120; // 1-3 minutes until next shower
-    
-    // Show notification (if HUD system exists)
-    if (window.showNotification) {
-      window.showNotification('Meteor shower beginning! Look up!', 4000);
-    }
-  }
-}
-
 // Mars Atmospheric Effects System
 class MarsAtmosphericEffects {
   constructor(scene) {
@@ -1966,7 +1480,7 @@ class MarsAtmosphericEffects {
       vertexColors: true,
       transparent: true,
       opacity: 0.6,
-      blending: THREE.AdditiveBlending
+      depthWrite: false // normal blending: additive made dust glow against the night sky
     });
     
     const dustParticles = new THREE.Points(geometry, material);
@@ -1975,20 +1489,26 @@ class MarsAtmosphericEffects {
     return dustDevilGroup;
   }
 
-  spawnDustDevil() {
+  spawnDustDevil(roverPosition) {
     // Find inactive dust devil
     for (let i = 0; i < this.dustDevilPool.length; i++) {
       const dustDevil = this.dustDevilPool[i];
       if (!dustDevil.userData.active) {
-        // Spawn dust devil at random location
-        const spawnRadius = 2000;
+        // Spawn in view range of the rover (not around the world origin),
+        // standing on the terrain
         const angle = Math.random() * Math.PI * 2;
-        const distance = Math.random() * spawnRadius;
-        
-        dustDevil.position.x = Math.cos(angle) * distance;
-        dustDevil.position.z = Math.sin(angle) * distance;
-        dustDevil.position.y = 0;
-        
+        const distance = 300 + Math.random() * 900;
+        const cx = roverPosition ? roverPosition.x : 0;
+        const cz = roverPosition ? roverPosition.z : 0;
+
+        dustDevil.position.x = cx + Math.cos(angle) * distance;
+        dustDevil.position.z = cz + Math.sin(angle) * distance;
+        dustDevil.position.y = sampleTerrainHeight(dustDevil.position.x, dustDevil.position.z, 0);
+
+        // Pooled devils keep the faded-out opacity from their last life
+        const particles = dustDevil.children[0];
+        if (particles && particles.material) particles.material.opacity = 0.6;
+
         dustDevil.userData.active = true;
         dustDevil.userData.life = 0;
         dustDevil.userData.maxLife = 15 + Math.random() * 20; // 15-35 seconds
@@ -2018,9 +1538,9 @@ class MarsAtmosphericEffects {
       this.atmosphericHaze.rotation.z += deltaSeconds * 0.01;
     }
     
-    // Spawn dust devils occasionally
-    if (Math.random() < this.dustDevilSpawnRate) {
-      this.spawnDustDevil();
+    // Spawn dust devils occasionally (rate is per 60 Hz frame)
+    if (Math.random() < this.dustDevilSpawnRate * deltaSeconds * 60) {
+      this.spawnDustDevil(roverPosition);
     }
     
     // Update active dust devils
@@ -2033,12 +1553,18 @@ class MarsAtmosphericEffects {
         // Move dust devil
         dustDevil.position.x += Math.cos(dustDevil.userData.direction) * dustDevil.userData.speed * deltaSeconds;
         dustDevil.position.z += Math.sin(dustDevil.userData.direction) * dustDevil.userData.speed * deltaSeconds;
-        
+        dustDevil.position.y = sampleTerrainHeight(dustDevil.position.x, dustDevil.position.z, dustDevil.position.y);
+
         // Rotate dust devil
         dustDevil.rotation.y += dustDevil.userData.rotationSpeed * deltaSeconds;
         
         // Update particle positions for spiral effect
         const particles = dustDevil.children[0];
+        if (particles && particles.material) {
+          // Dust is lit by the sun: it should darken at night, not glow
+          const day = typeof window.dayNightBlend === 'number' ? window.dayNightBlend : 0;
+          particles.material.color.setScalar(0.12 + 0.88 * day);
+        }
         if (particles && particles.geometry) {
           const positions = particles.geometry.attributes.position.array;
           const time = dustDevil.userData.life;
@@ -2087,6 +1613,960 @@ class MarsAtmosphericEffects {
 }
 
 
+// ============================================================
+// TESLA CYBERTRUCK TRAFFIC
+// ============================================================
+// World units are metres (the rover is ~3 m long, like Perseverance), so the
+// trucks are modelled at their real dimensions: 5.68 m long, 2.03 m wide,
+// 1.79 m tall, 3.67 m wheelbase on 35" tyres.
+const CYBERTRUCK = {
+  wheelbase: 3.665,
+  track: 1.73,
+  wheelRadius: 0.44,
+  tireWidth: 0.29,
+  noseZ: -2.83,  // model faces -Z, like the rover
+  tailZ: 2.86,
+  apexZ: 0.15,   // roof peak, just behind the B-pillar
+  roofY: 1.791,
+  windshieldZ: -1.2,
+  cabinEndZ: 1.0
+};
+const MARS_GRAVITY = 3.71;
+
+// Side-profile roof line: one straight rake from the nose to the apex, one
+// straight line down to the tailgate - the Cybertruck's triangle silhouette.
+function _ctTopY(z) {
+  const c = CYBERTRUCK;
+  if (z <= c.apexZ) return 0.98 + ((z - c.noseZ) / (c.apexZ - c.noseZ)) * (c.roofY - 0.98);
+  return c.roofY + ((z - c.apexZ) / (c.tailZ - c.apexZ)) * (1.12 - c.roofY);
+}
+
+// Rocker line with the truck's angular, trapezoidal wheel arches
+function _ctBottomY(z) {
+  const half = CYBERTRUCK.wheelbase / 2;
+  let y = 0.40;
+  for (const axle of [-half, half]) {
+    const d = Math.abs(z - axle);
+    if (d < 0.66) y = Math.max(y, d <= 0.47 ? 0.97 : 0.97 - ((d - 0.47) / 0.19) * 0.57);
+  }
+  return y;
+}
+
+// Half-width of the top edge: full-width hood, greenhouse tapering to the
+// roof, then the "vault" sails flaring back out toward the tailgate.
+function _ctTopHalfWidth(z) {
+  const c = CYBERTRUCK;
+  if (z <= c.windshieldZ) return 0.95;
+  if (z <= c.apexZ) return 0.95 - ((z - c.windshieldZ) / (c.apexZ - c.windshieldZ)) * 0.21;
+  if (z <= 1.3) return 0.74 + ((z - c.apexZ) / (1.3 - c.apexZ)) * 0.23;
+  return 0.97;
+}
+
+function _ctTopInset(z) {
+  const c = CYBERTRUCK;
+  if (z <= c.apexZ) return 0.07;
+  if (z <= 1.3) return 0.07 + ((z - c.apexZ) / (1.3 - c.apexZ)) * 0.15;
+  return 0.22;
+}
+
+// Accumulates triangles for one material, then emits a flat-shaded
+// BufferGeometry with box-projected UVs and an optional dust gradient.
+class _PartBuilder {
+  constructor(dusty) {
+    this.positions = [];
+    this.dusty = dusty;
+  }
+
+  tri(a, b, c, outwardFrom) {
+    // Wind the triangle so its normal faces away from `outwardFrom`
+    if (outwardFrom) {
+      const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+      const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      if (nx * nx + ny * ny + nz * nz < 1e-12) return; // degenerate
+      const cx = (a[0] + b[0] + c[0]) / 3 - outwardFrom[0];
+      const cy = (a[1] + b[1] + c[1]) / 3 - outwardFrom[1];
+      const cz = (a[2] + b[2] + c[2]) / 3 - outwardFrom[2];
+      if (nx * cx + ny * cy + nz * cz < 0) { const t = b; b = c; c = t; }
+    }
+    this.positions.push(...a, ...b, ...c);
+  }
+
+  quad(a, b, c, d, outwardFrom) {
+    this.tri(a, b, c, outwardFrom);
+    this.tri(a, c, d, outwardFrom);
+  }
+
+  addGeometry(geometry, matrix) {
+    const g = geometry.index ? geometry.toNonIndexed() : geometry.clone();
+    if (matrix) g.applyMatrix4(matrix);
+    const p = g.attributes.position.array;
+    for (let i = 0; i < p.length; i++) this.positions.push(p[i]);
+    g.dispose();
+  }
+
+  addBox(w, h, d, x, y, z, rx = 0, ry = 0, rz = 0) {
+    const m = new THREE.Matrix4().compose(
+      new THREE.Vector3(x, y, z),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)),
+      new THREE.Vector3(1, 1, 1)
+    );
+    const box = new THREE.BoxGeometry(w, h, d);
+    this.addGeometry(box, m);
+    box.dispose();
+  }
+
+  build() {
+    const geometry = new THREE.BufferGeometry();
+    const pos = new Float32Array(this.positions);
+    geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geometry.computeVertexNormals(); // non-indexed => crisp faceted normals
+
+    const normals = geometry.attributes.normal.array;
+    const uvs = new Float32Array((pos.length / 3) * 2);
+    const colors = new Float32Array(pos.length);
+    for (let v = 0; v < pos.length / 3; v++) {
+      const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
+      const ax = Math.abs(normals[v * 3]), ay = Math.abs(normals[v * 3 + 1]), az = Math.abs(normals[v * 3 + 2]);
+      // Box projection with U along the truck's length, so the brushed
+      // grain runs front-to-back like the real stainless panels.
+      if (ax >= ay && ax >= az) { uvs[v * 2] = z; uvs[v * 2 + 1] = y; }
+      else if (ay >= az) { uvs[v * 2] = z; uvs[v * 2 + 1] = x; }
+      else { uvs[v * 2] = x; uvs[v * 2 + 1] = y; }
+
+      // Regolith dust caked on the lower body, fading out by the beltline
+      let r = 1, g = 1, b = 1;
+      if (this.dusty) {
+        const t = Math.pow(Math.min(1, Math.max(0, (y - 0.38) / 0.75)), 0.8);
+        r = 0.80 + 0.20 * t;
+        g = 0.55 + 0.45 * t;
+        b = 0.42 + 0.58 * t;
+      }
+      colors[v * 3] = r; colors[v * 3 + 1] = g; colors[v * 3 + 2] = b;
+    }
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.computeBoundingSphere();
+    return geometry;
+  }
+}
+
+// Build the Cybertruck as one geometry per material. Returns
+// { stainless, glass, trim, frontLight, tailLight, tire, cover }.
+function buildCybertruckGeometries() {
+  const c = CYBERTRUCK;
+  const stainless = new _PartBuilder(true);
+  const glass = new _PartBuilder(false);
+  const trim = new _PartBuilder(true);
+  const frontLight = new _PartBuilder(false);
+  const tailLight = new _PartBuilder(false);
+
+  // --- Body: lofted through cross-sections at every profile breakpoint ---
+  const half = c.wheelbase / 2;
+  const zs = new Set([c.noseZ, c.windshieldZ, c.apexZ - 0.12, c.apexZ, c.cabinEndZ, 1.3, c.tailZ]);
+  for (const axle of [-half, half]) {
+    [-0.66, -0.47, 0.47, 0.66].forEach(o => zs.add(axle + o));
+  }
+  const stations = [...zs].filter(z => z >= c.noseZ && z <= c.tailZ).sort((a, b) => a - b);
+
+  // Cross-section loop (right half, mirrored): bottom, crease, beltline,
+  // top edge, top inset.
+  const section = (z) => {
+    const y0 = _ctBottomY(z);
+    const yT = _ctTopY(z);
+    const yBelt = Math.min(1.14, yT);
+    const yC = Math.min(Math.max(0.78, y0 + 0.07), yBelt);
+    const wT = _ctTopHalfWidth(z);
+    const wI = wT - _ctTopInset(z);
+    const right = [
+      [0.955, y0, z], [1.013, yC, z], [1.0, yBelt, z], [wT, yT, z], [wI, yT, z]
+    ];
+    const left = right.map(p => [-p[0], p[1], p[2]]).reverse();
+    return right.concat(left); // 10 points, loop order
+  };
+
+  const zoneOf = (z) => {
+    if (z < c.windshieldZ) return 'hood';
+    if (z < c.apexZ - 0.12) return 'windshield';
+    if (z < c.apexZ) return 'roof';
+    if (z < c.cabinEndZ) return 'rearGlass';
+    return 'vault';
+  };
+
+  for (let s = 0; s < stations.length - 1; s++) {
+    const za = stations[s], zb = stations[s + 1];
+    const zm = (za + zb) / 2;
+    const A = section(za), B = section(zb);
+    const zone = zoneOf(zm);
+    // Reference point inside the shell (between rocker and roof), used to
+    // wind every face outward - including the wheel-arch ceilings
+    const center = [0, (_ctBottomY(zm) + _ctTopY(zm)) / 2, zm];
+    const greenhouse = zm > c.windshieldZ + 0.05 && zm < c.cabinEndZ && _ctTopY(zm) > 1.2;
+
+    for (let e = 0; e < 10; e++) {
+      const e2 = (e + 1) % 10;
+      // Edge index: 0 lower side, 1 upper side, 2 greenhouse side, 3 top outer,
+      // 4 top centre, 5..8 mirrored, 9 underbody
+      const kind = e <= 4 ? e : (e === 9 ? 9 : 8 - e);
+      let target = stainless;
+      if (kind === 9) target = trim;
+      else if (kind === 2 && greenhouse) target = glass;
+      else if (kind === 4) {
+        if (zone === 'windshield' || zone === 'rearGlass') target = glass;
+        else if (zone === 'vault') target = trim; // tonneau cover
+      }
+      target.quad(A[e], A[e2], B[e2], B[e], center);
+    }
+  }
+
+  // End caps (nose fascia and tailgate)
+  [[c.noseZ, -1], [c.tailZ, 1]].forEach(([z, dir]) => {
+    const pts = section(z);
+    const mid = [0, 0.8, z];
+    const inside = [0, 0.8, z - dir];
+    for (let i = 0; i < pts.length; i++) {
+      stainless.tri(mid, pts[i], pts[(i + 1) % pts.length], inside);
+    }
+  });
+
+  // --- Lighting signatures: full-width front bar and tail bar ---
+  frontLight.addBox(1.86, 0.035, 0.035, 0, _ctTopY(c.noseZ) - 0.02, c.noseZ - 0.012);
+  tailLight.addBox(1.94, 0.04, 0.03, 0, 1.08, c.tailZ + 0.012);
+
+  // Black lower valances front and rear
+  trim.addBox(1.92, 0.2, 0.08, 0, 0.5, c.noseZ + 0.02);
+  trim.addBox(1.96, 0.18, 0.08, 0, 0.5, c.tailZ - 0.02);
+
+  // Angular black arch flares following each trapezoid arch
+  for (const axle of [-half, half]) {
+    const outline = [[axle - 0.66, 0.40], [axle - 0.47, 0.97], [axle + 0.47, 0.97], [axle + 0.66, 0.40]];
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 3; i++) {
+        const [z1, y1] = outline[i];
+        const [z2, y2] = outline[i + 1];
+        const len = Math.hypot(z2 - z1, y2 - y1);
+        const angle = Math.atan2(y2 - y1, z2 - z1);
+        // Offset outward from the arch opening (up/away from the wheel)
+        const ny = Math.cos(angle), nz = -Math.sin(angle);
+        trim.addBox(0.08, 0.1, len + 0.08,
+          side * 1.0, (y1 + y2) / 2 + ny * 0.05, (z1 + z2) / 2 + nz * 0.05,
+          -angle, 0, 0);
+      }
+    }
+  }
+
+  // Door seams (panel gaps) and mirrors
+  for (const side of [-1, 1]) {
+    [-1.12, 0.05, 1.1].forEach(z => {
+      const yBottom = _ctBottomY(z) + 0.04;
+      const h = 1.12 - yBottom;
+      trim.addBox(0.012, h, 0.014, side * 1.016, yBottom + h / 2, z);
+    });
+    trim.addBox(0.1, 0.1, 0.22, side * 1.09, 1.2, -1.05);
+    trim.addBox(0.14, 0.04, 0.05, side * 1.02, 1.18, -1.1);
+  }
+
+  // --- Wheels (built at the origin; instanced per wheel) ---
+  const tire = new _PartBuilder(false);
+  const cover = new _PartBuilder(false);
+  const tireGeom = new THREE.CylinderGeometry(c.wheelRadius, c.wheelRadius, c.tireWidth, 28, 1);
+  tireGeom.rotateZ(Math.PI / 2);
+  tire.addGeometry(tireGeom);
+  tireGeom.dispose();
+  // Chunky all-terrain tread blocks so rotation reads at a glance
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2;
+    tire.addBox(c.tireWidth * 0.92, 0.035, 0.08,
+      0, Math.cos(a) * (c.wheelRadius + 0.012), Math.sin(a) * (c.wheelRadius + 0.012), a, 0, 0);
+  }
+  // Flat aero cover with six angular vanes
+  const coverGeom = new THREE.CylinderGeometry(0.3, 0.3, c.tireWidth + 0.012, 6, 1);
+  coverGeom.rotateZ(Math.PI / 2);
+  cover.addGeometry(coverGeom);
+  coverGeom.dispose();
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+    for (const side of [-1, 1]) {
+      tire.addBox(0.012, 0.2, 0.035, side * (c.tireWidth / 2 + 0.008),
+        Math.cos(a) * 0.15, Math.sin(a) * 0.15, a, 0, 0);
+    }
+  }
+
+  return {
+    stainless: stainless.build(),
+    glass: glass.build(),
+    trim: trim.build(),
+    frontLight: frontLight.build(),
+    tailLight: tailLight.build(),
+    tire: tire.build(),
+    cover: cover.build()
+  };
+}
+
+// Brushed-steel roughness map: fine streaks along U (the truck's length)
+function createBrushedSteelTexture() {
+  const w = 512, h = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(w, h);
+  for (let y = 0; y < h; y++) {
+    // Each row gets its own streak value; lengthwise variation is slow
+    const rowBase = 150 + (Math.sin(y * 12.9898) * 43758.5453 % 1) * 40;
+    for (let x = 0; x < w; x++) {
+      const streak = Math.sin(x * 0.02 + y * 1.7) * 6 + Math.sin(x * 0.11 + y * 0.3) * 3;
+      const v = Math.max(0, Math.min(255, rowBase + streak));
+      const i = (y * w + x) * 4;
+      img.data[i] = v; img.data[i + 1] = v; img.data[i + 2] = v; img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(0.6, 6);
+  return tex;
+}
+
+// Arc-length parameterised polyline in the XZ plane
+class TrafficPath {
+  constructor(points, closed = false) {
+    this.points = points;
+    this.closed = closed;
+    const n = points.length;
+    this.segCount = closed ? n : n - 1;
+    this.cum = [0];
+    for (let i = 0; i < this.segCount; i++) {
+      const a = points[i], b = points[(i + 1) % n];
+      this.cum.push(this.cum[i] + Math.hypot(b.x - a.x, b.z - a.z));
+    }
+    this.length = this.cum[this.segCount];
+  }
+
+  // Writes position and unit tangent at arc length s into out {x, z, tx, tz}
+  sample(s, out) {
+    const L = this.length;
+    s = this.closed ? ((s % L) + L) % L : Math.max(0, Math.min(L, s));
+    let lo = 0, hi = this.segCount - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (this.cum[mid] <= s) lo = mid; else hi = mid - 1;
+    }
+    const a = this.points[lo], b = this.points[(lo + 1) % this.points.length];
+    const segLen = (this.cum[lo + 1] - this.cum[lo]) || 1;
+    const t = (s - this.cum[lo]) / segLen;
+    out.x = a.x + (b.x - a.x) * t;
+    out.z = a.z + (b.z - a.z) * t;
+    out.tx = (b.x - a.x) / segLen;
+    out.tz = (b.z - a.z) / segLen;
+    return out;
+  }
+}
+
+// Suspended regolith kicked up by the trucks. Mars' thin air carries little
+// dust, so plumes are faint and settle under 0.38 g rather than billowing.
+class TruckDust {
+  constructor(scene, capacity) {
+    this.capacity = capacity;
+    this.next = 0;
+    this.pos = new Float32Array(capacity * 3);
+    this.vel = new Float32Array(capacity * 3);
+    this.life = new Float32Array(capacity).fill(1);
+    this.maxLife = new Float32Array(capacity).fill(1);
+    this.alpha = new Float32Array(capacity);
+    this.size = new Float32Array(capacity);
+
+    const geometry = new THREE.BufferGeometry();
+    this.posAttr = new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage);
+    this.alphaAttr = new THREE.BufferAttribute(this.alpha, 1).setUsage(THREE.DynamicDrawUsage);
+    this.sizeAttr = new THREE.BufferAttribute(this.size, 1).setUsage(THREE.DynamicDrawUsage);
+    geometry.setAttribute('position', this.posAttr);
+    geometry.setAttribute('aAlpha', this.alphaAttr);
+    geometry.setAttribute('aSize', this.sizeAttr);
+
+    this.material = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: new THREE.Color(0xc8895a) },
+        uScale: { value: 400 }
+      },
+      vertexShader: `
+        attribute float aAlpha;
+        attribute float aSize;
+        uniform float uScale;
+        varying float vAlpha;
+        void main() {
+          vAlpha = aAlpha;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = aSize * uScale / max(-mv.z, 0.1);
+          gl_Position = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uColor;
+        varying float vAlpha;
+        void main() {
+          float d = length(gl_PointCoord - 0.5);
+          float a = smoothstep(0.5, 0.05, d) * vAlpha;
+          if (a < 0.004) discard;
+          gl_FragColor = vec4(uColor, a);
+        }
+      `,
+      transparent: true,
+      depthWrite: false
+    });
+    this.points = new THREE.Points(geometry, this.material);
+    this.points.frustumCulled = false;
+    scene.add(this.points);
+  }
+
+  emit(x, y, z, vx, vy, vz, life) {
+    const i = this.next;
+    this.next = (this.next + 1) % this.capacity;
+    this.pos[i * 3] = x; this.pos[i * 3 + 1] = y; this.pos[i * 3 + 2] = z;
+    this.vel[i * 3] = vx; this.vel[i * 3 + 1] = vy; this.vel[i * 3 + 2] = vz;
+    this.life[i] = 0;
+    this.maxLife[i] = life;
+  }
+
+  update(dt, lightLevel) {
+    const drag = Math.max(0, 1 - 1.2 * dt);
+    for (let i = 0; i < this.capacity; i++) {
+      const t = this.life[i] / this.maxLife[i];
+      if (t >= 1) { this.alpha[i] = 0; continue; }
+      this.life[i] += dt;
+      this.vel[i * 3 + 1] -= MARS_GRAVITY * 0.25 * dt; // fines stay aloft longer than grit
+      this.vel[i * 3] *= drag; this.vel[i * 3 + 1] *= drag; this.vel[i * 3 + 2] *= drag;
+      this.pos[i * 3] += this.vel[i * 3] * dt;
+      this.pos[i * 3 + 1] += this.vel[i * 3 + 1] * dt;
+      this.pos[i * 3 + 2] += this.vel[i * 3 + 2] * dt;
+      const fadeIn = Math.min(1, t * 8);
+      this.alpha[i] = fadeIn * Math.pow(1 - t, 1.6) * 0.32;
+      this.size[i] = 0.8 + t * 3.2;
+    }
+    this.posAttr.needsUpdate = true;
+    this.alphaAttr.needsUpdate = true;
+    this.sizeAttr.needsUpdate = true;
+    this.material.uniforms.uColor.value.setRGB(0.78, 0.53, 0.35).multiplyScalar(0.12 + 0.88 * lightLevel);
+    const pr = renderer.getPixelRatio ? renderer.getPixelRatio() : 1;
+    this.material.uniforms.uScale.value = window.innerHeight * pr * 0.5;
+  }
+}
+
+// All Cybertrucks share one set of instanced meshes (7 draw calls in total,
+// instead of ~30 meshes per truck), and are simulated as vehicles: lane
+// keeping, braking for traffic and the rover, U-turns at road ends,
+// suspension that follows the terrain, spinning and steering wheels.
+class CybertruckFleet {
+  constructor(scene, capacity) {
+    this.scene = scene;
+    this.capacity = capacity;
+    this.vehicles = [];
+
+    const perf = getPerformanceSettings();
+    const geoms = buildCybertruckGeometries();
+
+    // Colours below are linear (three r140 legacy colour mode). Stainless
+    // steel reflects ~55-65%; rubber and satin plastic only a few percent.
+    const stainlessMat = new THREE.MeshStandardMaterial({
+      color: 0xa4a7aa,
+      metalness: 1.0,
+      roughness: 0.34,
+      roughnessMap: createBrushedSteelTexture(),
+      vertexColors: true,
+      envMapIntensity: 1.1
+    });
+    const glassMat = new THREE.MeshPhysicalMaterial({
+      color: 0x0b0e12,
+      metalness: 0.0,
+      roughness: 0.06,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.04,
+      envMapIntensity: 1.4
+    });
+    const trimMat = new THREE.MeshStandardMaterial({
+      color: 0x0a0a0b,
+      metalness: 0.2,
+      roughness: 0.75,
+      vertexColors: true
+    });
+    this.frontLightMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0xf4f8ff,
+      emissiveIntensity: 1.0
+    });
+    this.tailLightMat = new THREE.MeshStandardMaterial({
+      color: 0x550008,
+      emissive: 0xff1522,
+      emissiveIntensity: 1.0
+    });
+    const tireMat = new THREE.MeshStandardMaterial({ color: 0x08080a, metalness: 0.0, roughness: 0.92 });
+    const coverMat = new THREE.MeshStandardMaterial({ color: 0x24272b, metalness: 0.6, roughness: 0.45 });
+
+    const makeInstanced = (geometry, material, count, castShadow) => {
+      const mesh = new THREE.InstancedMesh(geometry, material, count);
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.count = 0;
+      // InstancedMesh culls against the base geometry's bounds only, which
+      // would hide trucks far from the origin
+      mesh.frustumCulled = false;
+      mesh.castShadow = castShadow && !perf.isMobile;
+      mesh.receiveShadow = !perf.isMobile;
+      scene.add(mesh);
+      return mesh;
+    };
+
+    this.bodyMeshes = [
+      makeInstanced(geoms.stainless, stainlessMat, capacity, true),
+      makeInstanced(geoms.glass, glassMat, capacity, true),
+      makeInstanced(geoms.trim, trimMat, capacity, true),
+      makeInstanced(geoms.frontLight, this.frontLightMat, capacity, false),
+      makeInstanced(geoms.tailLight, this.tailLightMat, capacity, false)
+    ];
+    this.stainlessMesh = this.bodyMeshes[0];
+    this.wheelMeshes = [
+      makeInstanced(geoms.tire, tireMat, capacity * 4, true),
+      makeInstanced(geoms.cover, coverMat, capacity * 4, false)
+    ];
+
+    // Wrap/finish variety: mostly raw stainless, some heavily dusted,
+    // a few satin-black wraps.
+    this.stainlessMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
+    this.finishes = [
+      new THREE.Color(1, 1, 1), new THREE.Color(1, 1, 1), new THREE.Color(0.97, 0.98, 1),
+      new THREE.Color(0.9, 0.78, 0.68), new THREE.Color(0.18, 0.18, 0.19)
+    ];
+
+    // One shared headlight beam, parked on the truck nearest the camera at
+    // night. A fixed light count avoids shader recompiles as trucks come
+    // and go.
+    this.headlight = null;
+    if (!perf.isMobile) {
+      this.headlight = new THREE.SpotLight(0xf2f6ff, 0, 70, Math.PI * 0.2, 0.55, 1.2);
+      this.headlight.castShadow = false;
+      scene.add(this.headlight);
+      scene.add(this.headlight.target);
+    }
+
+    this.dust = perf.isMobile ? null : new TruckDust(scene, 700);
+
+    // Scratch objects reused every frame
+    this._sample = { x: 0, z: 0, tx: 0, tz: 1 };
+    this._m = new THREE.Matrix4();
+    this._wm = new THREE.Matrix4();
+    this._q = new THREE.Quaternion();
+    this._e = new THREE.Euler(0, 0, 0, 'YXZ');
+    this._p = new THREE.Vector3();
+    this._s = new THREE.Vector3(1, 1, 1);
+    this._wheelOffsets = [
+      [-CYBERTRUCK.track / 2, -CYBERTRUCK.wheelbase / 2, true],
+      [CYBERTRUCK.track / 2, -CYBERTRUCK.wheelbase / 2, true],
+      [-CYBERTRUCK.track / 2, CYBERTRUCK.wheelbase / 2, false],
+      [CYBERTRUCK.track / 2, CYBERTRUCK.wheelbase / 2, false]
+    ];
+  }
+
+  // options: { lane, cruise, s, dir, uturnReach, tag }
+  addVehicle(path, options = {}) {
+    if (this.vehicles.length >= this.capacity) return null;
+    const v = {
+      path,
+      tag: options.tag || null,
+      lane: options.lane ?? 1.6,
+      cruise: options.cruise ?? 14,
+      uturnReach: options.uturnReach ?? 7,
+      s: options.s ?? 0,
+      dir: options.dir ?? 1,
+      speed: options.speed ?? (options.cruise ?? 14) * 0.6,
+      mode: 'drive',
+      theta: 0,
+      turn: null,
+      position: new THREE.Vector3(),
+      yaw: 0,
+      pitch: 0,
+      roll: 0,
+      yawRate: 0,
+      accel: 0,
+      steer: 0,
+      spin: Math.random() * Math.PI * 2,
+      finish: this.finishes[Math.floor(Math.random() * this.finishes.length)],
+      dustCarry: 0,
+      initialised: false
+    };
+    this.vehicles.push(v);
+    return v;
+  }
+
+  removeWhere(predicate) {
+    this.vehicles = this.vehicles.filter(v => !predicate(v));
+  }
+
+  count(tag) {
+    let n = 0;
+    for (const v of this.vehicles) if (v.tag === tag) n++;
+    return n;
+  }
+
+  // True if moving the rover from (px,pz) to (x,z) drives it into a truck.
+  // Movement that increases the gap is always allowed, so a truck that
+  // stops alongside can never trap the rover.
+  blocksRover(x, z, radius, px, pz) {
+    for (const v of this.vehicles) {
+      const fx = -Math.sin(v.yaw), fz = -Math.cos(v.yaw);
+      for (const along of [-1.45, 1.45]) {
+        const cx = v.position.x + fx * along;
+        const cz = v.position.z + fz * along;
+        const min = radius + 1.2;
+        const dNew = (x - cx) * (x - cx) + (z - cz) * (z - cz);
+        if (dNew < min * min) {
+          const dOld = (px - cx) * (px - cx) + (pz - cz) * (pz - cz);
+          if (dNew < dOld) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  _placeOnPath(v, out) {
+    const smp = v.path.sample(v.s, this._sample);
+    const fx = smp.tx * v.dir, fz = smp.tz * v.dir;
+    // Drive on the right: offset toward the right-hand side of travel
+    out.x = smp.x - fz * v.lane;
+    out.z = smp.z + fx * v.lane;
+    out.fx = fx;
+    out.fz = fz;
+    return out;
+  }
+
+  update(dt, dayAmount, roverPos) {
+    const ACCEL = 2.6;     // m/s^2 - relaxed Cybertruck launch
+    const BRAKE = 4.2;     // m/s^2 - comfortable braking
+    const UTURN_SPEED = 4.0;
+    const place = { x: 0, z: 0, fx: 0, fz: -1 };
+
+    for (const v of this.vehicles) {
+      const prevYaw = v.yaw;
+      const prevSpeed = v.speed;
+      let targetSpeed = v.cruise;
+
+      if (v.mode === 'drive') {
+        const path = v.path;
+        if (!path.closed) {
+          const remain = v.dir > 0 ? path.length - v.s : v.s;
+          targetSpeed = Math.min(targetSpeed,
+            Math.sqrt(UTURN_SPEED * UTURN_SPEED + 2 * BRAKE * Math.max(0, remain - 1)));
+        }
+
+        // Car following: keep a two-second gap to the truck ahead in lane
+        for (const u of this.vehicles) {
+          if (u === v || u.path !== path || u.dir !== v.dir || u.mode !== 'drive') continue;
+          let gap = (u.s - v.s) * v.dir;
+          if (path.closed && gap < 0) gap += path.length;
+          if (gap > 0 && gap < 45) {
+            const safe = 8 + v.speed * 1.2;
+            targetSpeed = Math.min(targetSpeed, Math.max(0, u.speed + (gap - safe) * 0.6));
+          }
+        }
+      } else {
+        targetSpeed = UTURN_SPEED;
+      }
+
+      // Stop for the rover if it is in the lane ahead
+      if (roverPos && v.initialised) {
+        const fx = -Math.sin(v.yaw), fz = -Math.cos(v.yaw);
+        const dx = roverPos.x - v.position.x, dz = roverPos.z - v.position.z;
+        const along = dx * fx + dz * fz;
+        const lateral = Math.abs(dx * -fz + dz * fx);
+        if (along > 0 && along < 26 && lateral < 2.6) {
+          targetSpeed = Math.min(targetSpeed, Math.max(0, (along - 7.5) * 0.9));
+        }
+      }
+
+      const dv = targetSpeed - v.speed;
+      v.speed = Math.max(0, v.speed + Math.max(-BRAKE * 1.6 * dt, Math.min(ACCEL * dt, dv)));
+      v.accel = dt > 0 ? (v.speed - prevSpeed) / dt : 0;
+
+      let fx, fz;
+      if (v.mode === 'drive') {
+        v.s += v.dir * v.speed * dt;
+        const path = v.path;
+        if (path.closed) {
+          v.s = ((v.s % path.length) + path.length) % path.length;
+        } else if (v.s > path.length || v.s < 0) {
+          // Reached the end of the road: swing round in a U-turn
+          v.s = Math.max(0, Math.min(path.length, v.s));
+          const smp = path.sample(v.s, this._sample);
+          const tfx = smp.tx * v.dir, tfz = smp.tz * v.dir;
+          v.turn = { cx: smp.x, cz: smp.z, fx: tfx, fz: tfz, rx: -tfz, rz: tfx };
+          v.mode = 'uturn';
+          v.theta = 0;
+        }
+      }
+
+      if (v.mode === 'uturn') {
+        const t = v.turn;
+        const effR = Math.sqrt((v.lane * v.lane + v.uturnReach * v.uturnReach) / 2);
+        v.theta += (v.speed * dt) / effR;
+        if (v.theta >= Math.PI) {
+          v.mode = 'drive';
+          v.dir = -v.dir;
+          v.turn = null;
+        } else {
+          const cs = Math.cos(v.theta), sn = Math.sin(v.theta);
+          v.position.x = t.cx + t.rx * v.lane * cs + t.fx * v.uturnReach * sn;
+          v.position.z = t.cz + t.rz * v.lane * cs + t.fz * v.uturnReach * sn;
+          fx = -t.rx * v.lane * sn + t.fx * v.uturnReach * cs;
+          fz = -t.rz * v.lane * sn + t.fz * v.uturnReach * cs;
+          const len = Math.hypot(fx, fz) || 1;
+          fx /= len; fz /= len;
+        }
+      }
+      if (v.mode === 'drive') {
+        this._placeOnPath(v, place);
+        v.position.x = place.x;
+        v.position.z = place.z;
+        fx = place.fx;
+        fz = place.fz;
+      }
+
+      // Heading, eased so path vertices never snap the body round
+      const targetYaw = Math.atan2(-fx, -fz);
+      if (!v.initialised) {
+        v.yaw = targetYaw;
+      } else {
+        let dyaw = targetYaw - v.yaw;
+        dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
+        v.yaw += dyaw * Math.min(1, dt * 9);
+      }
+      let yawStep = v.yaw - prevYaw;
+      yawStep = Math.atan2(Math.sin(yawStep), Math.cos(yawStep));
+      v.yawRate = v.initialised && dt > 0 ? yawStep / dt : 0;
+
+      // Suspension: fit the body to the ground under all four tyres
+      const sy = Math.sin(v.yaw), cy = Math.cos(v.yaw);
+      const ffx = -sy, ffz = -cy;   // forward
+      const rrx = cy, rrz = -sy;    // right
+      const hb = CYBERTRUCK.wheelbase / 2, ht = CYBERTRUCK.track / 2;
+      const px = v.position.x, pz = v.position.z;
+      const hFL = sampleTerrainHeight(px + ffx * hb - rrx * ht, pz + ffz * hb - rrz * ht);
+      const hFR = sampleTerrainHeight(px + ffx * hb + rrx * ht, pz + ffz * hb + rrz * ht);
+      const hRL = sampleTerrainHeight(px - ffx * hb - rrx * ht, pz - ffz * hb - rrz * ht);
+      const hRR = sampleTerrainHeight(px - ffx * hb + rrx * ht, pz - ffz * hb + rrz * ht);
+      const roadLift = 0.13; // tyres ride on the graded road surface
+      const targetY = (hFL + hFR + hRL + hRR) / 4 + roadLift;
+      let targetPitch = Math.atan2((hFL + hFR) - (hRL + hRR), 2 * CYBERTRUCK.wheelbase);
+      let targetRoll = Math.atan2((hFR + hRR) - (hFL + hRL), 2 * CYBERTRUCK.track);
+      // Weight transfer: nose dives under braking, body leans out of turns
+      targetPitch += Math.max(-0.035, Math.min(0.035, v.accel * 0.006));
+      targetRoll += Math.max(-0.045, Math.min(0.045, -v.yawRate * v.speed * 0.006));
+
+      if (!v.initialised) {
+        v.position.y = targetY;
+        v.pitch = targetPitch;
+        v.roll = targetRoll;
+        v.initialised = true;
+      } else {
+        const k = Math.min(1, dt * 10);
+        v.position.y += (targetY - v.position.y) * Math.min(1, dt * 16);
+        v.position.y = Math.max(v.position.y, targetY - 0.06);
+        v.pitch += (targetPitch - v.pitch) * k;
+        v.roll += (targetRoll - v.roll) * k;
+      }
+
+      // Wheels: roll with distance travelled, steer with the turn rate
+      v.spin -= (v.speed * dt) / CYBERTRUCK.wheelRadius;
+      const targetSteer = v.speed > 0.5
+        ? Math.atan((CYBERTRUCK.wheelbase * v.yawRate) / v.speed)
+        : v.steer;
+      v.steer += (Math.max(-0.6, Math.min(0.6, targetSteer)) - v.steer) * Math.min(1, dt * 8);
+    }
+
+    this._writeInstances();
+    this._updateLights(dayAmount);
+    this._updateDust(dt, dayAmount);
+  }
+
+  _writeInstances() {
+    const n = this.vehicles.length;
+    for (let i = 0; i < n; i++) {
+      const v = this.vehicles[i];
+      this._e.set(v.pitch, v.yaw, v.roll, 'YXZ');
+      this._q.setFromEuler(this._e);
+      this._m.compose(v.position, this._q, this._s);
+      for (const mesh of this.bodyMeshes) mesh.setMatrixAt(i, this._m);
+      this.stainlessMesh.setColorAt(i, v.finish);
+
+      for (let w = 0; w < 4; w++) {
+        const [wx, wz, front] = this._wheelOffsets[w];
+        this._e.set(v.spin, front ? v.steer : 0, 0, 'YXZ');
+        this._q.setFromEuler(this._e);
+        this._p.set(wx, CYBERTRUCK.wheelRadius, wz);
+        this._wm.compose(this._p, this._q, this._s).premultiply(this._m);
+        for (const mesh of this.wheelMeshes) mesh.setMatrixAt(i * 4 + w, this._wm);
+      }
+    }
+    for (const mesh of this.bodyMeshes) {
+      mesh.count = n;
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    for (const mesh of this.wheelMeshes) {
+      mesh.count = n * 4;
+      mesh.instanceMatrix.needsUpdate = true;
+    }
+    if (this.stainlessMesh.instanceColor) this.stainlessMesh.instanceColor.needsUpdate = true;
+  }
+
+  _updateLights(dayAmount) {
+    const night = 1 - dayAmount;
+    // Daytime running lights stay visible; at night the bars bloom
+    this.frontLightMat.emissiveIntensity = 0.9 + night * 1.8;
+    this.tailLightMat.emissiveIntensity = 0.7 + night * 1.6;
+
+    if (!this.headlight) return;
+    let best = null, bestD = 160 * 160;
+    for (const v of this.vehicles) {
+      const dx = v.position.x - camera.position.x, dz = v.position.z - camera.position.z;
+      const d = dx * dx + dz * dz;
+      if (d < bestD) { bestD = d; best = v; }
+    }
+    if (!best || night < 0.05) {
+      this.headlight.intensity = 0;
+      return;
+    }
+    const fx = -Math.sin(best.yaw), fz = -Math.cos(best.yaw);
+    this.headlight.position.set(
+      best.position.x + fx * 2.9,
+      best.position.y + 0.95,
+      best.position.z + fz * 2.9
+    );
+    this.headlight.target.position.set(
+      best.position.x + fx * 28,
+      best.position.y - 1.5,
+      best.position.z + fz * 28
+    );
+    this.headlight.target.updateMatrixWorld();
+    this.headlight.intensity = 2.6 * night;
+  }
+
+  _updateDust(dt, dayAmount) {
+    if (!this.dust) return;
+    const cam = camera.position;
+    for (const v of this.vehicles) {
+      const dx = v.position.x - cam.x, dz = v.position.z - cam.z;
+      if (dx * dx + dz * dz > 260 * 260 || v.speed < 2) continue;
+      // Emission scales with speed; carry fractional particles between frames
+      v.dustCarry += v.speed * dt * 0.9;
+      const fx = -Math.sin(v.yaw), fz = -Math.cos(v.yaw);
+      const rx = -fz, rz = fx;
+      while (v.dustCarry >= 1) {
+        v.dustCarry -= 1;
+        const side = Math.random() < 0.5 ? -1 : 1;
+        const ex = v.position.x - fx * 1.95 + rx * side * 0.87;
+        const ez = v.position.z - fz * 1.95 + rz * side * 0.87;
+        const kick = v.speed * 0.25;
+        this.dust.emit(
+          ex, v.position.y + 0.15, ez,
+          -fx * kick + (Math.random() - 0.5) * 1.5,
+          0.6 + Math.random() * 1.2,
+          -fz * kick + (Math.random() - 0.5) * 1.5,
+          1.8 + Math.random() * 1.6
+        );
+      }
+    }
+    this.dust.update(dt, 0.1 + 0.9 * dayAmount);
+  }
+}
+
+// Continuous road ribbon draped over the terrain along a polyline, with
+// mitred joins so bends have no gaps or overlapping z-fighting slabs.
+function buildDrapedRibbon(points, halfWidth, lift, closed = false) {
+  const n = points.length;
+  const verts = [];
+  const lefts = [], rights = [];
+  for (let i = 0; i < n; i++) {
+    const prev = points[closed ? (i - 1 + n) % n : Math.max(0, i - 1)];
+    const next = points[closed ? (i + 1) % n : Math.min(n - 1, i + 1)];
+    let dx = next.x - prev.x, dz = next.z - prev.z;
+    const len = Math.hypot(dx, dz) || 1;
+    dx /= len; dz /= len;
+    const lx = points[i].x - dz * halfWidth, lz = points[i].z + dx * halfWidth;
+    const rx = points[i].x + dz * halfWidth, rz = points[i].z - dx * halfWidth;
+    lefts.push([lx, sampleTerrainHeight(lx, lz) + lift, lz]);
+    rights.push([rx, sampleTerrainHeight(rx, rz) + lift, rz]);
+  }
+  const segs = closed ? n : n - 1;
+  for (let i = 0; i < segs; i++) {
+    const j = (i + 1) % n;
+    // Wound so the face normal points up (roads are single-sided)
+    verts.push(...lefts[i], ...lefts[j], ...rights[i]);
+    verts.push(...lefts[j], ...rights[j], ...rights[i]);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+// Evenly spaced points along a straight line or a smoothed curve
+function resamplePath(controlPoints, spacing, closed = false) {
+  if (controlPoints.length === 2 && !closed) {
+    const [a, b] = controlPoints;
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    const steps = Math.max(1, Math.ceil(len / spacing));
+    const pts = [];
+    for (let i = 0; i <= steps; i++) pts.push(new THREE.Vector3().lerpVectors(a, b, i / steps));
+    return pts;
+  }
+  const curve = new THREE.CatmullRomCurve3(controlPoints, closed, 'centripetal');
+  const count = Math.max(8, Math.ceil(curve.getLength() / spacing));
+  const pts = curve.getSpacedPoints(count);
+  if (closed) pts.pop(); // last point duplicates the first
+  return pts;
+}
+
+// Dashed centre line as separate short ribbons
+function buildDashedLine(points, dash, gap, halfWidth, lift) {
+  const parts = [];
+  let run = [];
+  let travelled = 0;
+  for (let i = 0; i < points.length; i++) {
+    if (i > 0) travelled += Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z);
+    const onDash = travelled % (dash + gap) < dash;
+    if (onDash) run.push(points[i]);
+    if ((!onDash || i === points.length - 1) && run.length >= 2) {
+      parts.push(buildDrapedRibbon(run, halfWidth, lift));
+      run = [];
+    } else if (!onDash) {
+      run = [];
+    }
+  }
+  return parts;
+}
+
+// Round turnaround pad draped over the terrain
+function buildDrapedDisc(cx, cz, radius, lift) {
+  const rings = 4, sectors = 24;
+  const verts = [];
+  const at = (r, a) => {
+    const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+    return [x, sampleTerrainHeight(x, z) + lift, z];
+  };
+  for (let ri = 0; ri < rings; ri++) {
+    const r0 = (ri / rings) * radius, r1 = ((ri + 1) / rings) * radius;
+    for (let s = 0; s < sectors; s++) {
+      const a0 = (s / sectors) * Math.PI * 2, a1 = ((s + 1) / sectors) * Math.PI * 2;
+      const p00 = at(r0, a0), p01 = at(r0, a1), p10 = at(r1, a0), p11 = at(r1, a1);
+      verts.push(...p00, ...p01, ...p10);
+      verts.push(...p10, ...p01, ...p11);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+
 // Mars Background Scene Manager
 class MarsSceneManager {
   constructor(scene, terrainSize) {
@@ -2096,39 +2576,22 @@ class MarsSceneManager {
     this.lastPlayerPosition = new THREE.Vector3();
     this.sceneRepeatDistance = 5000;
     this.animatedObjects = []; // Track animated elements for update loop
+    this.nightLights = []; // Artificial lights that fade out in daylight
     this.guidedRouteWaypoints = []; // Beacons for optional guided driving route
     this.currentWaypointIndex = 0;
-    this.aiVehicles = []; // Ground traffic vehicles (mining trucks, cybertrucks, etc.)
+    this.fleet = null;      // CybertruckFleet (desktop only)
     this.aiRoutes = [];   // Reusable world-space routes for AI traffic
-    this.lastTrafficUpdateTime = null;
     this.bulletTrains = []; // High-speed trains on elevated tracks
     this.collidables = [];  // Objects the rover can collide with { position, radius }
 
     // Procedural settlement spawning system
-    this.settlementGrid = 400;          // Grid spacing â€” one potential site every 400 units
+    this.settlementGrid = 400;          // Grid spacing — one potential site every 400 units
     this.settlementSpawnDist = 800;     // Distance at which a settlement spawns
     this.settlementDespawnDist = 1500;  // Distance at which a settlement is removed
-    this.settlements = new Map();       // key "gx,gz" â†’ { group, center, type, collidableStart }
+    this.settlements = new Map();       // key "gx,gz" → { group, center, type, collidableStart }
     this.lastSettlementCheck = 0;       // Throttle timestamp
-    this.roads = new Map();             // key "fromâ†’to" â†’ { group }
-    this.roadVehicles = [];             // Vehicles driving along roads
+    this.roads = new Map();             // key "from→to" → { group }
     this.fadingSettlements = [];
-
-    // Get reference to the terrain mesh for proper ground placement
-    // The terrain is the largest PlaneGeometry in the scene (3000-5000 units wide)
-    this.terrainMesh = null;
-    this.scene.traverse(child => {
-      if (child.isMesh && child.geometry && child.geometry.parameters &&
-          child.geometry.parameters.width >= 2000 && child.geometry.parameters.height >= 2000) {
-        this.terrainMesh = child;
-      }
-    });
-    // Fallback: use the global marsSurface if available
-    if (!this.terrainMesh && typeof marsSurface !== 'undefined') {
-      this.terrainMesh = marsSurface;
-    }
-
-    // Background elements removed - keeping only terrain and sky
 
     // Lightweight colony + rocket traffic system
     this.rockets = [];
@@ -2138,9 +2601,9 @@ class MarsSceneManager {
       : Date.now();
     this.rocketCycleDuration = 60000; // one full launch+arrival cycle per minute
 
-    console.log('ðŸ—ï¸ MARS SCENE MANAGER: About to create colony infrastructure');
+    console.log('🏗️ MARS SCENE MANAGER: About to create colony infrastructure');
     this.createColonyInfrastructure();
-    console.log('ðŸ—ï¸ MARS SCENE MANAGER: About to initialize rocket launch system');
+    console.log('🏗️ MARS SCENE MANAGER: About to initialize rocket launch system');
     this.initializeRocketLaunchSystem();
 
     // Create an optional guided driving route using blinking beacons
@@ -2149,8 +2612,21 @@ class MarsSceneManager {
     // Initialize optional ground traffic system (AI vehicles)
     this.initializeTrafficSystem();
 
-    console.log('âœ… âœ… âœ… MarsSceneManager constructed with terrainSize=', terrainSize);
+    console.log('✅ ✅ ✅ MarsSceneManager constructed with terrainSize=', terrainSize);
     console.log('Colony and rockets should now be visible in the scene!');
+  }
+
+  // Procedural settlements keep clear of the hand-built colonies and the
+  // Cybertruck haul roads (one used to spawn inside the colony ring road)
+  _isSettlementSiteClear(x, z) {
+    const near = (c, r) => c && (c.x - x) * (c.x - x) + (c.z - z) * (c.z - z) < r * r;
+    if (near(this.colonyCenter, 480) || near(this.secondaryColonyCenter, 420)) return false;
+    for (const route of this.aiRoutes || []) {
+      for (let i = 0; i < route.points.length; i += 4) {
+        if (near(route.points[i], 120)) return false;
+      }
+    }
+    return true;
   }
 
   // Register a collidable object with a position and bounding radius
@@ -2170,7 +2646,8 @@ class MarsSceneManager {
 
   // Check if a world-space XZ position collides with any registered object
   // Returns true if blocked
-  checkCollision(x, z, roverRadius) {
+  checkCollision(x, z, roverRadius, prevX = x, prevZ = z) {
+    if (this.fleet && this.fleet.blocksRover(x, z, roverRadius, prevX, prevZ)) return true;
     const len = this.collidables.length;
     for (let i = 0; i < len; i++) {
       const c = this.collidables[i];
@@ -2206,7 +2683,7 @@ class MarsSceneManager {
     this.rockets = [];
 
     padPositions.forEach((padPos, index) => {
-      // For reliability, keep pads near nominal ground level; terrain is centered at yâ‰ˆ0
+      // For reliability, keep pads near nominal ground level; terrain is centered at y≈0
       const groundY = 0;
 
       // Simple hex pad
@@ -2244,140 +2721,137 @@ class MarsSceneManager {
     }
   }
 
-  // Initialize AI ground traffic (mining convoys, cybertruck-like vehicles)
+  // Cybertruck traffic: haul routes around the command colony plus trucks on
+  // the roads between procedural settlements. Skipped on mobile.
   initializeTrafficSystem() {
+    this.aiRoutes = this.aiRoutes || [];
+    this.fleet = null;
     try {
-      const perfSettings = getPerformanceSettings();
+      const perf = getPerformanceSettings();
+      if (perf.isMobile) return;
 
-      // Skip AI traffic only on mobile for performance
-      if (perfSettings.isMobile) {
-        this.aiVehicles = [];
-        this.aiRoutes = [];
-        return;
-      }
-
-      // Define a couple of simple routes between the colony and surrounding areas
+      this.fleet = new CybertruckFleet(this.scene, 32);
       this.createTrafficRoutes();
 
-      if (!this.aiRoutes || this.aiRoutes.length === 0) return;
-
-      const maxVehicles = perfSettings.detailLevel === 'high' ? 8 : 5;
-      const routeCount = this.aiRoutes.length;
-
-      for (let i = 0; i < maxVehicles; i++) {
-        const routeIndex = i % routeCount;
-        const route = this.aiRoutes[routeIndex];
-        if (!route || route.waypoints.length < 2) continue;
-
-        // Use a cybertruck-style vehicle for all AI traffic
-        const vehicleMesh = this.createCybertruckVehicle();
-
-        // Stagger starting positions along the route
-        const startT = (i / maxVehicles) * (route.waypoints.length - 1);
-        const baseIndex = Math.floor(startT);
-        const nextIndex = Math.min(baseIndex + 1, route.waypoints.length - 1);
-        const localT = startT - baseIndex;
-
-        const start = route.waypoints[baseIndex];
-        const end = route.waypoints[nextIndex];
-        const pos = new THREE.Vector3().copy(start).lerp(end, localT);
-
-        this.positionOnTerrain(vehicleMesh, pos.x, pos.z);
-        // Make AI vehicles slightly larger so they are easier to see
-        vehicleMesh.scale.set(1.4, 1.4, 1.4);
-        this.scene.add(vehicleMesh);
-
-        const speed = 18 + Math.random() * 10; // world units per second
-
-        this.aiVehicles.push({
-          mesh: vehicleMesh,
-          routeIndex,
-          segmentIndex: baseIndex,
-          segmentT: localT,
-          speed,
-          directionSign: Math.random() < 0.5 ? 1 : -1
+      const routeTrucks = perf.detailLevel === 'high' ? 10 : 7;
+      for (let i = 0; i < routeTrucks; i++) {
+        const route = this.aiRoutes[i % this.aiRoutes.length];
+        const slot = Math.floor(i / this.aiRoutes.length);
+        this.fleet.addVehicle(route.path, {
+          tag: 'route',
+          lane: route.lane,
+          uturnReach: route.uturnReach,
+          cruise: 11 + Math.random() * 7, // 40-65 km/h on graded regolith
+          s: ((slot * 0.37 + Math.random() * 0.2) % 1) * route.path.length,
+          dir: (i + slot) % 2 === 0 ? 1 : -1
         });
       }
-
-      console.log('AI ground traffic initialized. Vehicles:', this.aiVehicles.length);
+      console.log('Cybertruck traffic initialized. Trucks:', this.fleet.vehicles.length);
     } catch (e) {
-      console.warn('Failed to initialize AI traffic system:', e);
-      this.aiVehicles = [];
+      console.warn('Failed to initialize Cybertruck traffic:', e);
+      this.fleet = null;
       this.aiRoutes = [];
     }
   }
 
-  // Define a few looping traffic routes around the colony
+  // Haul roads: a ring road around the colony, two mine roads and a long
+  // road out toward the rover's landing site. Routes leave from the ring so
+  // no truck ever drives through a colony building.
   createTrafficRoutes() {
-    this.aiRoutes = [];
+    if (!this.aiRoutes || this.aiRoutes.length === 0) this.defineHaulRoutes();
+    this.createTrafficRouteRoads();
+  }
 
+  defineHaulRoutes() {
     if (!this.colonyCenter) {
-      // Fallback: approximate colony center near the known coordinates
-      this.colonyCenter = new THREE.Vector3(-360, 0, -560);
+      this.colonyCenter = new THREE.Vector3(COLONY_SITE_X, 0, COLONY_SITE_Z);
+    }
+    const c = this.colonyCenter;
+    const rel = (dx, dz) => new THREE.Vector3(c.x + dx, 0, c.z + dz);
+
+    const ring = [];
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      ring.push(rel(Math.cos(a) * 285, Math.sin(a) * 285));
     }
 
-    const base = this.colonyCenter.clone();
+    const defs = [
+      { name: 'Colony-Ring', closed: true, points: ring },
+      { name: 'Colony-Mine-A', points: [rel(200, -205), rel(255, -300), rel(300, -380), rel(345, -450), rel(380, -520)] },
+      { name: 'Colony-Mine-B', points: [rel(-200, 205), rel(-235, 290), rel(-280, 380), rel(-330, 470), rel(-420, 620)] },
+      { name: 'Colony-Landing-Site', points: [rel(185, 217), rel(270, 320), rel(340, 420), rel(400, 520)] }
+    ];
 
-    const makeWaypoint = (dx, dz) => {
-      const x = base.x + dx;
-      const z = base.z + dz;
-      // Sample terrain height directly for this point so vehicles follow ground
-      const y = this.getTerrainHeight(x, z);
-      return new THREE.Vector3(x, y, z);
+    this.aiRoutes = defs.map(def => {
+      const closed = !!def.closed;
+      const points = resamplePath(def.points, 5, closed);
+      return {
+        name: def.name,
+        closed,
+        points,
+        path: new TrafficPath(points, closed),
+        lane: 2.0,
+        uturnReach: 7
+      };
+    });
+  }
+
+  // Shared, lit road materials. Polygon offset keeps the draped ribbons from
+  // z-fighting with the terrain they follow.
+  getRoadMaterials() {
+    if (!this._roadMaterials) {
+      // Graded, compacted regolith: a little darker and browner than the
+      // loose ground (terrain vertex colour ~ 0.62, 0.19, 0.08). three r140
+      // runs in legacy colour mode, so hex values here are linear, not sRGB.
+      // Env reflection is cut back so the road doesn't mirror the bright
+      // horizon at grazing angles.
+      const surface = new THREE.MeshStandardMaterial({
+        color: 0x552514,
+        roughness: 1.0,
+        metalness: 0.0,
+        envMapIntensity: 0.25,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2
+      });
+      const marking = new THREE.MeshStandardMaterial({
+        color: 0xc0803a,
+        roughness: 0.7,
+        metalness: 0.0,
+        envMapIntensity: 0.4,
+        polygonOffset: true,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4
+      });
+      surface._shared = true;
+      marking._shared = true;
+      this._roadMaterials = { surface, marking };
+    }
+    return this._roadMaterials;
+  }
+
+  // Dashed centre line for a path, merged into one geometry
+  buildRoadDashes(path, lift) {
+    const dash = 3, gap = 6, halfWidth = 0.12;
+    const verts = [];
+    const smp = { x: 0, z: 0, tx: 0, tz: 1 };
+    const corner = (s, side) => {
+      path.sample(s, smp);
+      const x = smp.x - smp.tz * halfWidth * side;
+      const z = smp.z + smp.tx * halfWidth * side;
+      return [x, sampleTerrainHeight(x, z) + lift, z];
     };
-
-    // Route 1: Colony <-> mining site A (extended farther out)
-    const route1 = {
-      name: 'Colony-Mine-A',
-      waypoints: [
-        makeWaypoint(0, 0),
-        makeWaypoint(80, -60),
-        makeWaypoint(140, -160),
-        makeWaypoint(220, -260),
-        makeWaypoint(300, -380),
-        makeWaypoint(380, -520)
-      ]
-    };
-
-    // Route 2: Colony <-> mining site B (different direction, extended)
-    const route2 = {
-      name: 'Colony-Mine-B',
-      waypoints: [
-        makeWaypoint(0, 0),
-        makeWaypoint(-40, 100),
-        makeWaypoint(-120, 220),
-        makeWaypoint(-220, 320),
-        makeWaypoint(-320, 460),
-        makeWaypoint(-420, 620)
-      ]
-    };
-
-    // Route 3: Larger service loop around colony
-    const route3 = {
-      name: 'Colony-Loop',
-      waypoints: [
-        makeWaypoint(0, -70),
-        makeWaypoint(80, -40),
-        makeWaypoint(70, 60),
-        makeWaypoint(-40, 80),
-        makeWaypoint(-90, 0),
-        makeWaypoint(-40, -80)
-      ]
-    };
-
-    // Route 4: Long-haul route from colony toward rover spawn area (near 0,0)
-    const route4 = {
-      name: 'Colony-Spawn-LongHaul',
-      waypoints: [
-        makeWaypoint(0, 0),
-        makeWaypoint(120, 200),
-        makeWaypoint(240, 380),
-        makeWaypoint(360, 560) // This should be near (0, 0) in world space
-      ]
-    };
-
-    this.aiRoutes.push(route1, route2, route3, route4);
-    this.createTrafficRouteRoads();
+    for (let s = 0; s + dash <= path.length; s += dash + gap) {
+      for (let k = 0; k < 2; k++) {
+        const s0 = s + (k * dash) / 2, s1 = s + ((k + 1) * dash) / 2;
+        const l0 = corner(s0, 1), r0 = corner(s0, -1), l1 = corner(s1, 1), r1 = corner(s1, -1);
+        verts.push(...l0, ...l1, ...r0, ...l1, ...r1, ...r0);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    g.computeVertexNormals();
+    return g;
   }
 
   createTrafficRouteRoads() {
@@ -2386,66 +2860,29 @@ class MarsSceneManager {
       this.scene.remove(this.aiRoadGroup);
       this.aiRoadGroup.traverse(obj => {
         if (obj.geometry) obj.geometry.dispose();
-        if (obj.material) obj.material.dispose();
       });
     }
 
     const group = new THREE.Group();
     group.name = 'CybertruckRouteRoads';
-    const roadMat = new THREE.MeshStandardMaterial({
-      color: 0x2d2520,
-      roughness: 0.92,
-      metalness: 0.08
-    });
-    const laneMat = new THREE.MeshBasicMaterial({
-      color: 0xffb45a,
-      transparent: true,
-      opacity: 0.72
-    });
+    const mats = this.getRoadMaterials();
 
-    this.aiRoutes.forEach((route, routeIndex) => {
-      for (let i = 0; i < route.waypoints.length - 1; i++) {
-        const a = route.waypoints[i];
-        const b = route.waypoints[i + 1];
-        const dx = b.x - a.x;
-        const dz = b.z - a.z;
-        const length = Math.sqrt(dx * dx + dz * dz);
-        if (length < 1) continue;
+    this.aiRoutes.forEach(route => {
+      const road = new THREE.Mesh(buildDrapedRibbon(route.points, 4.5, 0.1, route.closed), mats.surface);
+      road.receiveShadow = true;
+      group.add(road);
 
-        const dirX = dx / length;
-        const dirZ = dz / length;
-        const perpX = -dirZ;
-        const perpZ = dirX;
-        const segs = Math.max(10, Math.floor(length / 10));
-        const buildDrapedRibbon = (halfWidth, yOff) => {
-          const verts = [];
-          for (let s = 0; s < segs; s++) {
-            const t0 = s / segs;
-            const t1 = (s + 1) / segs;
-            const x0 = a.x + dx * t0;
-            const z0 = a.z + dz * t0;
-            const x1 = a.x + dx * t1;
-            const z1 = a.z + dz * t1;
-            const y0 = this.getTerrainHeight(x0, z0) + yOff;
-            const y1 = this.getTerrainHeight(x1, z1) + yOff;
-            const l0 = [x0 + perpX * halfWidth, y0, z0 + perpZ * halfWidth];
-            const r0 = [x0 - perpX * halfWidth, y0, z0 - perpZ * halfWidth];
-            const l1 = [x1 + perpX * halfWidth, y1, z1 + perpZ * halfWidth];
-            const r1 = [x1 - perpX * halfWidth, y1, z1 - perpZ * halfWidth];
-            verts.push(...l0, ...r0, ...l1, ...l1, ...r0, ...r1);
-          }
-          const geometry = new THREE.BufferGeometry();
-          geometry.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-          geometry.computeVertexNormals();
-          return geometry;
-        };
+      const dashes = new THREE.Mesh(this.buildRoadDashes(route.path, 0.13), mats.marking);
+      dashes.receiveShadow = true;
+      group.add(dashes);
 
-        const road = new THREE.Mesh(buildDrapedRibbon(6.5, 0.18), roadMat);
-        road.receiveShadow = true;
-        group.add(road);
-
-        const lane = new THREE.Mesh(buildDrapedRibbon(0.32, 0.28), laneMat);
-        group.add(lane);
+      // Turnaround pads where trucks swing round at the road ends
+      if (!route.closed) {
+        [route.points[0], route.points[route.points.length - 1]].forEach(end => {
+          const pad = new THREE.Mesh(buildDrapedDisc(end.x, end.z, route.uturnReach + 3.5, 0.09), mats.surface);
+          pad.receiveShadow = true;
+          group.add(pad);
+        });
       }
     });
 
@@ -2453,248 +2890,60 @@ class MarsSceneManager {
     this.scene.add(group);
   }
 
-  // Simple boxy mining truck
-  createMiningTruck() {
-    const group = new THREE.Group();
-
-    const bodyGeom = new THREE.BoxGeometry(10, 4, 6);
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0xffcc66, metalness: 0.4, roughness: 0.6 });
-    const body = new THREE.Mesh(bodyGeom, bodyMat);
-    body.position.y = 3;
-    group.add(body);
-
-    const bedGeom = new THREE.BoxGeometry(8, 3, 5);
-    const bedMat = new THREE.MeshStandardMaterial({ color: 0xd58b3b, metalness: 0.3, roughness: 0.7 });
-    const bed = new THREE.Mesh(bedGeom, bedMat);
-    bed.position.set(-1, 5, 0);
-    group.add(bed);
-
-    const wheelGeom = new THREE.CylinderGeometry(1.2, 1.2, 1, 12);
-    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x111111, metalness: 0.2, roughness: 0.9 });
-    const wheelOffsets = [
-      [3.5, 0, 2.2],
-      [-3.5, 0, 2.2],
-      [3.5, 0, -2.2],
-      [-3.5, 0, -2.2]
-    ];
-
-    wheelOffsets.forEach(([x, y, z]) => {
-      const wheel = new THREE.Mesh(wheelGeom, wheelMat);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(x, 1.2, z);
-      group.add(wheel);
-    });
-
-    const lightGeom = new THREE.SphereGeometry(0.4, 12, 12);
-    const lightMat = new THREE.MeshBasicMaterial({ color: 0xffeeaa });
-    const headlightLeft = new THREE.Mesh(lightGeom, lightMat);
-    headlightLeft.position.set(5.2, 3.2, 1.2);
-    const headlightRight = headlightLeft.clone();
-    headlightRight.position.z = -1.2;
-    group.add(headlightLeft, headlightRight);
-
-    // Emissive headlight meshes are sufficient â€” no PointLight needed
-    return group;
+  // Straight traffic lane along a settlement road, stopping short of the
+  // settlement hubs at either end
+  makeRoadTrafficPath(road) {
+    const dx = road.endX - road.startX, dz = road.endZ - road.startZ;
+    const len = Math.hypot(dx, dz);
+    const trim = Math.min(60, len * 0.25);
+    if (len - 2 * trim < 40) return null;
+    const ux = dx / len, uz = dz / len;
+    return new TrafficPath([
+      new THREE.Vector3(road.startX + ux * trim, 0, road.startZ + uz * trim),
+      new THREE.Vector3(road.endX - ux * trim, 0, road.endZ - uz * trim)
+    ], false);
   }
 
-  // Sleek colony utility rover
-  createColonyRover() {
-    const group = new THREE.Group();
-
-    const bodyGeom = new THREE.BoxGeometry(8, 3, 5);
-    const bodyMat = new THREE.MeshStandardMaterial({ color: 0x99c2ff, metalness: 0.6, roughness: 0.3 });
-    const body = new THREE.Mesh(bodyGeom, bodyMat);
-    body.position.y = 2.5;
-    group.add(body);
-
-    const cabinGeom = new THREE.BoxGeometry(4, 2.5, 4);
-    const cabinMat = new THREE.MeshStandardMaterial({ color: 0xd9ecff, metalness: 0.2, roughness: 0.1, transparent: true, opacity: 0.8 });
-    const cabin = new THREE.Mesh(cabinGeom, cabinMat);
-    cabin.position.set(0, 4.3, 0);
-    group.add(cabin);
-
-    const wheelGeom = new THREE.CylinderGeometry(1.0, 1.0, 0.8, 16);
-    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.3, roughness: 0.8 });
-    const wheelOffsets = [
-      [3, 0, 2.0],
-      [-3, 0, 2.0],
-      [3, 0, -2.0],
-      [-3, 0, -2.0]
-    ];
-    wheelOffsets.forEach(([x, y, z]) => {
-      const wheel = new THREE.Mesh(wheelGeom, wheelMat);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(x, 1.0, z);
-      group.add(wheel);
+  // Keep a handful of trucks on the settlement roads near the player
+  _updateRoadVehicles(px, pz) {
+    if (!this.fleet) return;
+    const despawnSq = this.settlementDespawnDist * this.settlementDespawnDist;
+    this.fleet.removeWhere(v => {
+      if (v.tag !== 'road') return false;
+      if (!this.roads.has(v.roadKey)) return true;
+      const dx = v.position.x - px, dz = v.position.z - pz;
+      return dx * dx + dz * dz > despawnSq;
     });
 
-    const accentGeom = new THREE.BoxGeometry(1, 0.6, 3);
-    const accentMat = new THREE.MeshStandardMaterial({ color: 0x00e0ff, emissive: 0x0077aa, emissiveIntensity: 0.8 });
-    const accent = new THREE.Mesh(accentGeom, accentMat);
-    accent.position.set(-3.5, 3.0, 0);
-    group.add(accent);
+    const maxRoadTrucks = 18;
+    let count = this.fleet.count('road');
+    const smp = { x: 0, z: 0, tx: 0, tz: 1 };
+    for (const [key, road] of this.roads) {
+      if (count >= maxRoadTrucks) break;
+      if (Math.random() > 0.15) continue;
+      if (road.trafficPath === undefined) road.trafficPath = this.makeRoadTrafficPath(road);
+      const path = road.trafficPath;
+      if (!path) continue;
 
-    // Emissive accent is sufficient â€” no PointLight needed
-    return group;
-  }
+      // Never pop a truck into existence right next to the player
+      const s = Math.random() * path.length;
+      path.sample(s, smp);
+      const dx = smp.x - px, dz = smp.z - pz;
+      if (dx * dx + dz * dz < 150 * 150) continue;
 
-  // Low-poly Tesla Cybertruck-inspired vehicle
-  createCybertruckVehicle() {
-    const group = new THREE.Group();
-
-    const stainlessMat = new THREE.MeshStandardMaterial({
-      color: 0xbfc4c7,
-      metalness: 0.95,
-      roughness: 0.18
-    });
-    const glassMat = new THREE.MeshStandardMaterial({
-      color: 0x101820,
-      metalness: 0.7,
-      roughness: 0.12,
-      transparent: true,
-      opacity: 0.88
-    });
-    const blackMat = new THREE.MeshStandardMaterial({
-      color: 0x080808,
-      metalness: 0.35,
-      roughness: 0.72
-    });
-    const darkTrimMat = new THREE.MeshStandardMaterial({
-      color: 0x16191d,
-      metalness: 0.65,
-      roughness: 0.42
-    });
-
-    // Wide flat skateboard chassis
-    const bodyGeom = new THREE.BoxGeometry(11.0, 2.2, 4.8);
-    const body = new THREE.Mesh(bodyGeom, stainlessMat);
-    body.position.y = 1.6;
-    group.add(body);
-
-    // Faceted stainless side shells give the truck its wedge profile.
-    const shellShape = new THREE.Shape();
-    shellShape.moveTo(-5.4, -0.2);
-    shellShape.lineTo(4.9, -0.2);
-    shellShape.lineTo(2.15, 2.25);
-    shellShape.lineTo(-2.05, 2.52);
-    shellShape.lineTo(-5.0, 0.35);
-    shellShape.lineTo(-5.4, -0.2);
-    const shellGeom = new THREE.ShapeGeometry(shellShape);
-    const leftShell = new THREE.Mesh(shellGeom, stainlessMat);
-    leftShell.position.set(0, 1.88, 2.48);
-    group.add(leftShell);
-    const rightShell = leftShell.clone();
-    rightShell.position.z = -2.48;
-    rightShell.rotation.y = Math.PI;
-    group.add(rightShell);
-
-    const hood = new THREE.Mesh(new THREE.BoxGeometry(4.7, 0.22, 4.7), stainlessMat);
-    hood.position.set(3.15, 2.78, 0);
-    hood.rotation.z = -0.18;
-    group.add(hood);
-
-    // Cybertruck's signature steep single-slope windshield
-    const windshield = new THREE.Mesh(new THREE.BoxGeometry(4.8, 0.18, 4.6), glassMat);
-    windshield.position.set(1.4, 3.2, 0);
-    windshield.rotation.z = -0.62; // steeper rake
-    group.add(windshield);
-
-    // Flat roof panel (very short, near the rear)
-    const roof = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.22, 4.5), stainlessMat);
-    roof.position.set(-1.6, 4.1, 0);
-    roof.rotation.z = 0.04;
-    group.add(roof);
-
-    // Aggressive rear sail sloping downward to the bed
-    const rearSail = new THREE.Mesh(new THREE.BoxGeometry(4.2, 0.22, 4.6), stainlessMat);
-    rearSail.position.set(-3.8, 3.3, 0);
-    rearSail.rotation.z = 0.52;
-    group.add(rearSail);
-
-    const bedCover = new THREE.Mesh(new THREE.BoxGeometry(3.9, 0.2, 4.35), darkTrimMat);
-    bedCover.position.set(-3.72, 2.62, 0);
-    bedCover.rotation.z = 0.2;
-    group.add(bedCover);
-
-    const sideGlassGeom = new THREE.BoxGeometry(3.1, 0.9, 0.16);
-    const leftGlass = new THREE.Mesh(sideGlassGeom, glassMat);
-    leftGlass.position.set(-0.15, 3.0, 2.32);
-    group.add(leftGlass);
-    const rightGlass = leftGlass.clone();
-    rightGlass.position.z = -2.32;
-    group.add(rightGlass);
-
-    // Front light bar
-    const stripGeom = new THREE.BoxGeometry(0.18, 0.16, 4.05);
-    const stripMat = new THREE.MeshStandardMaterial({
-      color: 0xffffff,
-      emissive: 0xffffff,
-      emissiveIntensity: 1.2
-    });
-    const lightStrip = new THREE.Mesh(stripGeom, stripMat);
-    lightStrip.position.set(5.4, 2.2, 0);
-    group.add(lightStrip);
-
-    const rearStrip = new THREE.Mesh(stripGeom, stripMat);
-    rearStrip.position.set(-5.4, 2.05, 0);
-    rearStrip.scale.z = 0.82;
-    group.add(rearStrip);
-
-    const tailRedMat = new THREE.MeshStandardMaterial({
-      color: 0xff3040,
-      emissive: 0xff1018,
-      emissiveIntensity: 1.1
-    });
-    const rearRed = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.14, 3.4), tailRedMat);
-    rearRed.position.set(-5.56, 2.35, 0);
-    group.add(rearRed);
-
-    // Emissive light strip is sufficient â€” no PointLight needed for each cybertruck
-
-    // Dark lower fascia
-    const bumperGeom = new THREE.BoxGeometry(10.6, 1.0, 4.6);
-    const bumper = new THREE.Mesh(bumperGeom, blackMat);
-    bumper.position.y = 0.92;
-    group.add(bumper);
-
-    const flareGeom = new THREE.BoxGeometry(1.85, 0.48, 0.42);
-
-    // Wheels
-    const wheelGeom = new THREE.CylinderGeometry(1.25, 1.25, 0.9, 24);
-    const rimGeom = new THREE.CylinderGeometry(0.62, 0.62, 0.94, 18);
-    const rimMat = new THREE.MeshStandardMaterial({ color: 0x777b80, metalness: 0.8, roughness: 0.28 });
-    const wheelOffsets = [
-      [3.65, 0, 2.18],
-      [-3.85, 0, 2.18],
-      [3.65, 0, -2.18],
-      [-3.85, 0, -2.18]
-    ];
-    wheelOffsets.forEach(([x, y, z]) => {
-      const wheel = new THREE.Mesh(wheelGeom, blackMat);
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(x, 0.92, z);
-      group.add(wheel);
-
-      const rim = new THREE.Mesh(rimGeom, rimMat);
-      rim.rotation.z = Math.PI / 2;
-      rim.position.copy(wheel.position);
-      group.add(rim);
-
-      const flare = new THREE.Mesh(flareGeom, darkTrimMat);
-      flare.position.set(x, 1.68, z > 0 ? 2.53 : -2.53);
-      flare.rotation.y = z > 0 ? 0.08 : -0.08;
-      group.add(flare);
-    });
-
-    const mirrorGeom = new THREE.BoxGeometry(0.32, 0.18, 0.75);
-    const leftMirror = new THREE.Mesh(mirrorGeom, blackMat);
-    leftMirror.position.set(1.8, 3.0, 2.78);
-    group.add(leftMirror);
-    const rightMirror = leftMirror.clone();
-    rightMirror.position.z = -2.78;
-    group.add(rightMirror);
-
-    return group;
+      const v = this.fleet.addVehicle(path, {
+        tag: 'road',
+        lane: 1.5,
+        uturnReach: 6,
+        cruise: 9 + Math.random() * 6,
+        s,
+        dir: Math.random() < 0.5 ? 1 : -1
+      });
+      if (v) {
+        v.roadKey = key;
+        count++;
+      }
+    }
   }
 
   // Control methods for rocket launch system
@@ -2735,27 +2984,45 @@ class MarsSceneManager {
   }
 
   // --- UPDATE animated objects ---
-  updateAnimations(time) {
-    const rover = window.rover;
-    const roverPos = rover ? rover.position : null;
+  updateAnimations(time, dt = 1 / 60) {
+    const roverPos = typeof rover !== 'undefined' && rover ? rover.position : null;
     const BEACON_CULL_DIST_SQ = 700 * 700;
+    const frames = dt * 60; // rotation speeds are authored per 60 Hz frame
+    const t = time * 0.001;
+
+    // Floodlights barely register against Martian daylight; letting them run
+    // at full strength washed the colony out at noon
+    const nightLevel = 1 - 0.85 * (typeof window.dayNightBlend === 'number' ? window.dayNightBlend : 0);
+    for (const light of this.nightLights) {
+      if (light.userData.baseIntensity === undefined) light.userData.baseIntensity = light.intensity;
+      light.intensity = light.userData.baseIntensity * nightLevel;
+    }
 
     for (const anim of this.animatedObjects) {
       if (!anim.mesh) continue;
 
-      // Skip beacons that are too far from the rover
-      if (roverPos && anim.type === 'blink') {
-        const wp = new THREE.Vector3();
-        anim.mesh.getWorldPosition(wp);
-        const dx = wp.x - roverPos.x, dz = wp.z - roverPos.z;
-        if (dx * dx + dz * dz > BEACON_CULL_DIST_SQ) {
-          anim.mesh.visible = false;
-          continue;
+      if (anim.type === 'blink') {
+        // Beacons never move, so resolve the world position once
+        if (!anim.worldPos) {
+          anim.worldPos = new THREE.Vector3();
+          anim.mesh.getWorldPosition(anim.worldPos);
         }
-        const t = time * 0.001;
-        anim.mesh.visible = Math.sin(t * 1.8 + anim.phase) > 0.3;
+        let on = Math.sin(t * 1.8 + anim.phase) > 0.3;
+        if (roverPos) {
+          const dx = anim.worldPos.x - roverPos.x, dz = anim.worldPos.z - roverPos.z;
+          if (dx * dx + dz * dz > BEACON_CULL_DIST_SQ) on = false;
+        }
+        if (anim.mesh.isLight) {
+          // Toggling a light's visibility changes the scene's light count and
+          // forces every lit material to switch shader programs; dim it instead.
+          const ud = anim.mesh.userData;
+          if (ud.baseIntensity === undefined) ud.baseIntensity = anim.mesh.intensity;
+          anim.mesh.intensity = on ? ud.baseIntensity * nightLevel : 0;
+        } else {
+          anim.mesh.visible = on;
+        }
       } else if (anim.type === 'rotate') {
-        anim.mesh.rotation.y += anim.speed;
+        anim.mesh.rotation.y += anim.speed * frames;
       }
     }
   }
@@ -2805,8 +3072,8 @@ class MarsSceneManager {
     const structures = [];
     
     // Position colony further away and to the side for better view
-    const colonyOffsetX = -400;
-    const colonyOffsetZ = -600;
+    const colonyOffsetX = COLONY_SITE_X;
+    const colonyOffsetZ = COLONY_SITE_Z;
     const groundY = 0;
 
     // Store primary colony center for use by traffic and rail systems
@@ -2815,7 +3082,17 @@ class MarsSceneManager {
     // The colony buildings are placed at a fixed ground height (groundY=0), so
     // flatten the terrain beneath them to remove the little hills that would
     // otherwise poke up in front of the structures and the rocket area.
-    flattenMarsTerrain(colonyOffsetX, colonyOffsetZ, 220, groundY);
+    // The pad reaches out to the ring road, which then blends into the
+    // surrounding ground.
+    flattenMarsTerrain(colonyOffsetX, colonyOffsetZ, 330, groundY);
+
+    // Grade the haul roads into the ground before anything else is placed on
+    // it, so lamps, crates and pads all stand on the final surface
+    if (!getPerformanceSettings().isMobile) {
+      this.defineHaulRoutes();
+      this.aiRoutes.forEach(route => gradeTerrainAlongPath(route.points, route.closed));
+      marsSurface.geometry.computeVertexNormals();
+    }
 
     // Shared materials for colony infrastructure (avoid duplicates)
     const windowMaterial = new THREE.MeshStandardMaterial({
@@ -3082,52 +3359,67 @@ class MarsSceneManager {
         this.scene.add(pylonMesh);
       });
       
-      // Reactor glow handled by emissive materials above â€” no additional PointLight needed
+      // Reactor glow handled by emissive materials above — no additional PointLight needed
     }
     
     // === ADVANCED SOLAR FARM - Hexagonal mirror array ===
-    const solarCenterX = colonyOffsetX + 220;
-    const solarCenterZ = colonyOffsetZ - 80;
-    const hexRadius = 6;
-    const hexRows = 5;
-    const hexCols = 8;
-    
-    for (let row = 0; row < hexRows; row++) {
-      for (let col = 0; col < hexCols; col++) {
-        const xOffset = col * hexRadius * 1.8;
-        const zOffset = row * hexRadius * 1.6 + (col % 2) * hexRadius * 0.8;
-        
-        const hexGeometry = new THREE.CylinderGeometry(hexRadius, hexRadius, 0.5, 6);
-        const hexMaterial = new THREE.MeshStandardMaterial({
+    // Two instanced draw calls (it used to be 40 panels with 80 unique
+    // materials). Kept inside the ring road, which it used to straddle.
+    {
+      const solarCenterX = colonyOffsetX + 160;
+      const solarCenterZ = colonyOffsetZ - 100;
+      const hexRadius = 6;
+      const hexRows = 5;
+      const hexCols = 8;
+      const count = hexRows * hexCols;
+      const hexes = new THREE.InstancedMesh(
+        new THREE.CylinderGeometry(hexRadius, hexRadius, 0.5, 6),
+        new THREE.MeshStandardMaterial({
           color: 0x1a2844,
           roughness: 0.1,
           metalness: 0.95,
           emissive: 0x0a1a44,
           emissiveIntensity: 0.3
-        });
-        const hex = new THREE.Mesh(hexGeometry, hexMaterial);
-        hex.position.set(
-          solarCenterX + xOffset,
-          groundY + 2,
-          solarCenterZ + zOffset
-        );
-        hex.rotation.x = -Math.PI / 8;
-        hex.castShadow = true;
-        this.scene.add(hex);
-        
-        // Blue glow on panels
-        const glowGeometry = new THREE.CircleGeometry(hexRadius * 0.8, 6);
-        const glowMaterial = new THREE.MeshBasicMaterial({
+        }),
+        count
+      );
+      const glows = new THREE.InstancedMesh(
+        new THREE.CircleGeometry(hexRadius * 0.8, 6),
+        new THREE.MeshBasicMaterial({
           color: 0x2266ff,
           transparent: true,
           opacity: 0.4,
           side: THREE.DoubleSide
-        });
-        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-        glow.position.y = 0.3;
-        glow.rotation.x = -Math.PI / 2;
-        hex.add(glow);
+        }),
+        count
+      );
+      const panel = new THREE.Object3D();
+      panel.rotation.x = -Math.PI / 8;
+      const glowLocal = new THREE.Matrix4().compose(
+        new THREE.Vector3(0, 0.3, 0),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0)),
+        new THREE.Vector3(1, 1, 1)
+      );
+      const glowMatrix = new THREE.Matrix4();
+      let k = 0;
+      for (let row = 0; row < hexRows; row++) {
+        for (let col = 0; col < hexCols; col++) {
+          panel.position.set(
+            solarCenterX + col * hexRadius * 1.8,
+            groundY + 2,
+            solarCenterZ + row * hexRadius * 1.6 + (col % 2) * hexRadius * 0.8
+          );
+          panel.updateMatrix();
+          hexes.setMatrixAt(k, panel.matrix);
+          glows.setMatrixAt(k, glowMatrix.multiplyMatrices(panel.matrix, glowLocal));
+          k++;
+        }
       }
+      hexes.castShadow = true;
+      // r140 culls instances against the single panel's bounds
+      hexes.frustumCulled = false;
+      glows.frustumCulled = false;
+      this.scene.add(hexes, glows);
     }
     
     // === TRANSPORTATION HUB - Magnetic rail station ===
@@ -3199,8 +3491,9 @@ class MarsSceneManager {
     const centralLight = new THREE.PointLight(0xffffff, 3, 500);
     centralLight.position.set(colonyOffsetX, groundY + 150, colonyOffsetZ);
     this.scene.add(centralLight);
+    this.nightLights.push(centralLight);
     
-    // Spotlight beams removed â€” emissive materials and central light provide sufficient effect
+    // Spotlight beams removed — emissive materials and central light provide sufficient effect
     
     
     // Perimeter lighting system (reduced for performance)
@@ -3239,7 +3532,7 @@ class MarsSceneManager {
       });
     }
     
-    console.log('âœ… Ultra high-definition futuristic colony created:', structures.length, 'main structures');
+    console.log('✅ Ultra high-definition futuristic colony created:', structures.length, 'main structures');
 
     // Register collidable bounding volumes for the primary colony
     // Command center levels (3 stacked cylinders at colony center, radius ~70-80)
@@ -3259,7 +3552,7 @@ class MarsSceneManager {
       }
     });
 
-    // Create a lightweight secondary colony (not a full deep-clone â€” saves hundreds of objects)
+    // Create a lightweight secondary colony (not a full deep-clone — saves hundreds of objects)
     try {
       const perfSettings = getPerformanceSettings();
       if (!perfSettings.isMobile) {
@@ -3276,13 +3569,13 @@ class MarsSceneManager {
         });
         mainStructures.forEach(original => {
           if (!original) return;
-          const clone = original.clone(false); // shallow clone â€” no children (skips windows/beams)
+          const clone = original.clone(false); // shallow clone — no children (skips windows/beams)
           clone.position.x += replicaOffset.x;
           clone.position.z += replicaOffset.z;
           this.scene.add(clone);
         });
 
-        console.log('âœ… Lightweight secondary colony created at', this.secondaryColonyCenter.x, this.secondaryColonyCenter.z);
+        console.log('✅ Lightweight secondary colony created at', this.secondaryColonyCenter.x, this.secondaryColonyCenter.z);
 
         // Register secondary colony as collidable (mirror the primary colony center)
         this.registerCollidable(this.secondaryColonyCenter, 80);
@@ -3355,52 +3648,63 @@ class MarsSceneManager {
         emissiveIntensity: 0.28
       });
 
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(285, 2.6, 8, 160), serviceMat);
-      ring.position.set(center.x, groundY + 0.35, center.z);
-      ring.rotation.x = Math.PI / 2;
-      ring.receiveShadow = true;
-      group.add(ring);
+      // On desktop the Cybertruck ring road (createTrafficRoutes) is draped
+      // over the terrain on this radius; the flat torus stays for mobile.
+      if (perfSettings.isMobile) {
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(285, 2.6, 8, 160), serviceMat);
+        ring.position.set(center.x, groundY + 0.35, center.z);
+        ring.rotation.x = Math.PI / 2;
+        ring.receiveShadow = true;
+        group.add(ring);
 
-      const ringLine = new THREE.Mesh(new THREE.TorusGeometry(285, 0.32, 6, 160), lineMat);
-      ringLine.position.set(center.x, groundY + 0.55, center.z);
-      ringLine.rotation.x = Math.PI / 2;
-      group.add(ringLine);
+        const ringLine = new THREE.Mesh(new THREE.TorusGeometry(285, 0.32, 6, 160), lineMat);
+        ringLine.position.set(center.x, groundY + 0.55, center.z);
+        ringLine.rotation.x = Math.PI / 2;
+        group.add(ringLine);
+      }
 
       const serviceSpokes = [
         { angle: -0.15, length: 560 },
         { angle: Math.PI * 0.34, length: 430 },
-        { angle: Math.PI * 0.78, length: 470 },
+        { angle: Math.PI * 0.62, length: 470 }, // clear of the Mine-A haul road
         { angle: Math.PI * 1.18, length: 410 }
       ];
 
+      // Service roads are draped over the ground (flat boxes used to float
+      // or sink once they left the levelled colony pad). They stop either side
+      // of the ring road instead of z-fighting across it, and their landing
+      // pads sit clear of the ring on levelled ground.
+      const roadMats = this.getRoadMaterials();
+      const ringRadius = 285, ringGap = 6;
       serviceSpokes.forEach((spoke, index) => {
-        const road = new THREE.Mesh(new THREE.BoxGeometry(11, 0.18, spoke.length), serviceMat);
-        road.position.set(
-          center.x + Math.sin(spoke.angle) * spoke.length * 0.5,
-          groundY + 0.18,
-          center.z + Math.cos(spoke.angle) * spoke.length * 0.5
-        );
-        road.rotation.y = spoke.angle;
-        road.receiveShadow = true;
-        group.add(road);
+        const dirX = Math.sin(spoke.angle), dirZ = Math.cos(spoke.angle);
+        const at = d => new THREE.Vector3(center.x + dirX * d, 0, center.z + dirZ * d);
 
-        const line = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.08, spoke.length * 0.82), lineMat);
-        line.position.set(0, 0.2, 0);
-        road.add(line);
+        const padDist = Math.max(spoke.length * 0.72, 372);
+        const padX = center.x + dirX * padDist, padZ = center.z + dirZ * padDist;
+        const padY = this.getTerrainHeight(padX, padZ);
+        flattenMarsTerrain(padX, padZ, 44, padY);
+
+        const pieces = perfSettings.isMobile
+          ? [[0, spoke.length]]
+          : [[0, ringRadius - ringGap], [ringRadius + ringGap, spoke.length]];
+        pieces.forEach(([from, to]) => {
+          const pts = resamplePath([at(from), at(to)], 4, false);
+          const road = new THREE.Mesh(buildDrapedRibbon(pts, 5.5, 0.08, false), roadMats.surface);
+          road.receiveShadow = true;
+          group.add(road);
+          const dashes = new THREE.Mesh(this.buildRoadDashes(new TrafficPath(pts, false), 0.11), roadMats.marking);
+          group.add(dashes);
+        });
 
         const pad = new THREE.Mesh(new THREE.CylinderGeometry(24, 24, 1.2, 12), padMat);
-        const padDist = spoke.length * 0.72;
-        pad.position.set(
-          center.x + Math.sin(spoke.angle) * padDist,
-          groundY + 0.65,
-          center.z + Math.cos(spoke.angle) * padDist
-        );
+        pad.position.set(padX, padY + 0.45, padZ);
         pad.rotation.y = spoke.angle;
         pad.receiveShadow = true;
         group.add(pad);
 
         const padRing = new THREE.Mesh(new THREE.TorusGeometry(21, 0.55, 6, 48), index % 2 === 0 ? glowCyan : glowAmber);
-        padRing.position.set(pad.position.x, groundY + 1.35, pad.position.z);
+        padRing.position.set(pad.position.x, padY + 1.15, pad.position.z);
         padRing.rotation.x = Math.PI / 2;
         group.add(padRing);
         this.animatedObjects.push({ mesh: padRing, type: 'rotate', speed: index % 2 === 0 ? 0.01 : -0.012 });
@@ -3410,11 +3714,23 @@ class MarsSceneManager {
       const lightPostGeom = new THREE.CylinderGeometry(0.45, 0.7, 9, 8);
       const lightHeadGeom = new THREE.SphereGeometry(1.25, 10, 8);
       const perimeterCount = Math.floor((highDetail ? 30 : 20) * detailScale);
+      // Lamps never stand in a service or haul road
+      const onRoad = (x, z) => {
+        const dx = x - center.x, dz = z - center.z;
+        for (const spoke of serviceSpokes) {
+          const along = dx * Math.sin(spoke.angle) + dz * Math.cos(spoke.angle);
+          const across = dx * Math.cos(spoke.angle) - dz * Math.sin(spoke.angle);
+          if (along > 0 && along < spoke.length && Math.abs(across) < 10) return true;
+        }
+        return (this.aiRoutes || []).some(route => !route.closed &&
+          route.points.some(p => (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z) < 100));
+      };
       for (let i = 0; i < perimeterCount; i++) {
         const angle = (i / perimeterCount) * Math.PI * 2;
         const radius = 318 + Math.sin(i * 2.13) * 18;
         const x = center.x + Math.cos(angle) * radius;
         const z = center.z + Math.sin(angle) * radius;
+        if (onRoad(x, z)) continue;
         const y = this.getTerrainHeight(x, z);
         const post = new THREE.Mesh(lightPostGeom, darkCargoMat);
         post.position.set(x, y + 4.5, z);
@@ -3426,11 +3742,12 @@ class MarsSceneManager {
         this.animatedObjects.push({ mesh: head, type: 'blink', phase: i * 0.37 });
       }
 
+      // All inside the ring road (two used to sit on it)
       const cargoPositions = [
         { x: -210, z: 92, yaw: 0.2 },
         { x: 215, z: 84, yaw: -0.4 },
-        { x: -120, z: 255, yaw: 0.9 },
-        { x: 90, z: 285, yaw: -0.7 }
+        { x: -95, z: 205, yaw: 0.9 },
+        { x: 70, z: 215, yaw: -0.7 }
       ];
       cargoPositions.forEach((p, clusterIndex) => {
         for (let i = 0; i < 5; i++) {
@@ -3586,44 +3903,9 @@ class MarsSceneManager {
   }
 
   getTerrainHeight(x, z) {
-    // Reuse a single raycaster and direction vector (avoid allocating per call)
-    if (!this._heightRaycaster) {
-      this._heightRaycaster = new THREE.Raycaster();
-      this._heightRayOrigin = new THREE.Vector3();
-      this._heightRayDir = new THREE.Vector3(0, -1, 0);
-    }
-    this._heightRayOrigin.set(x, 500, z);
-    this._heightRaycaster.set(this._heightRayOrigin, this._heightRayDir);
-
-    // Try to find terrain mesh if not already set (one-time search)
-    if (!this.terrainMesh) {
-      // Use the global marsSurface directly â€” fastest fallback
-      if (typeof marsSurface !== 'undefined' && marsSurface) {
-        this.terrainMesh = marsSurface;
-      } else {
-        // Scan scene once for a large plane
-        this.scene.traverse(child => {
-          if (this.terrainMesh) return;
-          if (child.isMesh && child.geometry) {
-            const params = child.geometry.parameters;
-            if (params && (params.width >= 2000 || params.height >= 2000)) {
-              this.terrainMesh = child;
-            }
-          }
-        });
-      }
-    }
-    
-    if (this.terrainMesh) {
-      const intersects = this._heightRaycaster.intersectObject(this.terrainMesh, false);
-      if (intersects.length > 0) {
-        return intersects[0].point.y;
-      }
-    }
-    
-    // Fallback: return 0 if terrain not found (will log warning)
-    console.warn(`Could not find terrain at (${x}, ${z}), using y=0. Terrain mesh:`, this.terrainMesh ? 'found' : 'NOT FOUND');
-    return 0;
+    // Beyond the terrain edge there is no ground; y=0 keeps far-off
+    // structures level with the nominal surface.
+    return sampleTerrainHeight(x, z, 0);
   }
 
   // Create a third futuristic city node as part of a loose square network
@@ -3652,7 +3934,7 @@ class MarsSceneManager {
       const center = new THREE.Vector3(roughPos.x, groundY, roughPos.z);
       this.futureCityCenter = center;
 
-      console.log('ðŸ™ï¸ Creating third futuristic city node at', center.x, center.z);
+      console.log('🏙️ Creating third futuristic city node at', center.x, center.z);
 
       this.createFuturisticCity(center);
       this.createCityBulletTrainSystem(center);
@@ -3676,7 +3958,7 @@ class MarsSceneManager {
     const colonyTallTowerHeight = 170; // based on residential towers near the main colony
     const flagshipHeight = colonyTallTowerHeight * 5; // ultra-tall centerpiece
 
-    // Compact skyline â€” reduced object count for performance
+    // Compact skyline — reduced object count for performance
     let skyscraperCount = 25;
     if (perfSettings.detailLevel === 'normal') {
       skyscraperCount = 18;
@@ -3737,7 +4019,7 @@ class MarsSceneManager {
       beacon.position.set(0, baseHeight / 2 + 3, 0);
       tower.add(beacon);
 
-      // Emissive beacon mesh â€” no PointLight needed per building
+      // Emissive beacon mesh — no PointLight needed per building
       this.animatedObjects.push({
         mesh: beacon,
         type: 'blink',
@@ -3784,14 +4066,15 @@ class MarsSceneManager {
       speed: 0.02
     });
 
-    // Flagship emissive glow is sufficient â€” SpotLights removed for performance
+    // Flagship emissive glow is sufficient — SpotLights removed for performance
 
     // Single city-wide ambient glow (reduced intensity)
     const cityLight = new THREE.PointLight(0x88aaff, 2.0, 1200);
     cityLight.position.set(center.x, center.y + 260, center.z);
     this.scene.add(cityLight);
+    this.nightLights.push(cityLight);
 
-    console.log('âœ… Futuristic third-city skyline created with', structures.length, 'skyscraper structures');
+    console.log('✅ Futuristic third-city skyline created with', structures.length, 'skyscraper structures');
   }
 
   // Elevated rail and bullet train between the secondary colony and the new city
@@ -3878,7 +4161,7 @@ class MarsSceneManager {
         lastTime: null
       });
 
-      console.log('ðŸš„ City bullet train system created between secondary colony and third city');
+      console.log('🚄 City bullet train system created between secondary colony and third city');
     } catch (e) {
       console.warn('Failed to create city bullet train system:', e);
     }
@@ -3994,7 +4277,7 @@ class MarsSceneManager {
   // PROCEDURAL SETTLEMENT SPAWNING
   // ================================================================
 
-  // Deterministic hash for a grid cell â€” decides if a settlement exists there and its type
+  // Deterministic hash for a grid cell — decides if a settlement exists there and its type
   _settlementHash(gx, gz) {
     // Simple but effective integer hash
     let h = (gx * 374761393 + gz * 668265263) ^ 0x5bd1e995;
@@ -4055,7 +4338,7 @@ class MarsSceneManager {
       }
     }
 
-    // Scan grid cells around the player â€” spawn new settlements
+    // Scan grid cells around the player — spawn new settlements
     for (let gx = playerGX - scanRadius; gx <= playerGX + scanRadius; gx++) {
       for (let gz = playerGZ - scanRadius; gz <= playerGZ + scanRadius; gz++) {
         const key = `${gx},${gz}`;
@@ -4067,7 +4350,7 @@ class MarsSceneManager {
         const hash = this._settlementHash(gx, gz);
 
         // ~60% of grid cells have a settlement
-        if ((hash & 0xff) > 153) continue; // 154/256 â‰ˆ 60%
+        if ((hash & 0xff) > 153) continue; // 154/256 ≈ 60%
 
         const cx = gx * grid + ((hash >>> 8) & 0xff) / 256 * grid * 0.6;
         const cz = gz * grid + ((hash >>> 16) & 0xff) / 256 * grid * 0.6;
@@ -4078,18 +4361,19 @@ class MarsSceneManager {
         if (dx * dx + dz2 * dz2 > this.settlementSpawnDist * this.settlementSpawnDist) continue;
         const minSpawnDist = 260;
         if (dx * dx + dz2 * dz2 < minSpawnDist * minSpawnDist) continue;
+        if (!this._isSettlementSiteClear(cx, cz)) continue;
 
         // Determine settlement type from hash bits
         const typeBits = (hash >>> 24) & 0xff;
         let type;
-        if (typeBits < 100) type = 'outpost';       // ~39% â€” small
-        else if (typeBits < 200) type = 'base';      // ~39% â€” medium
-        else type = 'city';                           // ~22% â€” large
+        if (typeBits < 100) type = 'outpost';       // ~39% — small
+        else if (typeBits < 200) type = 'base';      // ~39% — medium
+        else type = 'city';                           // ~22% — large
 
         const groundY = this.getTerrainHeight(cx, cz);
         const center = new THREE.Vector3(cx, groundY, cz);
 
-        console.log(`ðŸ—ï¸ Spawning procedural ${type} at (${Math.round(cx)}, ${Math.round(cz)})`);
+        console.log(`🏗️ Spawning procedural ${type} at (${Math.round(cx)}, ${Math.round(cz)})`);
 
         const collidableStart = this.collidables.length;
         const group = this._buildSettlement(type, center, hash);
@@ -4111,9 +4395,6 @@ class MarsSceneManager {
 
     // Build roads between nearby settlements
     this._updateRoads(px, pz);
-
-    // Spawn vehicles on roads
-    this._updateRoadVehicles(px, pz);
   }
 
   // Create roads (flat strips) between pairs of nearby settlements
@@ -4135,22 +4416,7 @@ class MarsSceneManager {
       }
     }
 
-    // Shared road material (double-sided so a draped ribbon is visible
-    // regardless of triangle winding as it follows the terrain)
-    if (!this._roadMaterial) {
-      this._roadMaterial = new THREE.MeshBasicMaterial({
-        color: 0x3a3028,
-        side: THREE.DoubleSide,
-        depthWrite: true
-      });
-      this._roadMaterial._shared = true;
-      this._roadLineMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffaa33,
-        side: THREE.DoubleSide,
-        depthWrite: true
-      });
-      this._roadLineMaterial._shared = true;
-    }
+    const roadMats = this.getRoadMaterials();
 
     // Build roads between nearby spawned settlements
     const entries = [...this.settlements.entries()];
@@ -4158,7 +4424,7 @@ class MarsSceneManager {
       for (let j = i + 1; j < entries.length; j++) {
         const [keyA, a] = entries[i];
         const [keyB, b] = entries[j];
-        const roadKey = keyA < keyB ? `${keyA}â†’${keyB}` : `${keyB}â†’${keyA}`;
+        const roadKey = keyA < keyB ? `${keyA}→${keyB}` : `${keyB}→${keyA}`;
         if (this.roads.has(roadKey)) continue;
 
         const dx = a.center.x - b.center.x;
@@ -4178,42 +4444,18 @@ class MarsSceneManager {
         const angle = Math.atan2(b.center.z - a.center.z, b.center.x - a.center.x);
         const groundY = (a.center.y + b.center.y) / 2 + 0.15;
 
-        // Road surface â€” a ribbon DRAPED over the terrain so it follows the
-        // hills. A single flat plane floats over dips and lets the rover drive
-        // underneath it; sampling terrain height per segment fixes that.
-        const roadWidth = 6;
-        const dirX = (b.center.x - a.center.x) / dist;
-        const dirZ = (b.center.z - a.center.z) / dist;
-        const perpX = -dirZ, perpZ = dirX;
-        const segs = Math.max(8, Math.floor(dist / 12));
-        const buildDrapedRibbon = (halfWidth, yOff) => {
-          const v = [];
-          for (let s = 0; s < segs; s++) {
-            const t0 = s / segs, t1 = (s + 1) / segs;
-            const ax0 = a.center.x + (b.center.x - a.center.x) * t0;
-            const az0 = a.center.z + (b.center.z - a.center.z) * t0;
-            const ax1 = a.center.x + (b.center.x - a.center.x) * t1;
-            const az1 = a.center.z + (b.center.z - a.center.z) * t1;
-            const ay0 = this.getTerrainHeight(ax0, az0) + yOff;
-            const ay1 = this.getTerrainHeight(ax1, az1) + yOff;
-            const l0 = [ax0 + perpX * halfWidth, ay0, az0 + perpZ * halfWidth];
-            const r0 = [ax0 - perpX * halfWidth, ay0, az0 - perpZ * halfWidth];
-            const l1 = [ax1 + perpX * halfWidth, ay1, az1 + perpZ * halfWidth];
-            const r1 = [ax1 - perpX * halfWidth, ay1, az1 - perpZ * halfWidth];
-            v.push(...l0, ...r0, ...l1, ...l1, ...r0, ...r1);
-          }
-          const g = new THREE.BufferGeometry();
-          g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
-          g.computeVertexNormals();
-          return g;
-        };
-
-        const road = new THREE.Mesh(buildDrapedRibbon(roadWidth / 2, 0.15), this._roadMaterial);
+        // Road surface draped over the terrain, sampled every 4 m so it
+        // hugs the ground closely enough for trucks to sit on it.
+        const roadPoints = resamplePath([
+          new THREE.Vector3(a.center.x, 0, a.center.z),
+          new THREE.Vector3(b.center.x, 0, b.center.z)
+        ], 4);
+        const road = new THREE.Mesh(buildDrapedRibbon(roadPoints, 3, 0.1), roadMats.surface);
+        road.receiveShadow = true;
         roadGroup.add(road);
 
-        // Center line, draped just above the road surface
-        const line = new THREE.Mesh(buildDrapedRibbon(0.3, 0.22), this._roadLineMaterial);
-        roadGroup.add(line);
+        const dashes = new THREE.Mesh(this.buildRoadDashes(new TrafficPath(roadPoints), 0.13), roadMats.marking);
+        roadGroup.add(dashes);
 
         this.scene.add(roadGroup);
         this.roads.set(roadKey, {
@@ -4224,82 +4466,6 @@ class MarsSceneManager {
           dist, angle, groundY
         });
       }
-    }
-  }
-
-  // Spawn and animate vehicles on roads
-  _updateRoadVehicles(px, pz) {
-    const maxVehicles = 20;
-
-    // Remove vehicles that are too far from player
-    for (let i = this.roadVehicles.length - 1; i >= 0; i--) {
-      const v = this.roadVehicles[i];
-      const dx = v.mesh.position.x - px;
-      const dz = v.mesh.position.z - pz;
-      if (dx * dx + dz * dz > this.settlementDespawnDist * this.settlementDespawnDist) {
-        this.scene.remove(v.mesh);
-        v.mesh.traverse(obj => {
-          if (obj.geometry) obj.geometry.dispose();
-          if (obj.material) {
-            if (Array.isArray(obj.material)) obj.material.forEach(mat => mat.dispose());
-            else obj.material.dispose();
-          }
-        });
-        this.roadVehicles.splice(i, 1);
-      }
-    }
-
-    // Spawn new vehicles on active roads
-    if (this.roadVehicles.length < maxVehicles) {
-      for (const [, road] of this.roads) {
-        if (this.roadVehicles.length >= maxVehicles) break;
-        // ~5% chance per check to spawn a vehicle on each road
-        if (Math.random() > 0.05) continue;
-
-        const t = Math.random(); // 0..1 along road
-        const x = road.startX + (road.endX - road.startX) * t;
-        const z = road.startZ + (road.endZ - road.startZ) * t;
-
-        const veh = this.createCybertruckVehicle();
-        const scale = 0.9 + Math.random() * 0.35;
-        veh.scale.set(scale, scale, scale);
-        const spawnGroundY = Math.max(road.groundY, this.getTerrainHeight(x, z));
-        veh.position.set(x, spawnGroundY + 0.3, z);
-        const speed = (0.0003 + Math.random() * 0.0006) * (Math.random() < 0.5 ? 1 : -1);
-        const travelSign = speed >= 0 ? 1 : -1;
-        veh.rotation.y = Math.atan2(
-          -(road.endZ - road.startZ) * travelSign,
-          (road.endX - road.startX) * travelSign
-        );
-
-        this.scene.add(veh);
-        this.roadVehicles.push({
-          mesh: veh,
-          road,
-          t,
-          speed
-        });
-      }
-    }
-
-    // Animate existing vehicles along their roads
-    for (const v of this.roadVehicles) {
-      v.t += v.speed;
-      // Bounce at endpoints
-      if (v.t > 1) { v.t = 1; v.speed = -v.speed; v.mesh.rotation.y += Math.PI; }
-      if (v.t < 0) { v.t = 0; v.speed = -v.speed; v.mesh.rotation.y += Math.PI; }
-
-      v.mesh.position.x = v.road.startX + (v.road.endX - v.road.startX) * v.t;
-      v.mesh.position.z = v.road.startZ + (v.road.endZ - v.road.startZ) * v.t;
-      // Ride on top of whichever is higher: the flat road plane or the terrain
-      // beneath it, so vehicles never disappear under a hill the road cuts through.
-      const groundY = Math.max(v.road.groundY, this.getTerrainHeight(v.mesh.position.x, v.mesh.position.z));
-      v.mesh.position.y = groundY + 0.3;
-      const travelSign = v.speed >= 0 ? 1 : -1;
-      v.mesh.rotation.y = Math.atan2(
-        -(v.road.endZ - v.road.startZ) * travelSign,
-        (v.road.endX - v.road.startX) * travelSign
-      );
     }
   }
 
@@ -4727,7 +4893,7 @@ class MarsSceneManager {
         addAntennaArray(cx + 35, cz, 3);
 
       } else if (variant === 1) {
-        // Spire outpost â€” a cluster of pointed towers
+        // Spire outpost — a cluster of pointed towers
         const count = 3 + Math.floor(rand() * 4);
         for (let i = 0; i < count; i++) {
           const angle = (i / count) * Math.PI * 2 + rand() * 0.5;
@@ -4826,7 +4992,7 @@ class MarsSceneManager {
         }
 
       } else if (variant === 1) {
-        // Reactor core base â€” central glowing cylinder with orbiting modules
+        // Reactor core base — central glowing cylinder with orbiting modules
         const coreR = 15 + rand() * 10;
         const coreH = 40 + rand() * 30;
         const coreGeom = new THREE.CylinderGeometry(coreR, coreR, coreH, 24);
@@ -4868,7 +5034,7 @@ class MarsSceneManager {
         }
 
       } else if (variant === 2) {
-        // Bio-dome research base â€” large transparent domes with greenhouses
+        // Bio-dome research base — large transparent domes with greenhouses
         const mainR = 30 + rand() * 15;
         const mainGeom = new THREE.SphereGeometry(mainR, 24, 16);
         const mainDome = new THREE.Mesh(mainGeom, glassMat);
@@ -4901,7 +5067,7 @@ class MarsSceneManager {
         addAntennaArray(cx + mainR + 20, cz - 15, 4);
 
       } else {
-        // Industrial base â€” tall chimneys, storage tanks, cranes
+        // Industrial base — tall chimneys, storage tanks, cranes
         const centralH = 25 + rand() * 15;
         const centralR = 20 + rand() * 10;
         const centralGeom = new THREE.CylinderGeometry(centralR, centralR + 5, centralH, 16);
@@ -4961,7 +5127,7 @@ class MarsSceneManager {
       }
 
     } else {
-      // ==== CITY â€” the wildest part ====
+      // ==== CITY — the wildest part ====
       const cityRadius = 150 + rand() * 120;
       const towerCount = 10 + Math.floor(rand() * 12);
 
@@ -5002,7 +5168,7 @@ class MarsSceneManager {
             addFloatingRing(x, gy + rY, z, rR + 3, 0.8);
           }
         } else if (towerShape === 2) {
-          // Crystal shard â€” tilted octahedron
+          // Crystal shard — tilted octahedron
           const crystalGeom = new THREE.OctahedronGeometry(w * 0.7, 0);
           const crystalMat = new THREE.MeshStandardMaterial({ color: pal.accent, metalness: 0.95, roughness: 0.05, transparent: true, opacity: 0.7 });
           const crystal = new THREE.Mesh(crystalGeom, crystalMat);
@@ -5062,7 +5228,7 @@ class MarsSceneManager {
           tower.position.set(x, gy + h / 2, z);
           group.add(tower);
           this.registerCollidable({ x, z }, Math.max(w, d) / 2 + 2);
-          // Neon edges â€” random accent
+          // Neon edges — random accent
           for (let e = 0; e < 4; e++) {
             const eGeom = new THREE.BoxGeometry(0.6, h, 0.6);
             const edge = new THREE.Mesh(eGeom, rand() > 0.5 ? glowMat : glow2Mat);
@@ -5109,12 +5275,12 @@ class MarsSceneManager {
       if (flagStyle === 0) {
         // Twisted flagship
         makeTwistedTower(cx, cz, flagW, flagH, flagW, 0.06 + rand() * 0.08);
-        // Override material on flagship segments â€” re-add glow
+        // Override material on flagship segments — re-add glow
         addFloatingRing(cx, gy + flagH * 0.5, cz, flagW + 10, 2);
         addFloatingRing(cx, gy + flagH * 0.75, cz, flagW + 6, 1.5);
         addFloatingRing(cx, gy + flagH * 0.95, cz, flagW + 3, 1.2);
       } else if (flagStyle === 1) {
-        // Obelisk â€” tapered with a pointed crown
+        // Obelisk — tapered with a pointed crown
         const obGeom = new THREE.CylinderGeometry(flagW * 0.15, flagW * 0.55, flagH, 6);
         const ob = new THREE.Mesh(obGeom, flagMat);
         ob.position.set(cx, gy + flagH / 2, cz);
@@ -5195,11 +5361,9 @@ class MarsSceneManager {
           group.add(marker);
         }
       }
-
-      // Single ambient light for the city
-      const cityLight = new THREE.PointLight(pal.accent, 1.5, 900);
-      cityLight.position.set(cx, gy + flagH * 0.4, cz);
-      group.add(cityLight);
+      // No PointLight here: settlements spawn and despawn while driving, and
+      // every change in light count recompiles the shaders of all lit
+      // materials (a visible hitch). The emissive windows carry the glow.
     }
 
     addFuturisticGroundLayer();
@@ -5208,37 +5372,33 @@ class MarsSceneManager {
     return group;
   }
 
-  update(playerPosition) {
-    // Check if player has moved far enough to trigger scene repeat
-    const distanceMoved = playerPosition.distanceTo(this.lastPlayerPosition);
-    if (distanceMoved > this.sceneRepeatDistance) {
-      this.lastPlayerPosition.copy(playerPosition);
-      this.repositionSceneElements(playerPosition);
-    }
+  update(playerPosition, deltaMs = 16.67) {
+    const dt = Math.min(Math.max(deltaMs, 0), 100) / 1000;
+    const now = performance.now();
 
-    // Update city lighting based on time of day
-    this.updateCityLighting();
-
-    // Shared timestamp for all time-based systems in this manager
-    const now = (typeof performance !== 'undefined' && performance.now)
-      ? performance.now()
-      : Date.now();
-
-    // Update animated beacons, reactor rings, etc.
-    this.updateAnimations(now);
+    // Beacons, reactor rings and settlement fade-ins
+    this.updateAnimations(now, dt);
     this.updateSettlementFades(now);
 
     // Continuous rocket traffic around the colony
     this.updateRocketTraffic(now);
 
-    // Ground traffic (AI mining convoys / colony vehicles)
-    this.updateTraffic(now);
+    // Cybertruck traffic
+    this.updateTraffic(dt);
 
     // High-speed bullet train between the two colonies
     this.updateBulletTrain(now);
 
-    // Procedural settlements â€” spawn/despawn based on proximity
+    // Procedural settlements - spawn/despawn based on proximity (throttled)
     this.updateSettlements(playerPosition);
+
+    // Trucks on settlement roads. Spawning is cheap (instanced), so unlike
+    // settlements this keeps running while the rover drives.
+    if (now - (this._lastRoadTrafficCheck || 0) > 1000) {
+      this._lastRoadTrafficCheck = now;
+      this._updateRoadVehicles(playerPosition.x, playerPosition.z);
+    }
+
     this.updateScanSites(playerPosition);
   }
 
@@ -5260,7 +5420,10 @@ class MarsSceneManager {
       // Optionally dim the beacon once reached
       if (wp.group) {
         wp.group.traverse(obj => {
-          if (obj.isPointLight) obj.intensity = 0.4;
+          if (obj.isPointLight) {
+            obj.intensity = 0.4;
+            obj.userData.baseIntensity = 0.4; // keep the dimmed level while blinking
+          }
         });
       }
 
@@ -5303,85 +5466,12 @@ class MarsSceneManager {
     };
   }
 
-  // Animate AI ground traffic along predefined routes
-  updateTraffic(currentTime) {
-    if (!this.aiVehicles || this.aiVehicles.length === 0) return;
-    if (!this.aiRoutes || this.aiRoutes.length === 0) return;
-
-    // Throttle updates to avoid excessive work
-    if (this.lastTrafficUpdateTime == null) {
-      this.lastTrafficUpdateTime = currentTime;
-      return;
-    }
-
-    const deltaMs = currentTime - this.lastTrafficUpdateTime;
-    if (deltaMs <= 5) return; // too soon
-
-    this.lastTrafficUpdateTime = currentTime;
-    const dt = Math.min(deltaMs, 100) / 1000; // clamp to avoid huge jumps
-
-    for (const vehicle of this.aiVehicles) {
-      const route = this.aiRoutes[vehicle.routeIndex];
-      if (!route || !route.waypoints || route.waypoints.length < 2) continue;
-
-      const points = route.waypoints;
-      let i = vehicle.segmentIndex;
-      i = Math.max(0, Math.min(points.length - 2, i));
-
-      // Advance along the current segment based on speed
-      let a = points[i];
-      let b = points[i + 1];
-      const segVec = new THREE.Vector3().subVectors(b, a);
-      const segLen = segVec.length() || 1;
-
-      const distanceThisFrame = vehicle.speed * dt * vehicle.directionSign;
-      const deltaT = distanceThisFrame / segLen;
-      let t = (vehicle.segmentT || 0) + deltaT;
-
-      // Handle reaching segment ends with simple ping-pong behaviour
-      while (t > 1 || t < 0) {
-        if (t > 1) {
-          if (vehicle.directionSign > 0 && i < points.length - 2) {
-            t -= 1;
-            i++;
-          } else {
-            vehicle.directionSign = -1;
-            t = 1 - (t - 1);
-          }
-        } else if (t < 0) {
-          if (vehicle.directionSign < 0 && i > 0) {
-            t += 1;
-            i--;
-          } else {
-            vehicle.directionSign = 1;
-            t = -t;
-          }
-        }
-
-        i = Math.max(0, Math.min(points.length - 2, i));
-      }
-
-      vehicle.segmentIndex = i;
-      vehicle.segmentT = t;
-
-      a = points[i];
-      b = points[i + 1];
-
-      // Interpolate position between waypoints, then snap to the actual terrain
-      // height so vehicles ride the surface instead of sinking through hills/roads.
-      const pos = new THREE.Vector3().copy(a).lerp(b, t);
-      if (vehicle.mesh) {
-        const groundY = this.getTerrainHeight(pos.x, pos.z);
-        vehicle.mesh.position.set(pos.x, groundY + 0.2, pos.z);
-
-        // Orient vehicle to face along its path. The Cybertruck model's forward
-        // axis is +X, so align +X with the travel direction (atan2(-dz, dx)).
-        const dir = new THREE.Vector3().subVectors(b, a).multiplyScalar(vehicle.directionSign);
-        if (dir.lengthSq() > 0.0001) {
-          vehicle.mesh.rotation.y = Math.atan2(-dir.z, dir.x);
-        }
-      }
-    }
+  // Advance the Cybertruck fleet (route and settlement-road trucks)
+  updateTraffic(dt) {
+    if (!this.fleet) return;
+    const dayAmount = typeof window.dayNightBlend === 'number' ? window.dayNightBlend : 0;
+    const roverPos = typeof rover !== 'undefined' && rover ? rover.position : null;
+    this.fleet.update(dt, dayAmount, roverPos);
   }
 
   // Create elevated rail and a bullet train between the primary and secondary colonies
@@ -5467,7 +5557,7 @@ class MarsSceneManager {
         lastTime: null
       });
 
-      console.log('ðŸš„ Bullet train system created between colonies');
+      console.log('🚄 Bullet train system created between colonies');
     } catch (e) {
       console.warn('Failed to create bullet train system:', e);
     }
@@ -5795,49 +5885,6 @@ class MarsSceneManager {
     });
   }
 
-  updateActiveEvents() {
-    for (const event of this.activeEvents) {
-      const elapsedTime = Date.now() - event.startTime;
-      const progress = elapsedTime / event.duration;
-
-      if (progress >= 1) {
-        this.scene.remove(event.rocket);
-        this.activeEvents.delete(event);
-        continue;
-      }
-
-      if (event.type === 'launch') {
-        // Rocket launch animation - use easing for smooth acceleration
-        const easeProgress = this.easeInOutCubic(progress);
-        event.rocket.position.lerp(event.endPos, easeProgress);
-        
-        // Add slight wobble and rotation for realistic flight
-        event.rocket.rotation.z = Math.sin(progress * Math.PI * 4) * 0.05;
-        event.rocket.rotation.x = Math.cos(progress * Math.PI * 6) * 0.02;
-        
-        // Update enhanced engine burner effects
-        if (event.engineParticles) {
-          // Full throttle during launch
-          const thrustIntensity = Math.min(1.0, progress * 2); // Ramp up quickly
-          event.engineParticles.update(thrustIntensity);
-        }
-      } else {
-        // Rocket landing animation - use easing for controlled descent
-        const easeProgress = this.easeInOutCubic(1 - progress);
-        event.rocket.position.lerp(event.endPos, easeProgress);
-        event.rocket.rotation.z = Math.sin(progress * Math.PI * 4) * 0.05;
-        event.rocket.rotation.x = Math.cos(progress * Math.PI * 8) * 0.03;
-        
-        // Update engine effects for landing burn with throttle control
-        if (event.engineParticles) {
-          // Variable throttle for landing - strongest at end
-          const landingBurn = Math.max(0.3, (1 - progress) * 1.2);
-          event.engineParticles.update(landingBurn);
-        }
-      }
-    }
-  }
-
   repositionSceneElements(playerPosition) {
     // No bases to reposition
   }
@@ -5862,21 +5909,6 @@ class MarsSceneManager {
         return 0.3 + ((timeOfDay - 0.7) / 0.1) * 0.7; // Fade in at dusk
       }
     }
-  }
-
-  getNewElementPosition(playerPosition) {
-    const angle = Math.random() * Math.PI * 2;
-    const distance = this.sceneRepeatDistance;
-    const x = playerPosition.x + Math.cos(angle) * distance;
-    const z = playerPosition.z + Math.sin(angle) * distance;
-
-    // Find ground height at new position
-    const raycaster = new THREE.Raycaster();
-    raycaster.set(new THREE.Vector3(x, 1000, z), new THREE.Vector3(0, -1, 0));
-    const intersects = raycaster.intersectObjects(this.scene.children, true);
-    const y = intersects.length > 0 ? intersects[0].point.y : 0;
-
-    return new THREE.Vector3(x, y, z);
   }
 
   // createDistantFeatures() {
@@ -6102,11 +6134,112 @@ function _smoothstep(edge0, edge1, x) {
   return t * t * (3 - 2 * t);
 }
 
-function _lerpColorHex(a, b, t) {
-  const ca = new THREE.Color(a);
-  const cb = new THREE.Color(b);
-  return ca.lerp(cb, t);
+const _lerpColorScratch = new THREE.Color();
+function _lerpColorHex(a, b, t, target = new THREE.Color()) {
+  return target.set(a).lerp(_lerpColorScratch.set(b), t);
 }
+
+// Image-based lighting: a PMREM-filtered copy of a small gradient sky dome
+// becomes scene.environment. Without it every metallic material (Cybertruck
+// stainless, colony cladding) had nothing to reflect and rendered flat grey.
+// Re-baked only when the light has changed noticeably (~every few seconds).
+function createMarsEnvironment() {
+  if (perfSettings.isMobile || !THREE.PMREMGenerator) return null;
+  try {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envScene = new THREE.Scene();
+    const uniforms = {
+      uDay: { value: 0 },
+      uSunDir: { value: new THREE.Vector3(0, 1, 0) },
+      uSunColor: { value: new THREE.Color(1, 0.8, 0.5) }
+    };
+    const material = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      uniforms,
+      vertexShader: `
+        varying vec3 vDir;
+        void main() {
+          vDir = normalize(position);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      // Same palette as the visible sky shader, plus a lit regolith ground
+      // and a soft sun halo so metals pick up a warm glint.
+      fragmentShader: `
+        uniform float uDay;
+        uniform vec3 uSunDir;
+        uniform vec3 uSunColor;
+        varying vec3 vDir;
+        void main() {
+          vec3 dir = normalize(vDir);
+          float e = dir.y;
+          // Dusty butterscotch overhead: suspended iron-oxide dust scatters
+          // red light, so Mars' daytime sky is not Earth-blue
+          vec3 zenith  = mix(vec3(0.010, 0.013, 0.026), vec3(0.40, 0.35, 0.31), uDay);
+          // At night the ground near the colony is floodlit, so steel still
+          // picks up a warm glow from below instead of turning pitch black
+          vec3 horizon = mix(vec3(0.050, 0.026, 0.018), vec3(0.86, 0.44, 0.25), uDay);
+          vec3 ground  = mix(vec3(0.090, 0.036, 0.018), vec3(0.36, 0.17, 0.09), uDay);
+          vec3 col = e > 0.0 ? mix(horizon, zenith, smoothstep(0.0, 0.6, e))
+                             : mix(horizon * 0.7, ground, smoothstep(0.0, 0.25, -e));
+          float s = max(dot(dir, normalize(uSunDir)), 0.0);
+          col += uSunColor * (pow(s, 24.0) * 1.5 + pow(s, 4.0) * 0.25) * uDay;
+          gl_FragColor = vec4(col, 1.0);
+        }
+      `
+    });
+    envScene.add(new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), material));
+
+    let target = null;
+    let lastDay = -1;
+    const lastSun = new THREE.Vector3(0, -1, 0);
+    return {
+      update(dayAmount, sunDir, sunColor) {
+        const dayChanged = Math.abs(dayAmount - lastDay) > 0.04;
+        const sunMoved = dayAmount > 0.02 && lastSun.angleTo(sunDir) > 0.12;
+        if (target && !dayChanged && !sunMoved) return;
+        lastDay = dayAmount;
+        lastSun.copy(sunDir);
+        uniforms.uDay.value = dayAmount;
+        uniforms.uSunDir.value.copy(sunDir);
+        uniforms.uSunColor.value.copy(sunColor);
+        const next = pmrem.fromScene(envScene, 0.02);
+        scene.environment = next.texture;
+        if (target) target.dispose();
+        target = next;
+      }
+    };
+  } catch (e) {
+    console.warn('Environment lighting unavailable:', e);
+    return null;
+  }
+}
+const marsEnvironment = createMarsEnvironment();
+
+// Scratch colours/vectors for the day-night cycle (no per-frame allocations)
+const _dnc = {
+  nightFog: new THREE.Color(0x1a0703),
+  dayFog: new THREE.Color(0xd06f3c),
+  duskFog: new THREE.Color(0xff8a45),
+  fog: new THREE.Color(),
+  sunColor: new THREE.Color(),
+  nightBg: new THREE.Color(0x020308),
+  dayBg: new THREE.Color(0x87b8d8),
+  sunNight: new THREE.Color(0x7d3c26),
+  sunDay: new THREE.Color(0xffc06a),
+  ambNight: new THREE.Color(0x3a2118),
+  ambDay: new THREE.Color(0xffd4a0),
+  hemiSkyNight: new THREE.Color(0x28304a),
+  hemiSkyDay: new THREE.Color(0x8fb8ff),
+  hemiGroundNight: new THREE.Color(0x2a1008),
+  hemiGroundDay: new THREE.Color(0xa64724),
+  sunDir: new THREE.Vector3(),
+  right: new THREE.Vector3(),
+  up: new THREE.Vector3(),
+  center: new THREE.Vector3(),
+  worldUp: new THREE.Vector3(0, 1, 0)
+};
 
 function updateDayNightCycle(time) {
   const perfSettings = getPerformanceSettings();
@@ -6120,41 +6253,72 @@ function updateDayNightCycle(time) {
   window.dayNightBlend = dayAmount;
   isDaytime = dayAmount > 0.08;
 
-  const nightFog = new THREE.Color(0x1a0703);
-  const dayFog = new THREE.Color(0xd06f3c);
-  const fogColor = nightFog.clone().lerp(dayFog, dayAmount).lerp(new THREE.Color(0xff8a45), duskWarmth * 0.16);
+  const renderDistance = Number(perfSettings.renderDistance) || 5000;
+  const fogColor = _dnc.fog.copy(_dnc.nightFog).lerp(_dnc.dayFog, dayAmount).lerp(_dnc.duskFog, duskWarmth * 0.16);
   if (!scene.fog) {
-    scene.fog = new THREE.Fog(fogColor, 900, perfSettings.renderDistance || 5000);
+    scene.fog = new THREE.Fog(fogColor, 900, renderDistance);
   } else {
     scene.fog.color.copy(fogColor);
     scene.fog.near = 700 - dayAmount * 360;
-    scene.fog.far = (perfSettings.renderDistance || 5000) * (0.72 + dayAmount * 0.32);
+    scene.fog.far = renderDistance * (0.72 + dayAmount * 0.32);
   }
   if (scene.background && scene.background.isColor) {
-    scene.background.copy(new THREE.Color(0x020308).lerp(new THREE.Color(0x87b8d8), dayAmount));
+    scene.background.copy(_dnc.nightBg).lerp(_dnc.dayBg, dayAmount);
   }
 
-  const daySunIntensity = perfSettings.isMobile ? 0.78 : 1.12;
-  const nightSunIntensity = perfSettings.isMobile ? 0.035 : 0.055;
+  // One shadow-casting sun (a second, duplicate directional light used to
+  // double the shading cost for the same result)
+  const daySunIntensity = perfSettings.isMobile ? 1.4 : 1.7;
+  const nightSunIntensity = perfSettings.isMobile ? 0.06 : 0.1;
   const targetSunIntensity = nightSunIntensity + dayAmount * (daySunIntensity - nightSunIntensity);
-  const sunColorObj = _lerpColorHex(0x7d3c26, 0xffc06a, Math.min(1, dayAmount + duskWarmth * 0.25));
+  const sunColorObj = _lerpColorHex(_dnc.sunNight, _dnc.sunDay, Math.min(1, dayAmount + duskWarmth * 0.25), _dnc.sunColor);
+
+  const sunDir = _dnc.sunDir.set(
+    Math.cos(sunAngle - Math.PI / 2) * 260,
+    90 + dayAmount * 420,
+    Math.sin(sunAngle - Math.PI / 2) * 260
+  ).normalize();
 
   if (sunLight) {
     sunLight.intensity = targetSunIntensity;
     sunLight.color.copy(sunColorObj);
-    sunLight.position.set(Math.cos(sunAngle - Math.PI / 2) * 260, 90 + dayAmount * 420, Math.sin(sunAngle - Math.PI / 2) * 260);
-  }
-  if (sun) {
-    sun.intensity = targetSunIntensity * 0.82;
-    sun.color.copy(sunColorObj);
-    sun.position.copy(sunLight.position);
+
+    // Keep the shadow frustum centred on the rover so shadows exist wherever
+    // it drives (they used to stop 400 m from the landing site). The centre
+    // is snapped to whole shadow-map texels so edges don't shimmer.
+    const focus = typeof rover !== 'undefined' && rover ? rover.position : _dnc.center.set(0, 0, 0);
+    const shadowCam = sunLight.shadow.camera;
+    const texel = (shadowCam.right - shadowCam.left) / sunLight.shadow.mapSize.width;
+    const right = _dnc.right.crossVectors(_dnc.worldUp, sunDir);
+    if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+    right.normalize();
+    const up = _dnc.up.crossVectors(sunDir, right);
+    const r = focus.dot(right), u = focus.dot(up);
+    const center = _dnc.center.copy(focus)
+      .addScaledVector(right, Math.round(r / texel) * texel - r)
+      .addScaledVector(up, Math.round(u / texel) * texel - u);
+    sunLight.target.position.copy(center);
+    sunLight.position.copy(center).addScaledVector(sunDir, 500);
+    sunLight.target.updateMatrixWorld();
   }
 
-  ambientLight.intensity = (perfSettings.samsungOptimized ? 0.18 : 0.12) + dayAmount * (perfSettings.isMobile ? 0.46 : 0.58);
-  ambientLight.color.copy(_lerpColorHex(0x3a2118, 0xffd4a0, dayAmount));
-  hemisphereLight.intensity = (perfSettings.isMobile ? 0.12 : 0.16) + dayAmount * (perfSettings.isMobile ? 0.34 : 0.46);
-  hemisphereLight.color.copy(_lerpColorHex(0x28304a, 0x8fb8ff, dayAmount));
-  hemisphereLight.groundColor.copy(_lerpColorHex(0x2a1008, 0xa64724, dayAmount));
+  if (marsEnvironment) {
+    marsEnvironment.update(dayAmount, sunDir, sunColorObj);
+  }
+
+  // Desktop PBR materials also receive sky light from the environment map,
+  // so the flat ambient/hemisphere terms stay low in daylight there
+  ambientLight.intensity = (perfSettings.samsungOptimized ? 0.18 : 0.12) + dayAmount * (perfSettings.isMobile ? 0.46 : 0.12);
+  _lerpColorHex(_dnc.ambNight, _dnc.ambDay, dayAmount, ambientLight.color);
+  hemisphereLight.intensity = (perfSettings.isMobile ? 0.12 : 0.16) + dayAmount * (perfSettings.isMobile ? 0.34 : 0.22);
+
+  // Eye adaptation: open up at night, stop down in full daylight (the noon
+  // scene used to clip the regolith to pale peach)
+  if (!perfSettings.isMobile) {
+    renderer.toneMappingExposure = 1.2 - 0.5 * dayAmount;
+  }
+  _lerpColorHex(_dnc.hemiSkyNight, _dnc.hemiSkyDay, dayAmount, hemisphereLight.color);
+  _lerpColorHex(_dnc.hemiGroundNight, _dnc.hemiGroundDay, dayAmount, hemisphereLight.groundColor);
 
   if (sunSphere && sunSphere.material) {
     sunSphere.visible = dayAmount > 0.015;
@@ -6180,18 +6344,6 @@ function toggleDayNight() {
 
 // Scene manager is created via loadNonEssentialComponents / initializeScene - no duplicate needed here
 let sceneManager = null;
-
-// Add scene manager update to animation loop
-const originalAnimate = animate;
-animate = function (time) {
-  originalAnimate(time);
-
-  // Update scene manager with rover position (uses the one from lazy loader)
-  const mgr = sceneManager || window.marsSceneManager;
-  if (mgr && rover) {
-    mgr.update(rover.position);
-  }
-};
 
 // Global animation control to prevent multiple loops
 if (window.gameAnimationRunning) {
@@ -6269,13 +6421,13 @@ function animate(time) {
     resetRoverMotion(false);
     return;
   }
-  const frameScale = Math.min(delta / 16.67, 2.5);
-  const controlFrameScale = Math.min(delta / 16.67, 1.0);
+  // Movement constants are tuned per 60 Hz frame. Scale by the real frame time
+  // so the rover keeps the same speed at 30 or 144 fps (was capped at 1.0,
+  // which made it crawl whenever the frame rate dropped below 60).
+  const controlFrameScale = Math.min(delta / 16.67, 3.0);
 
-  // Mobile performance monitoring with adaptive throttling  
+  // Mobile adaptive throttling (frame times were sampled above)
   if (currentPerfSettings.isMobile) {
-    mobilePerformanceMonitor.update(time);
-    
     // Adaptive frame skipping based on performance and device tier
     const mobileTier = currentPerfSettings.mobileTier || 'low';
     const performanceThreshold = mobileTier === 'high' ? 25 : 
@@ -6319,7 +6471,7 @@ function animate(time) {
                                currentPerfSettings.mobileTier === 'medium' ? 20 : 40;
     
     if (window.marsSceneManager && rover && frameCount % (frameThrottle * sceneUpdateThrottle) === 0) {
-      window.marsSceneManager.update(rover.position);
+      window.marsSceneManager.update(rover.position, delta * frameThrottle * sceneUpdateThrottle);
     }
     
     // Disable all atmospheric effects and particles on mobile in emergency mode
@@ -6336,14 +6488,11 @@ function animate(time) {
       }
     }
   } else {
-    // Update meteor system if it exists and we're in night mode (throttled)
-    if (window.meteorSystem && (!isDaytime || isTransitioning) && frameCount % frameThrottle === 0) {
-      window.meteorSystem.update(delta);
-    }
-
-    // Update Mars Scene Manager if it exists (heavily throttled for performance)
-    if (window.marsSceneManager && rover && frameCount % (frameThrottle * 4) === 0) {
-      window.marsSceneManager.update(rover.position);
+    // Scene manager runs every frame: traffic, trains and rockets are animated
+    // with the real frame time. Heavy work inside it (settlement spawning) is
+    // throttled internally.
+    if (window.marsSceneManager && rover) {
+      window.marsSceneManager.update(rover.position, delta);
     }
 
     // Dev road/vehicle debug visuals (cheap when off, throttled when on)
@@ -6379,7 +6528,7 @@ function animate(time) {
 
   if (Math.abs(velocity) > 0.0005) {
     isMoving = true;
-    // Forward is negative Z in Three.js â€” negate velocity to match original convention
+    // Forward is negative Z in Three.js — negate velocity to match original convention
     const frameVelocity = velocity * controlFrameScale;
     const moveX = Math.sin(roverYaw) * (-frameVelocity);
     const moveZ = Math.cos(roverYaw) * (-frameVelocity);
@@ -6387,9 +6536,10 @@ function animate(time) {
     rover.position.x += moveX;
     rover.position.z += moveZ;
 
-    // Collision detection â€” revert if the rover hits a structure
+    // Collision detection — revert if the rover hits a structure
     if (window.marsSceneManager &&
-        window.marsSceneManager.checkCollision(rover.position.x, rover.position.z, 2.5)) {
+        window.marsSceneManager.checkCollision(rover.position.x, rover.position.z, 2.5,
+          previousPosition.x, previousPosition.z)) {
       rover.position.x = previousPosition.x;
       rover.position.z = previousPosition.z;
       velocity *= -0.3; // slight bounce-back on collision
@@ -6424,7 +6574,7 @@ function animate(time) {
   );
 
   // If we're too far from the current chunk center, update the chunk tracking
-  // (no longer blocks movement â€” the rover can explore freely)
+  // (no longer blocks movement — the rover can explore freely)
   if (chunkDistance > 2) {
     terrainSystem.currentChunk = { ...currentChunk };
   }
@@ -6447,7 +6597,7 @@ function animate(time) {
     const effectiveRotation = rotationVelocity * speedFactor * controlFrameScale;
     roverYaw += effectiveRotation;
 
-    // Normalize roverYaw to keep it within 0-2Ï€ range
+    // Normalize roverYaw to keep it within 0-2π range
     roverYaw = roverYaw % (Math.PI * 2);
     if (roverYaw < 0) roverYaw += Math.PI * 2;
 
@@ -6552,77 +6702,49 @@ function updateWheelRotation(wheels, baseSpeed, turnDirection) {
   }
 }
 
-function createRoverTireTracks() {
-  // Function to add tire tracks at the wheel positions
-  const addTireTrack = (x, z, width, depth, color) => {
-    const trackGeometry = new THREE.PlaneGeometry(width, depth);
-    const trackMaterial = new THREE.MeshBasicMaterial({
-      color: color,
-      transparent: true,
-      opacity: 0.5,
-      side: THREE.DoubleSide
-    });
-    const trackMesh = new THREE.Mesh(trackGeometry, trackMaterial);
-    trackMesh.rotation.x = -Math.PI / 2; // Rotate to lie flat on the ground
-    trackMesh.position.set(x, 0.01, z); // Slightly above the ground to avoid z-fighting
-    scene.add(trackMesh);
-  };
+// Exact height of the rendered terrain at (x, z). The terrain is a regular
+// PlaneGeometry grid, so this interpolates the same triangle the GPU draws in
+// O(1) - raycasting the mesh tested every one of its ~40k+ triangles per call,
+// and the rover, camera and traffic made a dozen of those calls per frame.
+function sampleTerrainHeight(x, z, fallback = 0) {
+  const grid = (typeof marsSurface !== 'undefined' && marsSurface)
+    ? marsSurface.geometry.userData.heightGrid
+    : null;
+  if (!grid) return fallback;
 
-  // Get the color from the Mars terrain
-  const marsTerrainColor = marsSurface.material.color;
+  const fx = (x + grid.half) / grid.cell;
+  const fz = (z + grid.half) / grid.cell;
+  const n = grid.segments;
+  if (!(fx >= 0 && fz >= 0 && fx <= n && fz <= n)) return fallback;
 
-  // Add tire tracks for each set of wheels
-  // Line 747 is likely here, trying to use .forEach on something that's undefined
-  // Make sure 'wheels' is defined and accessible in this scope
-  if (!wheels || !Array.isArray(wheels)) {
-    console.warn('Wheels array is not defined or not an array');
-    return; // Exit the function if wheels is not available
-  }
-
-  // Now safely use forEach on the wheels array
-  wheels.forEach(wheel => {
-    // Your tire track creation logic
-    const wheelPos = wheel.getWorldPosition(new THREE.Vector3());
-    addTireTrack(wheelPos.x, wheelPos.z, 0.3, 1.5, marsTerrainColor.clone().multiplyScalar(0.8));
-  });
-
-  const tireTrackGeometry = new THREE.BufferGeometry();
-  const tireTrackMaterial = new THREE.MeshBasicMaterial({
-    color: marsTerrainColor,
-    transparent: true,
-    opacity: 0.5
-  });
-
-  const tireTrackMesh = new THREE.Mesh(tireTrackGeometry, tireTrackMaterial);
-  scene.add(tireTrackMesh);
-
-  return tireTrackMesh;
+  const ix = Math.min(Math.floor(fx), n - 1);
+  const iz = Math.min(Math.floor(fz), n - 1);
+  const u = fx - ix;
+  const v = fz - iz;
+  const row = n + 1;
+  const p = grid.positions;
+  // Cell corners, matching PlaneGeometry's triangulation (a,b,d) + (b,c,d)
+  const ha = p[(iz * row + ix) * 3 + 1];
+  const hb = p[((iz + 1) * row + ix) * 3 + 1];
+  const hc = p[((iz + 1) * row + ix + 1) * 3 + 1];
+  const hd = p[(iz * row + ix + 1) * 3 + 1];
+  if (u + v <= 1) return ha + (hd - ha) * u + (hb - ha) * v;
+  return hc + (hb - hc) * (1 - u) + (hd - hc) * (1 - v);
 }
 
-// Optimize the positionRoverOnTerrain function
-// Shared downward raycast to sample ground height at an arbitrary (x, z).
-// Used by the chase camera and AI traffic so nothing clips below the surface.
-function getGroundHeight(x, z, fallback = 0) {
-  if (!window._groundHeightRaycaster) {
-    window._groundHeightRaycaster = new THREE.Raycaster();
-    window._groundHeightRaycaster.ray.direction.set(0, -1, 0);
-  }
-  const rc = window._groundHeightRaycaster;
-  rc.ray.origin.set(x, 500, z);
+// Smoothed surface normal over a footprint of +-step (vehicle wheelbase scale),
+// so vehicles tilt with the ground instead of snapping between flat facets.
+function sampleTerrainNormal(x, z, target, step = 2, fallback = 0) {
+  const hL = sampleTerrainHeight(x - step, z, fallback);
+  const hR = sampleTerrainHeight(x + step, z, fallback);
+  const hD = sampleTerrainHeight(x, z - step, fallback);
+  const hU = sampleTerrainHeight(x, z + step, fallback);
+  return target.set(hL - hR, 2 * step, hD - hU).normalize();
+}
 
-  // Prefer active terrain chunks, fall back to the main surface
-  let closest = null;
-  if (typeof terrainSystem !== 'undefined' && terrainSystem.chunks && terrainSystem.chunks.size > 0) {
-    for (const chunk of terrainSystem.chunks.values()) {
-      const hits = rc.intersectObject(chunk, false);
-      if (hits.length > 0 && (!closest || hits[0].distance < closest.distance)) closest = hits[0];
-    }
-  }
-  if (!closest && typeof marsSurface !== 'undefined' && marsSurface) {
-    const hits = rc.intersectObject(marsSurface, false);
-    if (hits.length > 0) closest = hits[0];
-  }
-  return closest ? closest.point.y : fallback;
+// Kept for existing callers (chase camera, debug tools)
+function getGroundHeight(x, z, fallback = 0) {
+  return sampleTerrainHeight(x, z, fallback);
 }
 
 // Flatten a disc of the Mars terrain toward a target height, with a smooth
@@ -6647,88 +6769,115 @@ function flattenMarsTerrain(cx, cz, radius, targetY = 0) {
   geo.computeVertexNormals();
 }
 
-function positionRoverOnTerrain() {
-  // Reuse raycaster object instead of creating a new one each time
-  if (!window.terrainRaycaster) {
-    window.terrainRaycaster = new THREE.Raycaster();
+// Grade a haul road into the terrain the way a real one is built: ground
+// heights along the path are smoothed into a gentle longitudinal profile
+// (cutting through bumps, filling dips, at most maxGrade), then the
+// surrounding ground is blended onto it across a shoulder. Points should be
+// evenly spaced (resamplePath). Normals are left to the caller.
+function gradeTerrainAlongPath(points, closed, halfWidth = 7, shoulder = 24, maxGrade = 0.08) {
+  if (typeof marsSurface === 'undefined' || !marsSurface || !marsSurface.geometry) return;
+  const grid = marsSurface.geometry.userData.heightGrid;
+  const n = points.length;
+  if (!grid || n < 2) return;
+
+  // Longitudinal profile: ground heights, box-filtered twice (~ +/-40 m)
+  let profile = points.map(p => sampleTerrainHeight(p.x, p.z));
+  const radius = 8;
+  for (let pass = 0; pass < 2; pass++) {
+    const next = new Array(n);
+    for (let i = 0; i < n; i++) {
+      let sum = 0, count = 0;
+      for (let k = -radius; k <= radius; k++) {
+        let j = i + k;
+        if (closed) j = (j + n) % n;
+        else if (j < 0 || j >= n) continue;
+        sum += profile[j];
+        count++;
+      }
+      next[i] = sum / count;
+    }
+    profile = next;
+  }
+  // Limit the gradient in both directions
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = 1; i < n; i++) {
+      const lim = points[i].distanceTo(points[i - 1]) * maxGrade;
+      profile[i] = Math.min(profile[i - 1] + lim, Math.max(profile[i - 1] - lim, profile[i]));
+    }
+    for (let i = n - 2; i >= 0; i--) {
+      const lim = points[i].distanceTo(points[i + 1]) * maxGrade;
+      profile[i] = Math.min(profile[i + 1] + lim, Math.max(profile[i + 1] - lim, profile[i]));
+    }
   }
 
-  // Reset every frame — camera-collision code mutates direction
-  window.terrainRaycaster.ray.direction.set(0, -1, 0);
-  window.terrainRaycaster.ray.origin.set(rover.position.x, 20, rover.position.z);
-
-  // Get all active terrain chunks to check for intersections
-  const terrainChunks = [];
-  for (const chunk of terrainSystem.chunks.values()) {
-    terrainChunks.push(chunk);
-  }
-
-  // If no chunks are available, use the main surface as fallback
-  if (terrainChunks.length === 0) {
-    terrainChunks.push(marsSurface);
-  }
-
-
-  // Check for intersections with all terrain chunks
-  let closestIntersection = null;
-  let closestDistance = Infinity;
-
-  for (const chunk of terrainChunks) {
-    const intersects = window.terrainRaycaster.intersectObject(chunk);
-
-    if (intersects.length > 0) {
-      const distance = intersects[0].distance;
-      if (distance < closestDistance) {
-        closestDistance = distance;
-        closestIntersection = intersects[0];
+  // Nearest road segment for every grid vertex within reach
+  const { positions, segments, cell, half } = grid;
+  const row = segments + 1;
+  const reach = halfWidth + shoulder;
+  const bestDist = new Map();
+  const target = new Map();
+  const segCount = closed ? n : n - 1;
+  for (let i = 0; i < segCount; i++) {
+    const a = points[i], b = points[(i + 1) % n];
+    const abx = b.x - a.x, abz = b.z - a.z;
+    const lenSq = abx * abx + abz * abz || 1;
+    const ix0 = Math.max(0, Math.floor((Math.min(a.x, b.x) - reach + half) / cell));
+    const ix1 = Math.min(segments, Math.ceil((Math.max(a.x, b.x) + reach + half) / cell));
+    const iz0 = Math.max(0, Math.floor((Math.min(a.z, b.z) - reach + half) / cell));
+    const iz1 = Math.min(segments, Math.ceil((Math.max(a.z, b.z) + reach + half) / cell));
+    for (let iz = iz0; iz <= iz1; iz++) {
+      for (let ix = ix0; ix <= ix1; ix++) {
+        const v = iz * row + ix;
+        const vx = positions[v * 3], vz = positions[v * 3 + 2];
+        const t = Math.max(0, Math.min(1, ((vx - a.x) * abx + (vz - a.z) * abz) / lenSq));
+        const dx = vx - (a.x + abx * t), dz = vz - (a.z + abz * t);
+        const d = Math.sqrt(dx * dx + dz * dz);
+        if (d >= reach) continue;
+        const prev = bestDist.get(v);
+        if (prev !== undefined && prev <= d) continue;
+        bestDist.set(v, d);
+        target.set(v, profile[i] + (profile[(i + 1) % n] - profile[i]) * t);
       }
     }
   }
 
-  if (closestIntersection) {
-    // Position the rover at the intersection point plus a smaller offset to be closer to ground
-    rover.position.y = closestIntersection.point.y + 0.3;
-
-    // Only calculate terrain alignment if the slope is significant
-    const normal = closestIntersection.face.normal.clone();
-    normal.transformDirection(closestIntersection.object.matrixWorld);
-
-    // Reuse cached up vector
-    if (!window._terrainUp) {
-      window._terrainUp = new THREE.Vector3(0, 1, 0);
-      window._terrainAxis = new THREE.Vector3();
-      window._terrainTiltQuat = new THREE.Quaternion();
+  bestDist.forEach((d, v) => {
+    let w = 1;
+    if (d > halfWidth) {
+      const u = 1 - (d - halfWidth) / shoulder;
+      w = u * u * (3 - 2 * u);
     }
-    const up = window._terrainUp;
+    const y = positions[v * 3 + 1];
+    positions[v * 3 + 1] = y + (target.get(v) - y) * w;
+  });
+  marsSurface.geometry.attributes.position.needsUpdate = true;
+}
 
-    // Calculate the angle between the normal and up vector
-    const angle = up.angleTo(normal);
+const _roverUp = new THREE.Vector3(0, 1, 0);
+const _roverGroundNormal = new THREE.Vector3(0, 1, 0);
+const _roverTargetNormal = new THREE.Vector3();
+const _roverTiltQuat = new THREE.Quaternion();
 
-    // Reset the rover's rotation
-    rover.rotation.set(0, 0, 0);
+function positionRoverOnTerrain() {
+  const x = rover.position.x;
+  const z = rover.position.z;
+  rover.position.y = sampleTerrainHeight(x, z, 0) + 0.3;
 
-    // First apply the yaw rotation (this is tracked separately)
-    rover.rotateY(roverYaw);
+  // Normal averaged over the wheelbase, eased so the body settles over bumps
+  // like a sprung chassis rather than snapping between terrain facets.
+  sampleTerrainNormal(x, z, _roverTargetNormal, 1.6);
+  _roverGroundNormal.lerp(_roverTargetNormal, 0.25).normalize();
 
-    // Then apply terrain tilt if needed and angle is significant
-    if (angle > 0.1 && angle < Math.PI / 6) {
-      // Create rotation axis (perpendicular to both vectors)
-      const axis = window._terrainAxis.crossVectors(up, normal).normalize();
-
-      // Create a quaternion for the terrain tilt
-      const tiltQuaternion = window._terrainTiltQuat.setFromAxisAngle(axis, angle * 0.5);
-
-      // Apply the tilt quaternion
-      rover.quaternion.premultiply(tiltQuaternion);
-    }
-  } else {
-    // Fallback if no intersection found
-    rover.position.y = 0.3;
-
-    // Just apply the yaw rotation
-    rover.rotation.set(0, 0, 0);
-    rover.rotateY(roverYaw);
+  // Clamp to 30 degrees so a steep crater wall never flips the rover
+  const maxTilt = Math.PI / 6;
+  const angle = _roverUp.angleTo(_roverGroundNormal);
+  _roverTiltQuat.setFromUnitVectors(_roverUp, _roverGroundNormal);
+  if (angle > maxTilt) {
+    _roverTiltQuat.slerp(new THREE.Quaternion(), 1 - maxTilt / angle);
   }
+
+  rover.rotation.set(0, roverYaw, 0);
+  rover.quaternion.premultiply(_roverTiltQuat);
 }
 
 // Optimize the updateWheelSuspension function
@@ -6796,7 +6945,7 @@ function updateRoadDebugVisuals() {
     });
   }
 
-  // 2) Vehicle height error lines (roadVehicles + aiVehicles)
+  // 2) Vehicle height error lines for every truck
   const addVehicleErrorLine = (mesh) => {
     if (!mesh || !mesh.position) return;
     const x = mesh.position.x;
@@ -6828,11 +6977,8 @@ function updateRoadDebugVisuals() {
     _roadDebugGroup.add(marker);
   };
 
-  if (mgr.roadVehicles && mgr.roadVehicles.length) {
-    mgr.roadVehicles.forEach(v => addVehicleErrorLine(v.mesh));
-  }
-  if (mgr.aiVehicles && mgr.aiVehicles.length) {
-    mgr.aiVehicles.forEach(v => addVehicleErrorLine(v.mesh));
+  if (mgr.fleet) {
+    mgr.fleet.vehicles.forEach(v => addVehicleErrorLine(v));
   }
 }
 
@@ -6862,30 +7008,24 @@ function updateCamera(deltaMs) {
         rover.position.z + vectors.offset.z
       );
 
-      // Terrain-collision avoidance: pull camera in front of any hill it would clip through.
-      // On mobile this raycast is throttled, while the chase camera itself still follows every frame.
-      const shouldCheckCameraTerrain = !perfSettings.isMobile || frameCount % 6 === 0;
-      if (shouldCheckCameraTerrain) {
-        if (!window.cameraRaycaster) window.cameraRaycaster = new THREE.Raycaster();
-        const toCamera = vectors.target.clone().sub(rover.position);
-        const dist = toCamera.length();
-        const dir = toCamera.clone().normalize();
-        window.cameraRaycaster.ray.origin.set(rover.position.x, rover.position.y + 2, rover.position.z);
-        window.cameraRaycaster.ray.direction.copy(dir);
-        const terrainMeshes = [];
-        for (const chunk of terrainSystem.chunks.values()) terrainMeshes.push(chunk);
-        const hits = window.cameraRaycaster.intersectObjects(terrainMeshes);
-        if (hits.length > 0 && hits[0].distance < dist) {
-          const safeDist = Math.max(hits[0].distance - 1.5, 3);
-          vectors.target.copy(rover.position).addScaledVector(dir, safeDist);
-          vectors.target.y = rover.position.y + 2;
+      // Terrain occlusion: march the rover->camera sight line over the height
+      // field and lift the camera so a hill behind the rover never blocks the view.
+      {
+        const eyeY = rover.position.y + 2;
+        for (let i = 1; i <= 6; i++) {
+          const t = i / 6;
+          const sx = rover.position.x + (vectors.target.x - rover.position.x) * t;
+          const sz = rover.position.z + (vectors.target.z - rover.position.z) * t;
+          const lineY = eyeY + (vectors.target.y - eyeY) * t;
+          const clearY = sampleTerrainHeight(sx, sz, rover.position.y) + 1.5;
+          if (lineY < clearY) vectors.target.y += (clearY - lineY) / t;
         }
       }
 
       // Spring-damper follow: stiffness pulls toward target, damping kills oscillation
       const stiffness = 10.0;
       const damping = 7.0;
-      const displacement = vectors.target.clone().sub(camera.position);
+      const displacement = vectors.head.subVectors(vectors.target, camera.position);
       cameraSpring.velocity.addScaledVector(displacement, stiffness * dt);
       cameraSpring.velocity.multiplyScalar(Math.max(0, 1 - damping * dt));
       camera.position.addScaledVector(cameraSpring.velocity, dt);
@@ -6975,15 +7115,18 @@ function createRealisticMarsTerrain() {
   // Performance-adaptive terrain creation with mobile optimization
   const perfSettings = getPerformanceSettings();
   
-  // Adaptive terrain parameters based on performance
-  const terrainSize = perfSettings.isMobile ? 3000 : 
-                     perfSettings.detailLevel === 'high' ? 5000 : 
-                     perfSettings.detailLevel === 'normal' ? 3000 : 2000;
-  
-  // Reduce segments to dramatically speed up terrain generation
-  const segments = perfSettings.isMobile ? 48 : 
-                   perfSettings.detailLevel === 'high' ? 128 : 
-                   perfSettings.detailLevel === 'normal' ? 96 : 64;
+  // Adaptive terrain parameters based on performance. Ground height is now
+  // sampled directly from the grid (sampleTerrainHeight) rather than
+  // raycast, so resolution no longer costs CPU per frame - only a little
+  // more generation time and GPU triangles. Desktop terrain spans 5 km so the
+  // second colony (2.6 km out) stands on real ground instead of the void.
+  const terrainSize = perfSettings.isMobile ? 3000 :
+                     perfSettings.detailLevel === 'high' ? 5000 :
+                     perfSettings.detailLevel === 'normal' ? 5000 : 3000;
+
+  const segments = perfSettings.isMobile ? 64 :
+                   perfSettings.detailLevel === 'high' ? 288 :
+                   perfSettings.detailLevel === 'normal' ? 224 : 128;
   
   const geometry = new THREE.PlaneGeometry(
     terrainSize,
@@ -7055,6 +7198,7 @@ function createRealisticMarsTerrain() {
     // Add deterministic variation based on position (not Math.random) for consistent terrain
     const randomVariation = (Math.sin(x * 1.37 + z * 2.41) * Math.cos(x * 0.93 - z * 1.67)) * 0.25;
     elevation += randomVariation;
+    const unfeaturedElevation = elevation;
 
     // Add specific Martian features only on highest detail to avoid
     // very long load times on typical devices.
@@ -7300,7 +7444,7 @@ function createRealisticMarsTerrain() {
     // 4.5 Add occasional very high mountains (deterministic selection)
     // Instead of looping 30 mountains and rolling Math.random() per vertex,
     // pre-select only ~3 mountains using a deterministic filter.
-    const highMountainCount = 3; // only 3 actual mountains (was 30 Ã— 10% = ~3 anyway)
+    const highMountainCount = 3; // only 3 actual mountains (was 30 × 10% = ~3 anyway)
     const highMountainSeeds = [2, 7, 19]; // fixed indices from the old 0-29 range
     for (let hi = 0; hi < highMountainCount; hi++) {
       const hm = highMountainSeeds[hi];
@@ -7378,6 +7522,17 @@ function createRealisticMarsTerrain() {
     }
     }
 
+    // Fade the set-piece features out around the colony (a 36 m mesa used to
+    // stand right on the ring road)
+    {
+      const cdx = x - COLONY_SITE_X, cdz = z - COLONY_SITE_Z;
+      const colonyDist = Math.sqrt(cdx * cdx + cdz * cdz);
+      if (colonyDist < 620) {
+        const t = Math.max(0, (colonyDist - 420) / 200);
+        elevation = unfeaturedElevation + (elevation - unfeaturedElevation) * (t * t * (3 - 2 * t));
+      }
+    }
+
     // 6. Add gentle rocky terrain detail - no spikes
     const rockyDetail = (
       Math.sin(x * 0.05 + z * 0.06) *
@@ -7399,20 +7554,30 @@ function createRealisticMarsTerrain() {
 
   geometry.computeVertexNormals();
 
+  // Grid description used by sampleTerrainHeight(). Holds the live position
+  // array, so later edits (flattenMarsTerrain) are picked up automatically.
+  geometry.userData.heightGrid = {
+    positions: geometry.attributes.position.array,
+    segments,
+    cell: terrainSize / segments,
+    half: terrainSize / 2
+  };
+
   // MOBILE EMERGENCY: Use basic material without textures to prevent WebGL context issues
   const terrainPerfSettings = getPerformanceSettings();
   let material;
   
   if (terrainPerfSettings.isMobile) {
-    // Mobile: basic material - deep Mars red, with vertex colors for variation
-    material = new THREE.MeshBasicMaterial({
-      color: 0xb33112,
+    // Mobile: cheap per-vertex Lambert lighting. (An unlit MeshBasicMaterial
+    // stayed fully bright through the night.)
+    material = new THREE.MeshLambertMaterial({
+      color: 0xffffff, // vertex colours carry the regolith tint (as on desktop)
       vertexColors: true,
       side: THREE.FrontSide, // terrain is only ever seen from above
       fog: true
     });
   } else {
-    // Desktop: Phong â€” per-fragment lighting so the normal map actually shows,
+    // Desktop: Phong — per-fragment lighting so the normal map actually shows,
     // but NOT physically based, so vertex colours don't get crushed under ACES
     // tone mapping the way MeshStandardMaterial would. Low shininess + near-black
     // specular keeps the regolith matte.
@@ -7570,7 +7735,7 @@ function createSpaceSkybox() {
   skyboxGroup.renderOrder = -1000;
 
   // === LAYER 1: Procedural shader sky sphere ===
-  // Low tessellation is fine â€” all sky detail lives in the fragment shader,
+  // Low tessellation is fine — all sky detail lives in the fragment shader,
   // the vertex shader only needs a smooth direction interpolant.
   const skyboxGeometry = new THREE.SphereGeometry(5900, 32, 24);
 
@@ -7883,7 +8048,7 @@ function createTwinklingStars() {
   const points = new THREE.Points(geometry, material);
   points.frustumCulled = false;
 
-  // Return system with update function â€” just advances the shader clock.
+  // Return system with update function — just advances the shader clock.
   return {
     points,
     update(time) {
@@ -7898,7 +8063,7 @@ function createTwinklingStars() {
 }
 
 function createStarTexture() {
-  // 64px is enough â€” stars are tiny points; higher res adds no benefit
+  // 64px is enough — stars are tiny points; higher res adds no benefit
   const canvas = document.createElement('canvas');
   canvas.width = 64;
   canvas.height = 64;
@@ -7975,7 +8140,7 @@ function createShootingStarSystem() {
     const trail = new THREE.Mesh(trailGeo, trailMat);
     trail.frustumCulled = false;
 
-    // Bright head glow (no PointLight â€” too expensive for transient effects)
+    // Bright head glow (no PointLight — too expensive for transient effects)
     const headGeo = new THREE.SphereGeometry(4, 6, 6);
     const headMat = new THREE.MeshBasicMaterial({
       color: 0xffffff,
@@ -8395,7 +8560,7 @@ const lazyLoader = new LazyLoader();
 
 // Initialize scene elements with lazy loading
 function initializeScene() {
-  console.log("ðŸš€ MARS SCENE: initializeScene() called");
+  console.log("🚀 MARS SCENE: initializeScene() called");
   console.log("Scene exists:", typeof scene !== 'undefined');
   console.log("Renderer exists:", typeof renderer !== 'undefined');
 
@@ -8409,7 +8574,7 @@ function initializeScene() {
 }
 
 function loadCoreComponents() {
-  console.log("ðŸ”§ MARS SCENE: loadCoreComponents() called");
+  console.log("🔧 MARS SCENE: loadCoreComponents() called");
   
   // Create the HUD (may not exist as a function, skip if undefined)
   if (typeof createHUD === 'function') {
@@ -8419,19 +8584,9 @@ function loadCoreComponents() {
     console.log("createHUD not defined, skipping");
   }
 
-  // Simple background only for mobile to prevent WebGL context issues
   const perfSettings = getPerformanceSettings();
-  if (perfSettings.isMobile) {
-    scene.background = new THREE.Color(0x87CEEB);
-    scene.fog = new THREE.Fog(0x87CEEB, 100, 1000);
-    console.log("Mobile: simple sky background created");
-  }
 
-  // Create the sun directional light; start dim because the scene begins at night
-  sun = new THREE.DirectionalLight(0xb96a45, isDaytime ? 1 : 0.04);
-  sun.position.set(10, 100, 10);
-  scene.add(sun);
-  console.log("Sun light added to scene");
+  // Sunlight comes from the single shadow-casting sunLight, driven by updateDayNightCycle
 
   // Create a simple sun sphere for daytime only; hidden at night to avoid extra "planets"
   const sunGeometry = new THREE.SphereGeometry(36, 16, 16); // Reduced geometry complexity
@@ -8448,15 +8603,15 @@ function loadCoreComponents() {
 
   // Eagerly create MarsSceneManager on desktop so colony and rockets
   // are always available even if lazy loading is delayed.
-  console.log("ðŸ—ï¸ MARS SCENE: About to create MarsSceneManager, isMobile=", perfSettings.isMobile);
+  console.log("🏗️ MARS SCENE: About to create MarsSceneManager, isMobile=", perfSettings.isMobile);
   if (!perfSettings.isMobile) {
     try {
-      console.log("ðŸ—ï¸ MARS SCENE: Creating MarsSceneManager now...");
+      console.log("🏗️ MARS SCENE: Creating MarsSceneManager now...");
       sceneManager = new MarsSceneManager(scene, 5000);
       window.marsSceneManager = sceneManager;
-      console.log('âœ… MarsSceneManager eagerly created for desktop');
+      console.log('✅ MarsSceneManager eagerly created for desktop');
     } catch (e) {
-      console.error('âŒ Failed to create MarsSceneManager eagerly:', e);
+      console.error('❌ Failed to create MarsSceneManager eagerly:', e);
       console.error('Error stack:', e.stack);
     }
   }
@@ -8494,14 +8649,6 @@ function loadNonEssentialComponents() {
     return;
   }
   
-  // Load meteor system only on high performance devices
-  if (perfSettings.detailLevel === 'high') {
-    lazyLoader.loadInBackground('meteorSystem', () => {
-      window.meteorSystem = new MeteorSystem(5000);
-      return Promise.resolve();
-    });
-  }
-
   // Load Mars scene manager after initial render settles
   setTimeout(() => {
     lazyLoader.loadInBackground('marsSceneManager', () => {
@@ -8558,19 +8705,19 @@ console.log("Initial day/night state:", isDaytime ? "DAY" : "NIGHT");
 // colony/rocket traffic it controls) is constructed on desktop,
 // and HUD/UI are set up, even though initializeScene wasn't being
 // called from index.html.
-console.log('ðŸŽ® MARS SCRIPT: End of mars.js reached, about to call initializeScene()');
-console.log('ðŸŽ® initializeScene exists:', typeof initializeScene);
-console.log('ðŸŽ® scene exists:', typeof scene);
-console.log('ðŸŽ® renderer exists:', typeof renderer);
+console.log('🎮 MARS SCRIPT: End of mars.js reached, about to call initializeScene()');
+console.log('🎮 initializeScene exists:', typeof initializeScene);
+console.log('🎮 scene exists:', typeof scene);
+console.log('🎮 renderer exists:', typeof renderer);
 try {
   if (typeof initializeScene === 'function') {
-    console.log('ðŸŽ® CALLING initializeScene() NOW...');
+    console.log('🎮 CALLING initializeScene() NOW...');
     initializeScene();
-    console.log('ðŸŽ® initializeScene() completed');
+    console.log('🎮 initializeScene() completed');
   } else {
-    console.warn('âŒ initializeScene is not defined; core components not initialized');
+    console.warn('❌ initializeScene is not defined; core components not initialized');
   }
 } catch (e) {
-  console.error('âŒ Error during initializeScene:', e);
+  console.error('❌ Error during initializeScene:', e);
   console.error('Error stack:', e.stack);
 }
