@@ -2945,6 +2945,108 @@ function mergeGeometryList(parts) {
   return out;
 }
 
+// Merge [{ geometry, matrix }] into one indexed geometry in a single pass,
+// writing straight into preallocated buffers (mergeGeometryList's per-part
+// toNonIndexed() + clone was the bulk of a settlement's build time). Source
+// geometries are disposed.
+const _mergeNormalMatrix = new THREE.Matrix3();
+function mergeGeometryListIndexed(parts) {
+  let vertexCount = 0, indexCount = 0;
+  for (const { geometry } of parts) {
+    if (!geometry.attributes.normal) geometry.computeVertexNormals();
+    const n = geometry.attributes.position.count;
+    vertexCount += n;
+    indexCount += geometry.index ? geometry.index.count : n;
+  }
+  const pos = new Float32Array(vertexCount * 3);
+  const nor = new Float32Array(vertexCount * 3);
+  const uv = new Float32Array(vertexCount * 2);
+  const index = vertexCount > 65535 ? new Uint32Array(indexCount) : new Uint16Array(indexCount);
+
+  let vo = 0, io = 0;
+  for (const { geometry, matrix } of parts) {
+    const p = geometry.attributes.position;
+    const nAttr = geometry.attributes.normal;
+    const tAttr = geometry.attributes.uv;
+    const e = matrix.elements;
+    const q = _mergeNormalMatrix.getNormalMatrix(matrix).elements;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      const o = (vo + i) * 3;
+      pos[o] = e[0] * x + e[4] * y + e[8] * z + e[12];
+      pos[o + 1] = e[1] * x + e[5] * y + e[9] * z + e[13];
+      pos[o + 2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+      const nx = nAttr.getX(i), ny = nAttr.getY(i), nz = nAttr.getZ(i);
+      const tx = q[0] * nx + q[3] * ny + q[6] * nz;
+      const ty = q[1] * nx + q[4] * ny + q[7] * nz;
+      const tz = q[2] * nx + q[5] * ny + q[8] * nz;
+      const len = Math.hypot(tx, ty, tz) || 1;
+      nor[o] = tx / len; nor[o + 1] = ty / len; nor[o + 2] = tz / len;
+      if (tAttr) {
+        uv[(vo + i) * 2] = tAttr.getX(i);
+        uv[(vo + i) * 2 + 1] = tAttr.getY(i);
+      }
+    }
+    if (geometry.index) {
+      const src = geometry.index.array;
+      for (let k = 0; k < src.length; k++) index[io + k] = src[k] + vo;
+      io += src.length;
+    } else {
+      for (let k = 0; k < p.count; k++) index[io + k] = vo + k;
+      io += p.count;
+    }
+    vo += p.count;
+    geometry.dispose();
+  }
+
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  out.setIndex(new THREE.BufferAttribute(index, 1));
+  out.computeBoundingSphere();
+  return out;
+}
+
+// Collapse a group of static meshes into one mesh per material and shadow
+// setting, flattening the hierarchy. Procedural settlements are assembled
+// from hundreds of small meshes; drawn as-is, the ~20 in range cost ~1,600
+// draw calls a frame. Anything that isn't a plain mesh is kept as it is.
+function mergeStaticGroup(group) {
+  group.updateMatrixWorld(true);
+  const buckets = new Map();
+  const kept = [];
+  group.traverse(obj => {
+    if (obj === group) return;
+    const mergeable = obj.isMesh && obj.visible && !obj.isInstancedMesh && !obj.isSkinnedMesh &&
+      !Array.isArray(obj.material) && !obj.geometry.morphAttributes.position;
+    if (mergeable) {
+      const key = `${obj.material.uuid}|${obj.castShadow ? 1 : 0}${obj.receiveShadow ? 1 : 0}`;
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = { material: obj.material, castShadow: obj.castShadow, receiveShadow: obj.receiveShadow, parts: [] };
+        buckets.set(key, bucket);
+      }
+      bucket.parts.push({ geometry: obj.geometry, matrix: obj.matrixWorld.clone() });
+    } else if (!obj.isMesh && (obj.isLine || obj.isPoints || obj.isSprite || obj.isLight)) {
+      kept.push(obj);
+    } else if (obj.isMesh) {
+      kept.push(obj);
+    }
+  });
+  // The group sits at the origin, so world matrices are group-local
+  kept.forEach(obj => group.attach(obj));
+  group.clear();
+  kept.forEach(obj => group.add(obj));
+  for (const bucket of buckets.values()) {
+    const mesh = new THREE.Mesh(mergeGeometryListIndexed(bucket.parts), bucket.material);
+    mesh.castShadow = bucket.castShadow;
+    mesh.receiveShadow = bucket.receiveShadow;
+    group.add(mesh);
+  }
+  return group;
+}
+
 // Roughen a geometry so regolith berms and shielding mounds read as heaped
 // soil rather than machined shapes. Displacement is a function of position,
 // so coincident vertices move together and no cracks open.
@@ -5155,14 +5257,14 @@ class MarsSceneManager {
   }
 
   // Check and spawn/despawn settlements near the player
-  updateSettlements(playerPosition) {
-    // Settlements used to be built only while the rover stood still, so they
-    // appeared after you had already driven past. A settlement takes ~2-18 ms
-    // to build, so building at most one per check (nearest first) keeps
-    // driving smooth; checks come quicker while moving so boost can't outrun them.
+  // Settlements used to be built only while the rover stood still, so they
+  // appeared after you had already driven past. Now: everything in range is
+  // built during the loading screen (prewarm), then new ones are built as you
+  // drive within a small per-check time budget, ones ahead of you first.
+  updateSettlements(playerPosition, { prewarm = false } = {}) {
     const now = performance.now();
     const moving = typeof velocity === 'number' && Math.abs(velocity) > 0.012;
-    if (now - this.lastSettlementCheck < (moving ? 350 : 1000)) return;
+    if (!prewarm && now - this.lastSettlementCheck < (moving ? 250 : 600)) return;
     this.lastSettlementCheck = now;
 
     const perfSettings = getPerformanceSettings();
@@ -5206,8 +5308,10 @@ class MarsSceneManager {
       }
     }
 
-    // Scan grid cells around the player; build the nearest missing settlement
-    let nearest = null;
+    // Scan grid cells around the player for missing settlements
+    const candidates = [];
+    const headingX = -Math.sin(typeof roverYaw === 'number' ? roverYaw : 0);
+    const headingZ = -Math.cos(typeof roverYaw === 'number' ? roverYaw : 0);
     for (let gx = playerGX - scanRadius; gx <= playerGX + scanRadius; gx++) {
       for (let gz = playerGZ - scanRadius; gz <= playerGZ + scanRadius; gz++) {
         const key = `${gx},${gz}`;
@@ -5232,12 +5336,16 @@ class MarsSceneManager {
         const minSpawnDist = 260;
         if (distSq < minSpawnDist * minSpawnDist) continue;
         if (!this._isSettlementSiteClear(cx, cz)) continue;
-        if (!nearest || distSq < nearest.distSq) nearest = { key, hash, cx, cz, distSq };
+        // While driving, sites ahead of the rover count as closer
+        const ahead = moving ? (dx * headingX + dz2 * headingZ) / Math.sqrt(distSq) : 0;
+        candidates.push({ key, hash, cx, cz, score: distSq * (ahead > 0.3 ? 0.45 : 1) });
       }
     }
+    candidates.sort((a, b) => a.score - b.score);
 
-    if (nearest) {
-      const { key, hash, cx, cz } = nearest;
+    const budgetMs = prewarm ? Infinity : (moving ? 6 : 12);
+    for (const { key, hash, cx, cz } of candidates) {
+      if (performance.now() - now > budgetMs) break;
       // Determine settlement type from hash bits
       const typeBits = (hash >>> 24) & 0xff;
       let type;
@@ -5248,17 +5356,16 @@ class MarsSceneManager {
       const groundY = this.getTerrainHeight(cx, cz);
       const center = new THREE.Vector3(cx, groundY, cz);
 
-      console.log(`🏗️ Spawning procedural ${type} at (${Math.round(cx)}, ${Math.round(cz)})`);
-
       const collidableStart = this.collidables.length;
-      const group = this._buildSettlement(type, center, hash);
+      const group = mergeStaticGroup(this._buildSettlement(type, center, hash));
       for (let i = collidableStart; i < this.collidables.length; i++) {
         this.collidables[i].dynamic = true;
       }
       const collidableCount = this.collidables.length - collidableStart;
 
-      // Ease in rather than pop (it may still be inside the haze)
-      this.prepareSettlementFadeIn(group, performance.now());
+      // Ease in rather than pop (it may still be inside the haze); settlements
+      // built behind the loading screen are simply there
+      if (!prewarm) this.prepareSettlementFadeIn(group, performance.now());
       this.scene.add(group);
       this.settlements.set(key, {
         group,
@@ -9282,6 +9389,8 @@ function loadCoreComponents() {
       console.log("🏗️ MARS SCENE: Creating MarsSceneManager now...");
       sceneManager = new MarsSceneManager(scene, 5000);
       window.marsSceneManager = sceneManager;
+      // Build the settlements around the landing site behind the loading screen
+      sceneManager.updateSettlements(rover.position, { prewarm: true });
       console.log('✅ MarsSceneManager eagerly created for desktop');
     } catch (e) {
       console.error('❌ Failed to create MarsSceneManager eagerly:', e);
