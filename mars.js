@@ -35,60 +35,37 @@ function _getHudElements() {
       compass: document.getElementById('rover-heading'),
       route: document.getElementById('tour-status'),
       mission: document.getElementById('mission-objective'),
-      toast: document.getElementById('mission-toast')
+      toast: document.getElementById('mission-toast'),
+      speedPanel: document.getElementById('speed-hud'),
+      speed: document.getElementById('speed-value'),
+      heading: document.getElementById('speed-heading')
     };
   }
   return _hudElements;
 }
 
+// HUD panels are styled by index.html (.hud-panel etc.); this only builds them
 function ensureMissionHUD() {
   if (typeof document === 'undefined' || document.getElementById('mission-hud')) return;
 
   const hud = document.createElement('div');
   hud.id = 'mission-hud';
-  hud.style.cssText = `
-    position: fixed;
-    top: 18px;
-    left: 18px;
-    z-index: 220;
-    min-width: 220px;
-    max-width: min(340px, calc(100vw - 36px));
-    padding: 10px 12px;
-    color: #eaf8ff;
-    font-family: Arial, sans-serif;
-    font-size: 12px;
-    line-height: 1.35;
-    background: rgba(5, 10, 16, 0.62);
-    border: 1px solid rgba(102, 234, 255, 0.36);
-    box-shadow: 0 0 24px rgba(54, 200, 255, 0.18);
-    backdrop-filter: blur(10px);
-    pointer-events: none;
-  `;
+  hud.className = 'hud-panel';
   hud.innerHTML = `
-    <div style="font-size: 10px; letter-spacing: 1.4px; color: #66eaff; text-transform: uppercase;">Mission</div>
-    <div id="mission-objective" style="margin-top: 3px; font-weight: 700;">Follow the blue beacon route</div>
-    <div id="tour-status" style="margin-top: 4px; color: rgba(234,248,255,0.78);">Tour: 0/6 beacons</div>
+    <div class="hud-eyebrow">Mission</div>
+    <div id="mission-objective">Follow the blue beacon route</div>
+    <div id="tour-status">Tour: 0/6 beacons</div>
   `;
   document.body.appendChild(hud);
 
+  const speed = document.createElement('div');
+  speed.id = 'speed-hud';
+  speed.className = 'hud-panel';
+  speed.innerHTML = '<span id="speed-value">0</span><span id="speed-unit">KM/H</span><span id="speed-heading"></span>';
+  document.body.appendChild(speed);
+
   const toast = document.createElement('div');
   toast.id = 'mission-toast';
-  toast.style.cssText = `
-    position: fixed;
-    top: 86px;
-    left: 18px;
-    z-index: 221;
-    padding: 8px 11px;
-    color: #071116;
-    font-family: Arial, sans-serif;
-    font-size: 12px;
-    font-weight: 700;
-    background: rgba(102, 234, 255, 0.92);
-    opacity: 0;
-    transform: translateY(-8px);
-    transition: opacity 220ms ease, transform 220ms ease;
-    pointer-events: none;
-  `;
   document.body.appendChild(toast);
   _hudElements = null;
 }
@@ -98,14 +75,11 @@ function showMissionToast(message) {
   const hud = _getHudElements();
   if (!hud.toast) return;
   hud.toast.textContent = message;
-  hud.toast.style.opacity = '1';
-  hud.toast.style.transform = 'translateY(0)';
+  hud.toast.classList.add('show');
   clearTimeout(window._missionToastTimer);
-  window._missionToastTimer = setTimeout(() => {
-    hud.toast.style.opacity = '0';
-    hud.toast.style.transform = 'translateY(-8px)';
-  }, 1800);
+  window._missionToastTimer = setTimeout(() => hud.toast.classList.remove('show'), 2200);
 }
+window.showGameToast = showMissionToast;
 
 function updateMissionObjective() {
   ensureMissionHUD();
@@ -145,6 +119,20 @@ function updateGameHUD() {
     hud.fuel.style.color = rover.fuel < 100 ? '#ff4444' : rover.fuel < 300 ? '#ffaa44' : '#44aaff';
   }
 
+  // Speedometer (1 world unit = 1 m; velocity is metres per 60 Hz frame)
+  if (hud.speed && typeof velocity === 'number') {
+    const kmh = String(Math.round(Math.abs(velocity) * 60 * 3.6));
+    if (hud.speed.textContent !== kmh) hud.speed.textContent = kmh;
+    const boosting = Math.abs(velocity) > MAX_SPEED * 1.05;
+    if (hud.speedPanel.classList.contains('boost') !== boosting) hud.speedPanel.classList.toggle('boost', boosting);
+    if (typeof window.roverYaw === 'number' && hud.heading) {
+      let deg = (window.roverYaw * 180 / Math.PI) % 360;
+      if (deg < 0) deg += 360;
+      const label = _compassDirs[Math.round(deg / 45) % 8];
+      if (hud.heading.textContent !== label) hud.heading.textContent = label;
+    }
+  }
+
   // Update compass / heading display
   if (hud.compass && typeof window.roverYaw === 'number') {
     let degrees = (window.roverYaw * 180 / Math.PI) % 360;
@@ -177,7 +165,7 @@ let manualTransitionSpeed = 0.005;
 let isDaytime = false; // Start at night so the starry sky is visible
 let sun = null;
 let sunSphere = null;
-let dayNightCycleOffset = 0;
+let dayNightCycleOffset = 0.28; // start just after sunrise: low sun, long shadows
 
 function getPerformanceSettings() {
   // Return cached settings if available (settings don't change during session)
@@ -228,20 +216,21 @@ if (window.gameRenderer) {
 const scene = new THREE.Scene();
 // Performance-optimized renderer with adaptive settings - MOBILE EMERGENCY MODE
 const perfSettings = getPerformanceSettings();
-const cameraFov = perfSettings.isMobile ? 58 : 85;
+const cameraFov = 62;
 const camera = new THREE.PerspectiveCamera(cameraFov, window.innerWidth / window.innerHeight, 0.1, 10000);
 camera.position.set(0, 10, 20);
 const renderer = new THREE.WebGLRenderer({
-  antialias: !perfSettings.isMobile, // Antialiasing on desktop for crisp edges
+  // Desktop renders into a multisampled post-processing target, so the
+  // default framebuffer never needs its own MSAA
+  antialias: false,
   powerPreference: perfSettings.isMobile ? 'low-power' : 'high-performance',
-  precision: perfSettings.isMobile ? 'lowp' : 'highp', // High precision on desktop for quality
+  precision: perfSettings.isMobile ? 'mediump' : 'highp',
   alpha: false,
   stencil: false,
   depth: true,
   logarithmicDepthBuffer: false,
   preserveDrawingBuffer: false,
-  failIfMajorPerformanceCaveat: false,
-  premultipliedAlpha: false
+  failIfMajorPerformanceCaveat: false
 });
 
 // Store renderer globally to prevent duplicates
@@ -254,48 +243,90 @@ if (window.webglContextManager && typeof window.webglContextManager.register ===
 }
 
 // Adaptive pixel ratio for better visual quality - capped at 1 for mobile emergency performance
+// (desktop draws through a multisampled HDR post chain, so it is capped lower)
 const pixelRatio = perfSettings.isMobile ? 1 :
-                   Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 2 : 1.5);
+                   Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 1.5 : 1.25);
 renderer.setPixelRatio(pixelRatio);
 
-// Desktop: Reinhard tone mapping works well for night scenes (ACES crushes cool blue to black)
-if (!perfSettings.isMobile) {
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.2;
-  renderer.outputEncoding = THREE.sRGBEncoding;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap; // soft shadows
+// Colour pipeline: materials work in linear light, the output is sRGB and
+// ACES filmic tone mapping rolls highlights off like film (it keeps the warm,
+// saturated look of real Mars imagery better than AgX, which greys it out). On desktop the tone
+// mapping and encoding happen in the post-processing OutputPass instead (the
+// renderer skips both when drawing into a render target).
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = !perfSettings.isMobile;
+renderer.shadowMap.type = THREE.PCFShadowMap; // Vogel-disk filtered; softness comes from shadow.radius
+
+// Lights are physically based since three r155: intensities are in candela /
+// lux, and point and spot lights fall off with the inverse square of distance.
+// lampIntensity() converts the game's original hand-tuned values (legacy mode:
+// intensity x PI, linear falloff out to `range`) so a lamp is exactly as bright
+// as it used to be at `matchAt` metres, hotter closer in and dimmer beyond,
+// like a real lamp. Big area fills (colony floods, city glow) use decay 0 and
+// keep their even wash.
+const LEGACY_LIGHT_SCALE = Math.PI;
+function lampIntensity(legacyIntensity, range, matchAt = range / 3) {
+  return legacyIntensity * LEGACY_LIGHT_SCALE * (1 - matchAt / range) * matchAt * matchAt;
 }
 
-  // Mobile-specific renderer optimizations
-if (perfSettings.isMobile) {
-  renderer.shadowMap.enabled = false;
-  if (perfSettings.samsungOptimized) {
-    // Samsung devices need different color encoding and gamma
-    renderer.outputEncoding = THREE.LinearEncoding;  // Better for Samsung displays
-    renderer.gammaFactor = perfSettings.gammaCorrection;
-    renderer.toneMapping = THREE.ReinhardToneMapping;
-    renderer.toneMappingExposure = 1.1;  // Slightly brighter exposure for Samsung
-    
-    console.log('- Ambient light boost:', perfSettings.ambientLightBoost);
-    console.log('- Material brightness:', perfSettings.materialBrightness);
-    console.log('- Fog density reduction:', perfSettings.fogDensityReduction);
-  } else {
-    // Standard mobile encoding
-    renderer.outputEncoding = THREE.sRGBEncoding;
-    renderer.gammaFactor = perfSettings.gammaCorrection;
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.0;
-    
-    console.log('Non-Samsung mobile device detected - using standard settings:');
-    console.log('- GPU:', perfSettings.deviceInfo.gpuRenderer);
-    console.log('- Mobile tier:', perfSettings.mobileTier);
-    console.log('- Gamma correction:', perfSettings.gammaCorrection);
+// Every material colour in this file was tuned as a *linear* value (three used
+// to treat hex colours that way). Keep that interpretation instead of letting
+// r152+ colour management re-read them as sRGB, which would darken and
+// over-saturate every albedo. Textures are still tagged sRGB where they are.
+THREE.ColorManagement.enabled = false;
+
+// Custom shaders here write display-referred colours. Decode them to linear
+// light so they join the HDR pipeline (tone mapping, bloom) with everything
+// else; `hdrBoost` lifts emitters like engine plumes above the bloom threshold.
+function glslDisplayOut(hdrBoost = 1.0) {
+  return `
+    gl_FragColor.rgb = pow(clamp(gl_FragColor.rgb, 0.0, 8.0), vec3(2.2)) * ${hdrBoost.toFixed(2)};
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  `;
+}
+
+// One sky model, shared by the sky dome, the image-based lighting and the
+// aerial-perspective pass, so distant terrain always fades into exactly the
+// colour of the sky behind it. Returns linear HDR radiance toward `dir`.
+//  - Daytime: fine iron-oxide dust scatters red and absorbs blue, so the sky
+//    is butterscotch, brightest at the horizon.
+//  - Dust also scatters strongly forward. Around a low sun that aureole turns
+//    blue (the grains scatter blue light forward): the Martian blue sunset.
+const MARS_SKY_GLSL = `
+  vec3 marsSkyRadiance(vec3 dir, vec3 sunDir) {
+    float e = max(dir.y, 0.0);
+    float sunE = sunDir.y;
+    float c = max(dot(dir, sunDir), 0.0);
+    float light = smoothstep(-0.20, 0.32, sunE);
+    float dusk = smoothstep(0.42, 0.04, sunE) * smoothstep(-0.20, 0.0, sunE);
+
+    vec3 zenith = vec3(0.26, 0.15, 0.085);
+    vec3 horizon = vec3(0.96, 0.60, 0.36);
+    vec3 sky = mix(horizon, zenith, pow(e, 0.5));
+
+    // Low sun: the half of the sky facing away from it sinks into dusky rose
+    sky *= mix(1.0, 0.30 + 0.70 * pow(0.5 + 0.5 * dot(dir, sunDir), 2.0), dusk);
+
+    vec3 aureole = mix(vec3(1.0, 0.80, 0.58), vec3(0.40, 0.62, 1.0), dusk);
+    sky += aureole * (pow(c, 7.0) * 0.8 + pow(c, 60.0) * 2.6) * (1.0 + 0.8 * dusk);
+    sky *= light;
+
+    vec3 night = mix(vec3(0.030, 0.020, 0.018), vec3(0.006, 0.008, 0.017), sqrt(e));
+    return sky + night * (1.0 - light);
   }
-  
-  // Disable shadows entirely on mobile for performance
-  renderer.shadowMap.enabled = false;
-  
+`;
+
+// Live atmosphere state, written by updateDayNightCycle
+const marsAtmosphere = {
+  sunDir: new THREE.Vector3(0, 1, 0), // true sun direction (can be below the horizon)
+  dayAmount: 0
+};
+
+
+if (perfSettings.isMobile) {
   // Add WebGL context loss handling for mobile stability
   renderer.domElement.addEventListener('webglcontextlost', (event) => {
     event.preventDefault();
@@ -321,7 +352,7 @@ if (perfSettings.isMobile) {
     
     // Restart animation with reduced settings
     window.gameAnimationRunning = true;
-    animate(performance.now());
+    scheduleAnimationFrame();
   }, false);
   
   // Force garbage collection more frequently on mobile
@@ -389,7 +420,7 @@ document.addEventListener('visibilitychange', () => {
     console.log('Page visible - resuming animation');
     if (!window.gameAnimationRunning) {
       window.gameAnimationRunning = true;
-      animate(performance.now());
+      scheduleAnimationFrame();
     }
   }
 });
@@ -726,6 +757,7 @@ function createRealisticRover() {
   }
 
   const wheelTexture = new THREE.CanvasTexture(wheelTextureCanvas);
+  wheelTexture.colorSpace = THREE.SRGBColorSpace;
   wheelTexture.wrapS = THREE.RepeatWrapping;
   wheelTexture.wrapT = THREE.RepeatWrapping;
   wheelTexture.repeat.set(8, 1);
@@ -784,6 +816,7 @@ function createRealisticRover() {
   // Emissive lamps mounted on the front of the chassis (they used to float
   // 1.4 m ahead of the rover, past the front edge at z = -1.6).
   const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfff6e0 });
+  const roverLights = [];
   const headlightGeom = new THREE.SphereGeometry(0.12, 10, 10);
   const lampPositions = [[-0.75, 0.95, -1.62], [0.75, 0.95, -1.62]];
   lampPositions.forEach(([lx, ly, lz]) => {
@@ -794,25 +827,31 @@ function createRealisticRover() {
 
   if (perfSettings.isMobile) {
     // Mobile: one cheap point light at the front, no spotlights
-    const roverLight = new THREE.PointLight(0xfff2d8, 1.6, 28);
+    const roverLight = new THREE.PointLight(0xfff2d8, lampIntensity(1.6, 28, 6), 28);
     roverLight.position.set(0, 2, -2.5);
     roverGroup.add(roverLight);
+    roverLights.push(roverLight);
     console.log('Minimal mobile rover lighting added for performance');
   } else {
     // Desktop: two forward spotlight cones for real headlight beams,
     // plus a soft warm fill so the rover body and nearby ground read at night.
     lampPositions.forEach(([lx, ly, lz]) => {
-      const spot = new THREE.SpotLight(0xfff2d8, 3.0, 85, Math.PI * 0.22, 0.5, 1.0);
+      const spot = new THREE.SpotLight(0xfff2d8, lampIntensity(3.0, 85, 16), 85, Math.PI * 0.22, 0.5, 2);
       spot.position.set(lx, ly, lz);
       spot.target.position.set(lx * 1.5, -3, lz - 34); // aim forward and slightly down
       spot.castShadow = false;
       roverGroup.add(spot);
       roverGroup.add(spot.target);
+      roverLights.push(spot);
     });
-    const fill = new THREE.PointLight(0xffe9cc, 0.8, 20);
+    const fill = new THREE.PointLight(0xffe9cc, lampIntensity(0.8, 20, 4) * 0.3, 20);
     fill.position.set(0, 2.2, -2.0);
     roverGroup.add(fill);
+    roverLights.push(fill);
   }
+  // Lamps switch on as daylight fails (see updateDayNightCycle)
+  roverLights.forEach(light => { light.userData.nightIntensity = light.intensity; });
+  roverGroup.userData.lamps = { material: headlightMat, lights: roverLights };
 
   return {
     rover: roverGroup,
@@ -840,6 +879,7 @@ function createSolarPanelTexture() {
     context.fillStyle = '#2244aa'; // Simple blue color
     context.fillRect(0, 0, 16, 16);
     const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
     texture.generateMipmaps = false;
     texture.minFilter = THREE.LinearFilter;
     texture.magFilter = THREE.LinearFilter;
@@ -889,6 +929,7 @@ function createSolarPanelTexture() {
   }
 
   const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 4;
   return tex;
 }
@@ -904,7 +945,7 @@ scene.add(rover);
 const perfSettingsForRover = getPerformanceSettings();
 if (perfSettingsForRover.isMobile) {
   // Reduce ambient light intensity to prevent GPU overload
-  const ambientLight = new THREE.AmbientLight(0x404040, 0.4); // Reduced intensity
+  const ambientLight = new THREE.AmbientLight(0x404040, 0.4 * LEGACY_LIGHT_SCALE); // Reduced intensity
   scene.add(ambientLight);
   
   // Remove hemisphere light on mobile to reduce GPU load
@@ -1079,14 +1120,14 @@ const dustParticles = createDustParticles();
 const ambientIntensity = perfSettings.samsungOptimized ? 0.34 * perfSettings.ambientLightBoost :
                          perfSettings.isMobile ? 0.34 : 0.24;
 const ambientColor = perfSettings.samsungOptimized ? 0x5a3528 : 0x3a2018;
-const ambientLight = new THREE.AmbientLight(ambientColor, ambientIntensity);
+const ambientLight = new THREE.AmbientLight(ambientColor, ambientIntensity * LEGACY_LIGHT_SCALE);
 scene.add(ambientLight);
 
 // Low, weak reflected light gives terrain shape without making night feel like day
 const sunIntensity = perfSettings.samsungOptimized ? 0.16 * perfSettings.materialBrightness :
                      perfSettings.isMobile ? 0.14 : 0.12;
 const sunColor = 0xb96a45;
-const sunLight = new THREE.DirectionalLight(sunColor, sunIntensity);
+const sunLight = new THREE.DirectionalLight(sunColor, sunIntensity * LEGACY_LIGHT_SCALE);
 // Low-angle Mars sun — long shadows, dramatic look
 sunLight.position.set(-120, 55, 80);
 if (!perfSettings.isMobile) {
@@ -1110,7 +1151,7 @@ scene.add(sunLight.target);
 
 // Secondary fill light - barely lifts silhouettes at night
 if (!perfSettings.isMobile) {
-  const fillLight = new THREE.DirectionalLight(0x34180f, 0.05);
+  const fillLight = new THREE.DirectionalLight(0x34180f, 0.05 * LEGACY_LIGHT_SCALE);
   fillLight.position.set(80, 40, -60);
   scene.add(fillLight);
 }
@@ -1120,8 +1161,209 @@ const hemisphereIntensity = perfSettings.samsungOptimized ? 0.24 * perfSettings.
                              perfSettings.isMobile ? 0.22 : 0.18;
 const hemisphereSkyColor = 0x070912;
 const hemisphereGroundColor = 0x2a0f06;
-const hemisphereLight = new THREE.HemisphereLight(hemisphereSkyColor, hemisphereGroundColor, hemisphereIntensity);
+const hemisphereLight = new THREE.HemisphereLight(hemisphereSkyColor, hemisphereGroundColor, hemisphereIntensity * LEGACY_LIGHT_SCALE);
 scene.add(hemisphereLight);
+
+// ============================================================
+// MARS ATMOSPHERE + POST-PROCESSING
+// ============================================================
+
+const _fullscreenVert = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = vec4(position.xy, 0.0, 1.0);
+  }
+`;
+
+// Desktop render path: scene -> GTAO -> atmosphere -> bloom -> grade.
+// Mobile renders straight to the canvas with the renderer's own tone mapping.
+function createPostProcessing() {
+  if (perfSettings.isMobile || !THREE.UnrealBloomPass) return null;
+  const quality = perfSettings.graphicsQuality || 'medium';
+
+  // Glows (unlit MeshBasicMaterial colours) and emissive surfaces become real
+  // HDR light sources so they bloom. Patched before any material compiles.
+  const glowBoost = 2.4, emissiveBoost = 2.0;
+  THREE.ShaderLib.basic.fragmentShader = THREE.ShaderLib.basic.fragmentShader.replace(
+    'vec3 outgoingLight = reflectedLight.indirectDiffuse;',
+    `vec3 outgoingLight = reflectedLight.indirectDiffuse;
+    #ifndef USE_MAP
+      outgoingLight *= ${glowBoost.toFixed(2)};
+    #endif`
+  );
+  THREE.ShaderChunk.emissivemap_fragment += `\ntotalEmissiveRadiance *= ${emissiveBoost.toFixed(2)};\n`;
+
+  const size = new THREE.Vector2();
+  renderer.getDrawingBufferSize(size);
+
+  // HDR scene target with 4x MSAA; its depth is resolved into a float texture
+  // that GTAO and the atmosphere pass read back
+  const depthTexture = new THREE.DepthTexture(size.x, size.y, THREE.FloatType);
+  const sceneTarget = new THREE.WebGLRenderTarget(size.x, size.y, {
+    type: THREE.HalfFloatType,
+    samples: quality === 'low' ? 0 : 4,
+    depthTexture
+  });
+  const hdrTarget = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, depthBuffer: false });
+
+  // Ground-truth AO from the scene's own depth (no second scene render).
+  // It runs at reduced resolution; the Poisson denoise hides the upscale.
+  let gtao = null;
+  if (quality !== 'low' && THREE.GTAOPass) {
+    const aoScale = 0.5;
+    gtao = new THREE.GTAOPass(scene, camera, Math.round(size.x * aoScale), Math.round(size.y * aoScale));
+    gtao.setGBuffer(depthTexture);
+    gtao.output = THREE.GTAOPass.OUTPUT.Off; // we composite the denoised AO ourselves
+    gtao.updateGtaoMaterial({ radius: 1.6, distanceExponent: 1.6, thickness: 2.5, scale: 1.0, samples: quality === 'high' ? 12 : 8, distanceFallOff: 1.0 });
+    // A wide, many-sample denoise: blotchy AO read as grain
+    gtao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 10, rings: 3, samples: 16 });
+    gtao.aoScale = aoScale;
+  }
+
+  const atmosphereMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      tDiffuse: { value: sceneTarget.texture },
+      tDepth: { value: depthTexture },
+      tAO: { value: gtao ? gtao.pdRenderTarget.texture : null },
+      uUseAO: { value: gtao ? 1 : 0 },
+      uProjInv: { value: new THREE.Matrix4() },
+      uCamWorld: { value: new THREE.Matrix4() },
+      uCamPos: { value: new THREE.Vector3() },
+      uSunDir: { value: marsAtmosphere.sunDir },
+      uFogDensity: { value: 0.00085 },
+      uFogFalloff: { value: 1 / 320 },
+      uFogBase: { value: 0 }
+    },
+    vertexShader: _fullscreenVert,
+    fragmentShader: `
+      uniform sampler2D tDiffuse;
+      uniform sampler2D tDepth;
+      uniform sampler2D tAO;
+      uniform float uUseAO;
+      uniform mat4 uProjInv;
+      uniform mat4 uCamWorld;
+      uniform vec3 uCamPos;
+      uniform vec3 uSunDir;
+      uniform float uFogDensity;
+      uniform float uFogFalloff;
+      uniform float uFogBase;
+      varying vec2 vUv;
+      ${MARS_SKY_GLSL}
+      void main() {
+        vec4 col = texture2D(tDiffuse, vUv);
+        // Stacked additive plumes can overflow half floats; one Inf or NaN
+        // pixel would smear across the whole frame through the bloom blur
+        // (max() returns the non-NaN operand on GPUs, min() caps Inf)
+        col.rgb = min(max(col.rgb, vec3(0.0)), vec3(256.0));
+        float depth = texture2D(tDepth, vUv).x;
+        if (depth >= 1.0) { gl_FragColor = vec4(col.rgb, 1.0); return; } // sky: already the sky model
+
+        if (uUseAO > 0.5) col.rgb *= mix(1.0, texture2D(tAO, vUv).r, 0.7);
+
+        vec4 v = uProjInv * vec4(vUv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
+        vec3 wpos = (uCamWorld * vec4(v.xyz / v.w, 1.0)).xyz;
+        vec3 ray = wpos - uCamPos;
+        float dist = length(ray);
+        vec3 rd = ray / dist;
+
+        // Exponential height fog integrated analytically along the view ray:
+        // dust hangs low, so valleys haze over while ridgelines stay crisp
+        float a = uFogDensity * exp(-uFogFalloff * (uCamPos.y - uFogBase));
+        float b = uFogFalloff * rd.y;
+        float k = abs(b) < 1e-5 ? dist : (1.0 - exp(-b * dist)) / b;
+        // Dust extinguishes blue more than red, so distance also reddens
+        vec3 transmittance = exp(-a * k * vec3(0.80, 1.0, 1.28));
+
+        // In-scattered light is the horizon sky in the same compass direction,
+        // which is what makes haze glow toward the sun and match the dome
+        vec3 hazeDir = normalize(vec3(rd.x, 0.035, rd.z));
+        vec3 inscatter = marsSkyRadiance(hazeDir, uSunDir);
+        col.rgb = col.rgb * transmittance + inscatter * (1.0 - transmittance);
+        gl_FragColor = vec4(col.rgb, 1.0);
+      }
+    `,
+    depthTest: false,
+    depthWrite: false
+  });
+  const atmosphereQuad = new THREE.FullScreenQuad(atmosphereMaterial);
+
+  const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(size.x, size.y), 0.32, 0.4, 1.5);
+
+  const gradeMaterial = new THREE.ShaderMaterial({
+    uniforms: {
+      tDiffuse: { value: hdrTarget.texture },
+      uAspect: { value: size.x / size.y },
+      uSaturation: { value: 1.04 },
+      uVignette: { value: 0.28 }
+    },
+    vertexShader: _fullscreenVert,
+    fragmentShader: `
+      uniform sampler2D tDiffuse;
+      uniform float uAspect;
+      uniform float uSaturation;
+      uniform float uVignette;
+      varying vec2 vUv;
+      void main() {
+        vec3 col = texture2D(tDiffuse, vUv).rgb;
+        // Gentle saturation lift before the filmic curve
+        float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+        col = max(mix(vec3(luma), col, uSaturation), 0.0);
+        // Natural lens falloff toward the corners
+        vec2 q = (vUv - 0.5) * vec2(uAspect, 1.0);
+        col *= 1.0 - uVignette * smoothstep(0.25, 1.1, dot(q, q) * 1.6);
+        gl_FragColor = vec4(col, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }
+    `,
+    depthTest: false,
+    depthWrite: false
+  });
+  const gradeQuad = new THREE.FullScreenQuad(gradeMaterial);
+
+  const uniforms = atmosphereMaterial.uniforms;
+
+  return {
+    bloom,
+    gtao,
+    atmosphere: uniforms,
+    grade: gradeMaterial.uniforms,
+    render(timeMs) {
+      renderer.setRenderTarget(sceneTarget);
+      renderer.render(scene, camera);
+
+      if (gtao) gtao.render(renderer, null, sceneTarget);
+
+      uniforms.uProjInv.value.copy(camera.projectionMatrixInverse);
+      uniforms.uCamWorld.value.copy(camera.matrixWorld);
+      uniforms.uCamPos.value.setFromMatrixPosition(camera.matrixWorld);
+      renderer.setRenderTarget(hdrTarget);
+      atmosphereQuad.render(renderer);
+
+      bloom.render(renderer, null, hdrTarget);
+
+      renderer.setRenderTarget(null);
+      gradeQuad.render(renderer);
+    },
+    setSize() {
+      renderer.getDrawingBufferSize(size);
+      sceneTarget.setSize(size.x, size.y);
+      hdrTarget.setSize(size.x, size.y);
+      if (gtao) gtao.setSize(Math.round(size.x * gtao.aoScale), Math.round(size.y * gtao.aoScale));
+      bloom.setSize(size.x, size.y);
+      gradeMaterial.uniforms.uAspect.value = size.x / size.y;
+    }
+  };
+}
+const postProcessing = createPostProcessing();
+
+function renderFrame(timeMs) {
+  if (postProcessing) postProcessing.render(timeMs);
+  else renderer.render(scene, camera);
+}
+// Lets tooling grab a finished frame (the canvas is not preserveDrawingBuffer)
+window.renderFrameForCapture = () => renderFrame(performance.now());
 
 // Orbit Controls - Make globally accessible for mobile controls
 window.controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -1143,6 +1385,9 @@ const DECELERATION = 0.022;      // Braking stays responsive
 const COAST_DECEL = 0.008;       // Passive deceleration when no key held
 const MAX_ROTATION_SPEED = 0.020; // Slightly quicker turn rate
 const ROTATION_ACCEL = 0.003;    // Turn rate ramps up gradually
+const BOOST_SPEED = MAX_SPEED * 4;  // Hold Space while driving forward to cover ground fast
+const BOOST_ACCELERATION = 0.03;
+const BOOST_RELEASE_DECEL = 0.012; // Bleeds back down to cruising speed when Space is released
 let velocity = 0;                // Current velocity (-MAX_SPEED to +MAX_SPEED)
 let rotationVelocity = 0;        // Current turn rate
 let isMoving = false;
@@ -1156,6 +1401,7 @@ function resetRoverMotion(clearInput = false) {
     keys.a = false;
     keys.s = false;
     keys.d = false;
+    keys[' '] = false;
   }
   if (typeof cameraSpring !== 'undefined' && cameraSpring.velocity) {
     cameraSpring.velocity.set(0, 0, 0);
@@ -1207,27 +1453,12 @@ if (!window.gameEventListeners) {
 
 // Combined keydown handler to prevent duplicate listeners
 const keydownHandler = (event) => {
+  if (event.code === 'Space') event.preventDefault(); // boost, not "click the focused button"
   keys[event.key.toLowerCase()] = true;
   
   // Camera toggle functionality
   if (event.key.toLowerCase() === 'c') {
     toggleCameraMode();
-    
-    // Update HUD when camera mode changes
-    const hud = document.getElementById('cameraHUD');
-    if (hud) {
-      switch (cameraMode) {
-        case 'orbit':
-          hud.innerHTML = 'Camera: Orbit Mode (Press C to change)';
-          break;
-        case 'thirdPerson':
-          hud.innerHTML = 'Camera: Third Person Mode (Press C to change)';
-          break;
-        case 'firstPerson':
-          hud.innerHTML = 'Camera: First Person Mode (Press C to change)';
-          break;
-      }
-    }
   }
   
   // Day/night cycle toggle functionality
@@ -1267,11 +1498,31 @@ window.gameEventListeners.add(document, 'visibilitychange', () => {
   if (document.hidden) resetRoverMotion(true);
 });
 
-// Add camera modes and third-person view
-// Third-person camera: closer, more grounded chase cam for the rover (tighter feel)
-const cameraOffset = new THREE.Vector3(2.2, 5.2, 13.5);
-const mobileCameraOffset = new THREE.Vector3(0.8, 3.6, 4.8);
 const cameraSpring = { velocity: new THREE.Vector3() };
+
+// Camera modes: a close chase cam, a first-person mast cam and a free orbit.
+// The chase cam sits low and close behind the rover and looks out past it to
+// the horizon, so the landscape stays the subject. Drag to look around,
+// scroll to zoom; it eases back behind the rover once you drive off.
+const cameraRig = {
+  yaw: 0,                 // orbit offset from straight behind the rover (rad)
+  pitch: 0.2,             // camera elevation above the rover (rad)
+  defaultPitch: 0.2,
+  distance: perfSettings.isMobile ? 7.5 : 8.5,
+  minDistance: 4.5,
+  maxDistance: 28,
+  lookYaw: 0,             // first-person head turn relative to the rover
+  lookPitch: -0.08,
+  dragging: false,
+  lastInput: -Infinity,
+  fov: perfSettings.isMobile ? 62 : 62,
+  firstPersonFov: 74,
+  currentFov: camera.fov
+};
+// Above the front of the deck, ahead of the high-gain dish so nothing but the
+// rover's nose sits in the view
+const FIRST_PERSON_MOUNT = new THREE.Vector3(0, 2.3, -0.95);
+const CAMERA_MODE_LABELS = { thirdPerson: 'Chase camera', firstPerson: 'Mast camera', orbit: 'Free orbit' };
 
 // Change default camera mode to thirdPerson - Make globally accessible for mobile controls
 window.cameraMode = 'thirdPerson'; // 'orbit', 'thirdPerson', 'firstPerson'
@@ -1279,27 +1530,81 @@ let cameraMode = window.cameraMode;
 
 // Function to toggle between camera modes - Make globally accessible for mobile controls
 window.toggleCameraMode = function toggleCameraMode() {
-  switch (cameraMode) {
-    case 'orbit':
-      cameraMode = 'thirdPerson';
-      window.cameraMode = cameraMode;
-      controls.enabled = false; // Disable orbit controls in third-person mode
-      console.log('Camera Mode: Third Person');
-      break;
-    case 'thirdPerson':
-      cameraMode = 'firstPerson';
-      window.cameraMode = cameraMode;
-      controls.enabled = false; // Disable orbit controls in first-person mode
-      console.log('Camera Mode: First Person');
-      break;
-    case 'firstPerson':
-      cameraMode = 'orbit';
-      window.cameraMode = cameraMode;
-      controls.enabled = true; // Enable orbit controls in orbit mode
-      console.log('Camera Mode: Orbit');
-      break;
+  const next = { thirdPerson: 'firstPerson', firstPerson: 'orbit', orbit: 'thirdPerson' };
+  cameraMode = next[cameraMode] || 'thirdPerson';
+  window.cameraMode = cameraMode;
+  controls.enabled = cameraMode === 'orbit';
+  if (cameraMode === 'orbit' && typeof rover !== 'undefined' && rover) {
+    controls.target.copy(rover.position);
+  }
+  cameraRig.lookYaw = 0;
+  cameraRig.lookPitch = -0.08;
+  cameraRig.yaw = 0;
+  if (typeof window.showGameToast === 'function') {
+    window.showGameToast(CAMERA_MODE_LABELS[cameraMode] + '  ·  C to switch');
   }
 };
+
+// Drag-to-look and scroll-to-zoom for the chase and mast cameras (orbit mode
+// uses OrbitControls). Mouse drags on the canvas, one-finger drags on the
+// mobile touch area.
+(function setupCameraLook() {
+  let lastX = 0, lastY = 0;
+  const begin = (x, y) => {
+    if (cameraMode === 'orbit') return false;
+    cameraRig.dragging = true;
+    lastX = x; lastY = y;
+    return true;
+  };
+  const move = (x, y, sensitivity) => {
+    if (!cameraRig.dragging) return;
+    const dx = (x - lastX) * sensitivity, dy = (y - lastY) * sensitivity;
+    lastX = x; lastY = y;
+    if (cameraMode === 'firstPerson') {
+      cameraRig.lookYaw = THREE.MathUtils.clamp(cameraRig.lookYaw - dx * 0.0042, -2.6, 2.6);
+      cameraRig.lookPitch = THREE.MathUtils.clamp(cameraRig.lookPitch - dy * 0.0036, -1.1, 0.9);
+    } else {
+      cameraRig.yaw -= dx * 0.0055;
+      cameraRig.pitch = THREE.MathUtils.clamp(cameraRig.pitch + dy * 0.0042, -0.02, 1.25);
+    }
+    cameraRig.lastInput = performance.now();
+  };
+  const end = () => {
+    cameraRig.dragging = false;
+    cameraRig.lastInput = performance.now();
+  };
+
+  const canvas = renderer.domElement;
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch') return; // touch goes through the touch area
+    if (begin(e.clientX, e.clientY)) canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', (e) => { if (e.pointerType !== 'touch') move(e.clientX, e.clientY, 1); });
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  canvas.addEventListener('wheel', (e) => {
+    if (cameraMode !== 'thirdPerson') return;
+    e.preventDefault();
+    cameraRig.distance = THREE.MathUtils.clamp(
+      cameraRig.distance * Math.exp(e.deltaY * 0.0011), cameraRig.minDistance, cameraRig.maxDistance);
+    cameraRig.lastInput = performance.now();
+  }, { passive: false });
+
+  const touchArea = document.getElementById('touch-camera-area');
+  if (touchArea) {
+    touchArea.addEventListener('touchstart', (e) => {
+      const t = e.touches[0];
+      if (t) begin(t.clientX, t.clientY);
+    }, { passive: true });
+    touchArea.addEventListener('touchmove', (e) => {
+      const t = e.touches[0];
+      if (t) move(t.clientX, t.clientY, 1.4);
+    }, { passive: true });
+    touchArea.addEventListener('touchend', end, { passive: true });
+    touchArea.addEventListener('touchcancel', end, { passive: true });
+  }
+})();
 
 // Camera toggle is now handled in the main keydown handler to prevent duplicate listeners
 
@@ -1311,6 +1616,18 @@ let roverYaw = window.roverYaw;
 let frameCount = 0;
 let lastTime = 0;
 let animationId = null; // Track animation frame ID for context loss handling
+// Exactly one frame is ever queued. Resuming after a hidden tab or a context
+// loss used to call animate() directly while the paused frame was still
+// queued, leaving two loops that each moved the rover: double speed.
+let animationFramePending = false;
+function scheduleAnimationFrame() {
+  if (animationFramePending || !window.gameAnimationRunning) return;
+  animationFramePending = true;
+  animationId = window.gameAnimationId = requestAnimationFrame((t) => {
+    animationFramePending = false;
+    animate(t);
+  });
+}
 
 // Emergency performance mode for mobile
 let emergencyPerformanceMode = false;
@@ -1928,6 +2245,7 @@ function createBrushedSteelTexture() {
   }
   ctx.putImageData(img, 0, 0);
   const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(0.6, 6);
@@ -2021,6 +2339,7 @@ class TruckDust {
           float a = smoothstep(0.5, 0.05, d) * vAlpha;
           if (a < 0.004) discard;
           gl_FragColor = vec4(uColor, a);
+          ${glslDisplayOut()}
         }
       `,
       transparent: true,
@@ -2153,7 +2472,7 @@ class CybertruckFleet {
     // and go.
     this.headlight = null;
     if (!perf.isMobile) {
-      this.headlight = new THREE.SpotLight(0xf2f6ff, 0, 70, Math.PI * 0.2, 0.55, 1.2);
+      this.headlight = new THREE.SpotLight(0xf2f6ff, 0, 70, Math.PI * 0.2, 0.55, 2);
       this.headlight.castShadow = false;
       scene.add(this.headlight);
       scene.add(this.headlight.target);
@@ -2478,7 +2797,7 @@ class CybertruckFleet {
       best.position.z + fz * 28
     );
     this.headlight.target.updateMatrixWorld();
-    this.headlight.intensity = 2.6 * night;
+    this.headlight.intensity = lampIntensity(2.6, 70, 14) * night;
   }
 
   _updateDust(dt, dayAmount) {
@@ -2750,6 +3069,7 @@ function createPlumeMaterial() {
         float a = pow(facing, 1.5) * pow(1.0 - vT, 1.7) * uThrottle;
         vec3 col = mix(uCore, uOuter, smoothstep(0.03, 0.5, vT));
         gl_FragColor = vec4(col, a);
+        ${glslDisplayOut(4.0)}
       }
     `,
     transparent: true,
@@ -2782,6 +3102,7 @@ function createPlasmaMaterial() {
         float facing = abs(dot(normalize(vN), normalize(vV)));
         float a = uHeat * (0.25 + 0.75 * pow(1.0 - facing, 1.4));
         gl_FragColor = vec4(1.0, 0.45 + 0.2 * facing, 0.22, a);
+        ${glslDisplayOut(3.0)}
       }
     `,
     transparent: true,
@@ -2860,6 +3181,7 @@ class StarshipSpaceport {
     fctx.fillStyle = grad;
     fctx.fillRect(0, 0, 64, 64);
     const flareTex = new THREE.CanvasTexture(flareCanvas);
+    flareTex.colorSpace = THREE.SRGBColorSpace;
 
     const plumeGeom = new THREE.CylinderGeometry(1, 1, 1, 28, 12, true);
     plumeGeom.translate(0, -0.5, 0);
@@ -2922,7 +3244,7 @@ class StarshipSpaceport {
     }
 
     // One shared engine light (a fixed light count avoids shader recompiles)
-    this.engineLight = new THREE.PointLight(0xffc48a, 0, 900, 1.2);
+    this.engineLight = new THREE.PointLight(0xffc48a, 0, 900, 0);
     scene.add(this.engineLight);
 
     this.dust = new TruckDust(scene, this.isMobile ? 500 : 1600,
@@ -3180,7 +3502,7 @@ class StarshipSpaceport {
       const s = lightShip;
       this._down.set(0, -1, 0).applyQuaternion(s.group.quaternion);
       this.engineLight.position.copy(s.pos).addScaledVector(this._down, 12);
-      this.engineLight.intensity = 5 * s.throttle * (1 - 0.6 * dayAmount);
+      this.engineLight.intensity = 5 * LEGACY_LIGHT_SCALE * s.throttle * (1 - 0.6 * dayAmount);
     } else {
       this.engineLight.intensity = 0;
     }
@@ -3263,8 +3585,8 @@ class MarsSceneManager {
 
     // Procedural settlement spawning system
     this.settlementGrid = 400;          // Grid spacing — one potential site every 400 units
-    this.settlementSpawnDist = 800;     // Distance at which a settlement spawns
-    this.settlementDespawnDist = 1500;  // Distance at which a settlement is removed
+    this.settlementSpawnDist = 1300;    // Built well ahead, out in the haze, so none pop in close
+    this.settlementDespawnDist = 1900;  // Distance at which a settlement is removed
     this.settlements = new Map();       // key "gx,gz" → { group, center, type, collidableStart }
     this.lastSettlementCheck = 0;       // Throttle timestamp
     this.roads = new Map();             // key "from→to" → { group }
@@ -3778,7 +4100,7 @@ class MarsSceneManager {
       .forEach(c => this.registerCollidable({ x: c.x, z: c.z }, c.r));
 
     // Floodlights over the core (fades out in daylight)
-    const floodLight = new THREE.PointLight(0xffd2a0, 1.6, 420);
+    const floodLight = new THREE.PointLight(0xffd2a0, 1.6 * LEGACY_LIGHT_SCALE, 420, 0);
     floodLight.position.set(colonyOffsetX, groundY + 40, colonyOffsetZ);
     this.scene.add(floodLight);
     this.nightLights.push(floodLight);
@@ -4615,7 +4937,7 @@ class MarsSceneManager {
     // Flagship emissive glow is sufficient — SpotLights removed for performance
 
     // Single city-wide ambient glow (reduced intensity)
-    const cityLight = new THREE.PointLight(0x88aaff, 2.0, 1200);
+    const cityLight = new THREE.PointLight(0x88aaff, 2.0 * LEGACY_LIGHT_SCALE, 1200, 0);
     cityLight.position.set(center.x, center.y + 260, center.z);
     this.scene.add(cityLight);
     this.nightLights.push(cityLight);
@@ -4779,7 +5101,7 @@ class MarsSceneManager {
 
         let light = null;
         if (!perfSettings.isMobile) {
-          light = new THREE.PointLight(0x66ddff, 1.2, 120);
+          light = new THREE.PointLight(0x66ddff, lampIntensity(1.2, 120), 120);
           light.position.copy(head.position);
           group.add(light);
         }
@@ -4834,17 +5156,17 @@ class MarsSceneManager {
 
   // Check and spawn/despawn settlements near the player
   updateSettlements(playerPosition) {
+    // Settlements used to be built only while the rover stood still, so they
+    // appeared after you had already driven past. A settlement takes ~2-18 ms
+    // to build, so building at most one per check (nearest first) keeps
+    // driving smooth; checks come quicker while moving so boost can't outrun them.
     const now = performance.now();
-    if (now - this.lastSettlementCheck < 2000) return; // check every 2 seconds
+    const moving = typeof velocity === 'number' && Math.abs(velocity) > 0.012;
+    if (now - this.lastSettlementCheck < (moving ? 350 : 1000)) return;
     this.lastSettlementCheck = now;
 
     const perfSettings = getPerformanceSettings();
     if (perfSettings.isMobile) return;
-
-    const roverIsDriving =
-      (typeof velocity === 'number' && Math.abs(velocity) > 0.012) ||
-      (window.keys && (window.keys.w || window.keys.a || window.keys.s || window.keys.d));
-    if (roverIsDriving) return;
 
     const px = playerPosition.x;
     const pz = playerPosition.z;
@@ -4884,7 +5206,8 @@ class MarsSceneManager {
       }
     }
 
-    // Scan grid cells around the player — spawn new settlements
+    // Scan grid cells around the player; build the nearest missing settlement
+    let nearest = null;
     for (let gx = playerGX - scanRadius; gx <= playerGX + scanRadius; gx++) {
       for (let gz = playerGZ - scanRadius; gz <= playerGZ + scanRadius; gz++) {
         const key = `${gx},${gz}`;
@@ -4904,39 +5227,46 @@ class MarsSceneManager {
         // Distance check
         const dx = cx - px;
         const dz2 = cz - pz;
-        if (dx * dx + dz2 * dz2 > this.settlementSpawnDist * this.settlementSpawnDist) continue;
+        const distSq = dx * dx + dz2 * dz2;
+        if (distSq > this.settlementSpawnDist * this.settlementSpawnDist) continue;
         const minSpawnDist = 260;
-        if (dx * dx + dz2 * dz2 < minSpawnDist * minSpawnDist) continue;
+        if (distSq < minSpawnDist * minSpawnDist) continue;
         if (!this._isSettlementSiteClear(cx, cz)) continue;
-
-        // Determine settlement type from hash bits
-        const typeBits = (hash >>> 24) & 0xff;
-        let type;
-        if (typeBits < 100) type = 'outpost';       // ~39% — small
-        else if (typeBits < 200) type = 'base';      // ~39% — medium
-        else type = 'city';                           // ~22% — large
-
-        const groundY = this.getTerrainHeight(cx, cz);
-        const center = new THREE.Vector3(cx, groundY, cz);
-
-        console.log(`🏗️ Spawning procedural ${type} at (${Math.round(cx)}, ${Math.round(cz)})`);
-
-        const collidableStart = this.collidables.length;
-        const group = this._buildSettlement(type, center, hash);
-        for (let i = collidableStart; i < this.collidables.length; i++) {
-          this.collidables[i].dynamic = true;
-        }
-        const collidableCount = this.collidables.length - collidableStart;
-
-        this.scene.add(group);
-        this.settlements.set(key, {
-          group,
-          center,
-          type,
-          collidableStart,
-          collidableCount
-        });
+        if (!nearest || distSq < nearest.distSq) nearest = { key, hash, cx, cz, distSq };
       }
+    }
+
+    if (nearest) {
+      const { key, hash, cx, cz } = nearest;
+      // Determine settlement type from hash bits
+      const typeBits = (hash >>> 24) & 0xff;
+      let type;
+      if (typeBits < 100) type = 'outpost';       // ~39% — small
+      else if (typeBits < 200) type = 'base';      // ~39% — medium
+      else type = 'city';                           // ~22% — large
+
+      const groundY = this.getTerrainHeight(cx, cz);
+      const center = new THREE.Vector3(cx, groundY, cz);
+
+      console.log(`🏗️ Spawning procedural ${type} at (${Math.round(cx)}, ${Math.round(cz)})`);
+
+      const collidableStart = this.collidables.length;
+      const group = this._buildSettlement(type, center, hash);
+      for (let i = collidableStart; i < this.collidables.length; i++) {
+        this.collidables[i].dynamic = true;
+      }
+      const collidableCount = this.collidables.length - collidableStart;
+
+      // Ease in rather than pop (it may still be inside the haze)
+      this.prepareSettlementFadeIn(group, performance.now());
+      this.scene.add(group);
+      this.settlements.set(key, {
+        group,
+        center,
+        type,
+        collidableStart,
+        collidableCount
+      });
     }
 
     // Build roads between nearby settlements
@@ -5967,8 +6297,8 @@ class MarsSceneManager {
       if (wp.group) {
         wp.group.traverse(obj => {
           if (obj.isPointLight) {
-            obj.intensity = 0.4;
-            obj.userData.baseIntensity = 0.4; // keep the dimmed level while blinking
+            obj.intensity = lampIntensity(0.4, obj.distance || 120);
+            obj.userData.baseIntensity = obj.intensity; // keep the dimmed level while blinking
           }
         });
       }
@@ -6263,7 +6593,7 @@ class MarsSceneManager {
         frontStrip.position.set(0, 2.4, -carLength / 2 - 1.6);
         car.add(frontStrip);
 
-        const headLight = new THREE.PointLight(0xffffff, 1.7, 140);
+        const headLight = new THREE.PointLight(0xffffff, lampIntensity(1.7, 140), 140);
         headLight.position.set(0, 2.4, -carLength / 2 - 1.9);
         car.add(headLight);
       }
@@ -6471,27 +6801,25 @@ function createMarsEnvironment() {
           gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
         }
       `,
-      // Same palette as the visible sky shader, plus a lit regolith ground
-      // and a soft sun halo so metals pick up a warm glint.
+      // The visible sky model above the horizon; below it, sunlit regolith
+      // bouncing a warm glow back up (colony floodlights keep a little at night)
       fragmentShader: `
         uniform float uDay;
         uniform vec3 uSunDir;
         uniform vec3 uSunColor;
         varying vec3 vDir;
+        ${MARS_SKY_GLSL}
         void main() {
           vec3 dir = normalize(vDir);
-          float e = dir.y;
-          // Dusty butterscotch overhead: suspended iron-oxide dust scatters
-          // red light, so Mars' daytime sky is not Earth-blue
-          vec3 zenith  = mix(vec3(0.010, 0.013, 0.026), vec3(0.40, 0.35, 0.31), uDay);
-          // At night the ground near the colony is floodlit, so steel still
-          // picks up a warm glow from below instead of turning pitch black
-          vec3 horizon = mix(vec3(0.050, 0.026, 0.018), vec3(0.86, 0.44, 0.25), uDay);
-          vec3 ground  = mix(vec3(0.090, 0.036, 0.018), vec3(0.36, 0.17, 0.09), uDay);
-          vec3 col = e > 0.0 ? mix(horizon, zenith, smoothstep(0.0, 0.6, e))
-                             : mix(horizon * 0.7, ground, smoothstep(0.0, 0.25, -e));
-          float s = max(dot(dir, normalize(uSunDir)), 0.0);
-          col += uSunColor * (pow(s, 24.0) * 1.5 + pow(s, 4.0) * 0.25) * uDay;
+          vec3 horizon = marsSkyRadiance(normalize(vec3(dir.x, 0.0, dir.z)), uSunDir);
+          vec3 col;
+          if (dir.y >= 0.0) {
+            col = marsSkyRadiance(dir, uSunDir);
+          } else {
+            vec3 ground = vec3(0.34, 0.15, 0.08) * (0.05 + 0.95 * uDay) * max(uSunDir.y, 0.05) * 1.6
+                        + vec3(0.03, 0.014, 0.008);
+            col = mix(horizon, ground, smoothstep(0.0, 0.2, -dir.y));
+          }
           gl_FragColor = vec4(col, 1.0);
         }
       `
@@ -6526,22 +6854,28 @@ const marsEnvironment = createMarsEnvironment();
 
 // Scratch colours/vectors for the day-night cycle (no per-frame allocations)
 const _dnc = {
-  nightFog: new THREE.Color(0x1a0703),
-  dayFog: new THREE.Color(0xd06f3c),
-  duskFog: new THREE.Color(0xff8a45),
+  // Mobile distance fog: matches the sky model's horizon colour
+  nightFog: new THREE.Color(0x030202),
+  dayFog: new THREE.Color(0xe69461),
+  duskFog: new THREE.Color(0x8a4a38),
   fog: new THREE.Color(),
   sunColor: new THREE.Color(),
   nightBg: new THREE.Color(0x020308),
   dayBg: new THREE.Color(0x87b8d8),
-  sunNight: new THREE.Color(0x7d3c26),
-  sunDay: new THREE.Color(0xffc06a),
+  // Sunlight reaches the surface warm-white; a low sun is reddened by the
+  // long path through the dust. At night this light is faint sky glow.
+  sunNight: new THREE.Color(0x5a3a30),
+  sunDusk: new THREE.Color(0xff9a5c),
+  sunDay: new THREE.Color(0xffe8cc),
   ambNight: new THREE.Color(0x3a2118),
   ambDay: new THREE.Color(0xffd4a0),
+  // Mars skylight is butterscotch, not blue: shadows fill in warm brown
   hemiSkyNight: new THREE.Color(0x28304a),
-  hemiSkyDay: new THREE.Color(0x8fb8ff),
+  hemiSkyDay: new THREE.Color(0xd8a476),
   hemiGroundNight: new THREE.Color(0x2a1008),
   hemiGroundDay: new THREE.Color(0xa64724),
   sunDir: new THREE.Vector3(),
+  lightDir: new THREE.Vector3(),
   right: new THREE.Vector3(),
   up: new THREE.Vector3(),
   center: new THREE.Vector3(),
@@ -6560,14 +6894,30 @@ function updateDayNightCycle(time) {
   window.dayNightBlend = dayAmount;
   isDaytime = dayAmount > 0.08;
 
-  const renderDistance = Number(perfSettings.renderDistance) || 5000;
-  const fogColor = _dnc.fog.copy(_dnc.nightFog).lerp(_dnc.dayFog, dayAmount).lerp(_dnc.duskFog, duskWarmth * 0.16);
-  if (!scene.fog) {
-    scene.fog = new THREE.Fog(fogColor, 900, renderDistance);
+  // True sun path: rises in the east, peaks ~62 degrees up, sets in the west
+  // and genuinely dips below the horizon at night (the sky, haze and IBL use it)
+  const sunAzimuth = sunAngle - Math.PI / 2;
+  const sunAltitude = sunElevation * 1.08;
+  const trueSun = marsAtmosphere.sunDir.set(
+    Math.cos(sunAzimuth) * Math.cos(sunAltitude),
+    Math.sin(sunAltitude),
+    Math.sin(sunAzimuth) * Math.cos(sunAltitude)
+  );
+  marsAtmosphere.dayAmount = dayAmount;
+
+  // Desktop: the atmosphere post-pass replaces distance fog entirely
+  if (postProcessing) {
+    scene.fog = null;
   } else {
-    scene.fog.color.copy(fogColor);
-    scene.fog.near = 700 - dayAmount * 360;
-    scene.fog.far = renderDistance * (0.72 + dayAmount * 0.32);
+    const renderDistance = Number(perfSettings.renderDistance) || 5000;
+    const fogColor = _dnc.fog.copy(_dnc.nightFog).lerp(_dnc.dayFog, dayAmount).lerp(_dnc.duskFog, duskWarmth * 0.3);
+    if (!scene.fog) {
+      scene.fog = new THREE.Fog(fogColor, 900, renderDistance);
+    } else {
+      scene.fog.color.copy(fogColor);
+      scene.fog.near = 700 - dayAmount * 360;
+      scene.fog.far = renderDistance * (0.72 + dayAmount * 0.32);
+    }
   }
   if (scene.background && scene.background.isColor) {
     scene.background.copy(_dnc.nightBg).lerp(_dnc.dayBg, dayAmount);
@@ -6578,16 +6928,20 @@ function updateDayNightCycle(time) {
   const daySunIntensity = perfSettings.isMobile ? 1.4 : 1.7;
   const nightSunIntensity = perfSettings.isMobile ? 0.06 : 0.1;
   const targetSunIntensity = nightSunIntensity + dayAmount * (daySunIntensity - nightSunIntensity);
-  const sunColorObj = _lerpColorHex(_dnc.sunNight, _dnc.sunDay, Math.min(1, dayAmount + duskWarmth * 0.25), _dnc.sunColor);
+  const sunColorObj = _dnc.sunColor.copy(_dnc.sunNight)
+    .lerp(_dnc.sunDusk, Math.min(1, dayAmount * 2.2))
+    .lerp(_dnc.sunDay, _smoothstep(0.12, 0.45, trueSun.y));
 
-  const sunDir = _dnc.sunDir.set(
-    Math.cos(sunAngle - Math.PI / 2) * 260,
-    90 + dayAmount * 420,
-    Math.sin(sunAngle - Math.PI / 2) * 260
-  ).normalize();
+  // The light follows the sun but never drops below ~12 degrees, which keeps
+  // shadows a sane length; after sunset it is only faint sky glow anyway
+  const sunDir = _dnc.lightDir.copy(trueSun);
+  if (sunDir.y < 0.21) {
+    const horiz = Math.hypot(sunDir.x, sunDir.z) || 1;
+    sunDir.set(sunDir.x / horiz * 0.978, 0.21, sunDir.z / horiz * 0.978);
+  }
 
   if (sunLight) {
-    sunLight.intensity = targetSunIntensity;
+    sunLight.intensity = targetSunIntensity * LEGACY_LIGHT_SCALE;
     sunLight.color.copy(sunColorObj);
 
     // Keep the shadow frustum centred on the rover so shadows exist wherever
@@ -6610,35 +6964,30 @@ function updateDayNightCycle(time) {
   }
 
   if (marsEnvironment) {
-    marsEnvironment.update(dayAmount, sunDir, sunColorObj);
+    marsEnvironment.update(dayAmount, trueSun, sunColorObj);
   }
 
   // Desktop PBR materials also receive sky light from the environment map,
   // so the flat ambient/hemisphere terms stay low in daylight there
-  ambientLight.intensity = (perfSettings.samsungOptimized ? 0.18 : 0.12) + dayAmount * (perfSettings.isMobile ? 0.46 : 0.12);
+  ambientLight.intensity = LEGACY_LIGHT_SCALE * ((perfSettings.isMobile ? 0.12 : 0.12) + dayAmount * (perfSettings.isMobile ? 0.46 : 0.16));
   _lerpColorHex(_dnc.ambNight, _dnc.ambDay, dayAmount, ambientLight.color);
-  hemisphereLight.intensity = (perfSettings.isMobile ? 0.12 : 0.16) + dayAmount * (perfSettings.isMobile ? 0.34 : 0.22);
+  hemisphereLight.intensity = LEGACY_LIGHT_SCALE * ((perfSettings.isMobile ? 0.12 : 0.16) + dayAmount * (perfSettings.isMobile ? 0.34 : 0.28));
 
   // Eye adaptation: open up at night, stop down in full daylight (the noon
   // scene used to clip the regolith to pale peach)
-  if (!perfSettings.isMobile) {
-    renderer.toneMappingExposure = 1.2 - 0.5 * dayAmount;
-  }
+  renderer.toneMappingExposure = (perfSettings.isMobile ? 1.25 : 1.75) - (perfSettings.isMobile ? 0.25 : 0.55) * dayAmount;
   _lerpColorHex(_dnc.hemiSkyNight, _dnc.hemiSkyDay, dayAmount, hemisphereLight.color);
   _lerpColorHex(_dnc.hemiGroundNight, _dnc.hemiGroundDay, dayAmount, hemisphereLight.groundColor);
 
-  if (sunSphere && sunSphere.material) {
-    sunSphere.visible = dayAmount > 0.015;
-    sunSphere.material.opacity = dayAmount * 0.78;
-    sunSphere.position.set(
-      Math.cos(sunAngle - Math.PI / 2) * 950,
-      160 + dayAmount * 760,
-      Math.sin(sunAngle - Math.PI / 2) * 950
-    );
-  }
-
   if (spaceSkybox) {
     spaceSkybox.visible = true;
+  }
+
+  // Rover lamps come on as the light fails, and are off in full daylight
+  if (typeof rover !== 'undefined' && rover && rover.userData.lamps) {
+    const night = 1 - _smoothstep(0.2, 0.65, dayAmount);
+    for (const light of rover.userData.lamps.lights) light.intensity = light.userData.nightIntensity * night;
+    rover.userData.lamps.material.color.setHex(0xfff6e0).multiplyScalar(0.2 + 0.8 * night);
   }
 }
 
@@ -6667,14 +7016,11 @@ function animate(time) {
     return;
   }
   
-  // Prevent multiple animation loops
-  if (window.gameAnimationId && window.gameAnimationId !== animationId) {
-    console.warn('Multiple animation loops detected, canceling previous');
-    cancelAnimationFrame(window.gameAnimationId);
-  }
-  
-  window.gameAnimationId = requestAnimationFrame(animate);
-  animationId = window.gameAnimationId;
+  // A second call for a frame that already ran (same timestamp) must not
+  // step the simulation again
+  if (lastTime && time <= lastTime) return;
+
+  scheduleAnimationFrame();
   
   // Emergency performance monitoring for mobile
   const currentPerfSettings = getPerformanceSettings();
@@ -6720,7 +7066,7 @@ function animate(time) {
   }
 
   // Calculate delta time for consistent movement regardless of frame rate
-  const delta = time - lastTime || 16.67; // Default to 60fps if lastTime is not set
+  const delta = lastTime ? time - lastTime : 16.67; // Default to 60fps on the first frame
   lastTime = time;
 
   // Skip frames if browser tab is inactive or delta is too large (indicating lag)
@@ -6819,8 +7165,17 @@ function animate(time) {
 
   // Smooth acceleration/deceleration physics
   if (keys.w) {
-    const accel = velocity < 0 ? DECELERATION : ACCELERATION;
-    velocity = Math.min(velocity + accel * controlFrameScale, MAX_SPEED);
+    const boosting = !!keys[' '];
+    const topSpeed = boosting ? BOOST_SPEED : MAX_SPEED;
+    if (velocity < 0) {
+      velocity = Math.min(velocity + DECELERATION * controlFrameScale, 0);
+    } else if (velocity < topSpeed) {
+      const accel = boosting ? BOOST_ACCELERATION : ACCELERATION;
+      velocity = Math.min(velocity + accel * controlFrameScale, topSpeed);
+    } else {
+      // Space released at boost speed: ease back to cruising, don't snap
+      velocity = Math.max(velocity - BOOST_RELEASE_DECEL * controlFrameScale, topSpeed);
+    }
   } else if (keys.s) {
     const accel = velocity > 0 ? DECELERATION : ACCELERATION;
     velocity = Math.max(velocity - accel * controlFrameScale, -MAX_SPEED * REVERSE_SPEED_FACTOR);
@@ -6842,6 +7197,20 @@ function animate(time) {
 
     rover.position.x += moveX;
     rover.position.z += moveZ;
+
+    // Soft edge of the world: the terrain mesh ends here
+    const grid = marsSurface.geometry.userData.heightGrid;
+    const limit = grid.half - 60;
+    if (Math.abs(rover.position.x) > limit || Math.abs(rover.position.z) > limit) {
+      rover.position.x = THREE.MathUtils.clamp(rover.position.x, -limit, limit);
+      rover.position.z = THREE.MathUtils.clamp(rover.position.z, -limit, limit);
+      velocity *= 0.5;
+      if (typeof window.showGameToast === 'function' && !window._edgeToastShown) {
+        window._edgeToastShown = true;
+        window.showGameToast('Edge of the survey area');
+        setTimeout(() => { window._edgeToastShown = false; }, 4000);
+      }
+    }
 
     // Collision detection — revert if the rover hits a structure
     if (window.marsSceneManager &&
@@ -6887,7 +7256,9 @@ function animate(time) {
   }
 
   // Handle turning with smooth acceleration - turning radius scales with speed
-  const speedFactor = 1.0 - 0.4 * (Math.abs(velocity) / MAX_SPEED); // tighter steering at low speed, reduced at high speed
+  // Tighter steering at low speed, progressively gentler at cruise and boost
+  const speedRatio = Math.abs(velocity) / MAX_SPEED;
+  const speedFactor = 1.0 - 0.4 * Math.min(speedRatio, 1) - 0.3 * THREE.MathUtils.clamp((speedRatio - 1) / 3, 0, 1);
   if (keys.a || keys.d) {
     const turnDir = keys.a ? 1 : -1;
     rotationVelocity = Math.min(
@@ -6949,8 +7320,8 @@ function animate(time) {
     controls.update();
   }
 
-  // Render scene
-  renderer.render(scene, camera);
+  // Render scene (through the post-processing chain on desktop)
+  renderFrame(time);
 
   // Update distance traveled
   if (lastUpdateTime === 0) {
@@ -7291,89 +7662,115 @@ function updateRoadDebugVisuals() {
 
 function updateCamera(deltaMs) {
   const dt = Math.min((deltaMs || 16.67) / 1000, 0.05);
+  const now = performance.now();
 
   if (!window.cameraVectors) {
     window.cameraVectors = {
-      offset: new THREE.Vector3(),
       target: new THREE.Vector3(),
       head: new THREE.Vector3(),
-      forward: new THREE.Vector3(),
-      upAxis: new THREE.Vector3(0, 1, 0)
+      look: new THREE.Vector3(),
+      toRover: new THREE.Vector3(),
+      euler: new THREE.Euler(0, 0, 0, 'YXZ'),
+      quat: new THREE.Quaternion()
     };
   }
   const vectors = window.cameraVectors;
+  const rig = cameraRig;
+  const speed01 = Math.min(Math.abs(velocity) / MAX_SPEED, 1);
+  const boost01 = THREE.MathUtils.clamp((Math.abs(velocity) - MAX_SPEED) / (BOOST_SPEED - MAX_SPEED), 0, 1);
+  // A couple of seconds after the last drag, ease back to the default view
+  // (quicker while driving, so the road ahead comes back into view)
+  const recentre = !rig.dragging && now - rig.lastInput > 2500
+    ? 1 - Math.exp(-dt * (0.5 + 2.5 * speed01))
+    : 0;
+
+  let targetFov = rig.fov;
 
   switch (cameraMode) {
     case 'thirdPerson': {
-      // Fixed close chase distance; the spring-damper below keeps motion smooth.
-      vectors.offset.copy(perfSettings.isMobile ? mobileCameraOffset : cameraOffset);
-      vectors.offset.applyAxisAngle(vectors.upAxis, roverYaw);
+      rig.yaw = Math.atan2(Math.sin(rig.yaw), Math.cos(rig.yaw)); // keep in [-PI, PI]
+      rig.yaw += (0 - rig.yaw) * recentre;
+      rig.pitch += (rig.defaultPitch - rig.pitch) * recentre * 0.6;
 
+      // Behind the rover (it faces -Z), swung round by the orbit yaw
+      const heading = roverYaw + rig.yaw;
+      const distance = rig.distance + 3.0 * boost01; // drop back a little at boost speed
+      const horizontal = distance * Math.cos(rig.pitch);
+      const pivotY = rover.position.y + 1.5;
       vectors.target.set(
-        rover.position.x + vectors.offset.x,
-        rover.position.y + vectors.offset.y,
-        rover.position.z + vectors.offset.z
+        rover.position.x + Math.sin(heading) * horizontal,
+        pivotY + distance * Math.sin(rig.pitch),
+        rover.position.z + Math.cos(heading) * horizontal
       );
 
       // Terrain occlusion: march the rover->camera sight line over the height
       // field and lift the camera so a hill behind the rover never blocks the view.
-      {
-        const eyeY = rover.position.y + 2;
-        for (let i = 1; i <= 6; i++) {
-          const t = i / 6;
-          const sx = rover.position.x + (vectors.target.x - rover.position.x) * t;
-          const sz = rover.position.z + (vectors.target.z - rover.position.z) * t;
-          const lineY = eyeY + (vectors.target.y - eyeY) * t;
-          const clearY = sampleTerrainHeight(sx, sz, rover.position.y) + 1.5;
-          if (lineY < clearY) vectors.target.y += (clearY - lineY) / t;
-        }
+      for (let i = 1; i <= 6; i++) {
+        const t = i / 6;
+        const sx = rover.position.x + (vectors.target.x - rover.position.x) * t;
+        const sz = rover.position.z + (vectors.target.z - rover.position.z) * t;
+        const lineY = pivotY + (vectors.target.y - pivotY) * t;
+        const clearY = sampleTerrainHeight(sx, sz, rover.position.y) + 1.0;
+        if (lineY < clearY) vectors.target.y += (clearY - lineY) / t;
       }
 
-      // Spring-damper follow: stiffness pulls toward target, damping kills oscillation
-      const stiffness = 10.0;
-      const damping = 7.0;
+      // Spring-damper follow: a touch of lag sells the rover's weight, but a
+      // drag should feel direct, so stiffen the spring while looking around
+      const stiffness = rig.dragging ? 40.0 : 11.0;
+      const damping = rig.dragging ? 12.0 : 7.0;
       const displacement = vectors.head.subVectors(vectors.target, camera.position);
       cameraSpring.velocity.addScaledVector(displacement, stiffness * dt);
       cameraSpring.velocity.multiplyScalar(Math.max(0, 1 - damping * dt));
       camera.position.addScaledVector(cameraSpring.velocity, dt);
 
-      // Keep the camera above the terrain so it never clips through hills behind the rover
-      {
-        const groundY = getGroundHeight(camera.position.x, camera.position.z, rover.position.y);
-        const minCamY = groundY + 3.0; // clearance above the surface
-        if (camera.position.y < minCamY) camera.position.y = minCamY;
-      }
+      const groundY = getGroundHeight(camera.position.x, camera.position.z, rover.position.y);
+      if (camera.position.y < groundY + 1.2) camera.position.y = groundY + 1.2;
 
-      // Look slightly ahead of the rover (in its facing direction) for a dynamic feel
-      vectors.forward.set(0, 0, -1).applyAxisAngle(vectors.upAxis, roverYaw);
-      const lookAhead = perfSettings.isMobile ? 2.0 : 5.0;
-      const lookHeight = perfSettings.isMobile ? 1.4 : 2.0;
-      camera.lookAt(
-        rover.position.x + vectors.forward.x * lookAhead,
-        rover.position.y + lookHeight,
-        rover.position.z + vectors.forward.z * lookAhead
+      // Look past the rover toward the horizon rather than down at it
+      vectors.toRover.set(rover.position.x - camera.position.x, 0, rover.position.z - camera.position.z);
+      if (vectors.toRover.lengthSq() > 1e-6) vectors.toRover.normalize();
+      const lookAhead = 3.0 + 4.0 * speed01;
+      vectors.look.set(
+        rover.position.x + vectors.toRover.x * lookAhead,
+        pivotY + 0.2,
+        rover.position.z + vectors.toRover.z * lookAhead
       );
+      // A faint high-frequency judder at speed, like a camera on a chase car
+      if (speed01 > 0.05) {
+        const t = now * 0.001;
+        vectors.look.y += (Math.sin(t * 21.0) * 0.6 + Math.sin(t * 34.0) * 0.4) * 0.012 * speed01;
+      }
+      camera.lookAt(vectors.look);
+      targetFov = rig.fov + 8 * speed01 + 12 * boost01;
       break;
     }
 
     case 'firstPerson': {
-      vectors.head.set(rover.position.x, rover.position.y + 2.5, rover.position.z);
-      vectors.forward.set(0, 0, -1).applyAxisAngle(vectors.upAxis, roverYaw);
-      camera.position.copy(vectors.head);
-      camera.lookAt(
-        vectors.head.x + vectors.forward.x * 10,
-        vectors.head.y,
-        vectors.head.z + vectors.forward.z * 10
-      );
+      rig.lookYaw += (0 - rig.lookYaw) * recentre;
+      rig.lookPitch += (-0.08 - rig.lookPitch) * recentre;
+      // Ride on the mast: the view pitches and rolls with the rover
+      rover.updateMatrixWorld();
+      camera.position.copy(FIRST_PERSON_MOUNT).applyMatrix4(rover.matrixWorld);
+      vectors.euler.set(rig.lookPitch, rig.lookYaw, 0);
+      camera.quaternion.copy(rover.quaternion).multiply(vectors.quat.setFromEuler(vectors.euler));
+      targetFov = rig.firstPersonFov + 6 * speed01 + 10 * boost01;
       break;
     }
 
     case 'orbit':
+      targetFov = rig.fov;
       break;
+  }
+
+  // Ease the field of view (it widens a little with speed)
+  if (Math.abs(targetFov - rig.currentFov) > 0.01) {
+    rig.currentFov += (targetFov - rig.currentFov) * (1 - Math.exp(-dt * 4));
+    camera.fov = rig.currentFov;
+    camera.updateProjectionMatrix();
   }
 }
 
-animate(0);
+scheduleAnimationFrame();
 // Add a simple HUD to show camera mode
 
 
@@ -7385,6 +7782,7 @@ const resizeHandler = () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  if (postProcessing) postProcessing.setSize();
 };
 
 window.gameEventListeners.add(window, 'resize', resizeHandler);
@@ -7416,6 +7814,209 @@ function _terrainFbm(x, y, octaves) {
     amp *= 0.5;
   }
   return val / norm; // normalised [0,1]
+}
+
+// ============================================================
+// REGOLITH TERRAIN MATERIAL (desktop)
+// ============================================================
+// The terrain mesh is ~20 m per vertex, so all close-range detail comes from
+// the shader: world-space texture layers at several scales (rotated against
+// each other so nothing visibly tiles), dark basaltic sand sheets, layered
+// rock on slopes and pebbly grit near the camera.
+
+// Periodic value noise / fBm / Worley on a P x P lattice, so textures tile
+function _periodicHash(x, y, P, seed) {
+  x = ((x % P) + P) % P;
+  y = ((y % P) + P) % P;
+  const h = Math.sin(x * 127.1 + y * 311.7 + seed * 74.7) * 43758.5453;
+  return h - Math.floor(h);
+}
+function _periodicNoise(x, y, P, seed) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = _periodicHash(xi, yi, P, seed), b = _periodicHash(xi + 1, yi, P, seed);
+  const c = _periodicHash(xi, yi + 1, P, seed), d = _periodicHash(xi + 1, yi + 1, P, seed);
+  return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
+}
+function _periodicFbm(x, y, P, octaves, seed) {
+  let val = 0, amp = 0.5, norm = 0;
+  for (let o = 0; o < octaves; o++) {
+    val += amp * _periodicNoise(x, y, P, seed + o * 13);
+    norm += amp;
+    x *= 2; y *= 2; P *= 2;
+    amp *= 0.5;
+  }
+  return val / norm;
+}
+// Distance to the nearest jittered cell point (0 at a pebble centre)
+function _periodicWorley(x, y, P, seed) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  let best = 9;
+  for (let j = -1; j <= 1; j++) {
+    for (let i = -1; i <= 1; i++) {
+      const cx = xi + i, cy = yi + j;
+      const px = cx + _periodicHash(cx, cy, P, seed);
+      const py = cy + _periodicHash(cx, cy, P, seed + 1.7);
+      const d = Math.hypot(px - x, py - y);
+      if (d < best) best = d;
+    }
+  }
+  return best;
+}
+
+// RGBA detail: R broad fBm, G pebble mask, B fine grit, A second broad fBm
+function createRegolithDetailTexture() {
+  const size = 512;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = x / size, v = y / size;
+      const broad = _periodicFbm(u * 4, v * 4, 4, 5, 1);
+      const pebble = Math.max(0, 1 - _periodicWorley(u * 24, v * 24, 24, 3) * 1.9);
+      const grit = _periodicFbm(u * 64, v * 64, 64, 2, 7);
+      const broad2 = _periodicFbm(u * 3 + 0.5, v * 3 + 0.5, 3, 5, 11);
+      const i = (y * size + x) * 4;
+      data[i] = broad * 255;
+      data[i + 1] = Math.min(1, pebble * (0.6 + 0.8 * _periodicHash(Math.floor(u * 24), Math.floor(v * 24), 24, 5))) * 255;
+      data[i + 2] = grit * 255;
+      data[i + 3] = broad2 * 255;
+    }
+  }
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  tex.needsUpdate = true;
+  return tex;
+}
+
+// Tangent-space normals of a rocky height field: fBm undulation plus rounded
+// pebbles (Worley bumps) and fine grit
+function createRegolithNormalTexture() {
+  const size = 512;
+  const H = new Float32Array(size * size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const u = x / size, v = y / size;
+      const undulation = _periodicFbm(u * 6, v * 6, 6, 5, 21);
+      const stones = Math.pow(Math.max(0, 1 - _periodicWorley(u * 18, v * 18, 18, 23) * 2.2), 1.5);
+      const grit = _periodicFbm(u * 96, v * 96, 96, 2, 29);
+      H[y * size + x] = undulation * 0.9 + stones * 0.55 + grit * 0.12;
+    }
+  }
+  const at = (x, y) => H[(((y % size) + size) % size) * size + (((x % size) + size) % size)];
+  const data = new Uint8Array(size * size * 4);
+  const strength = 6.0;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      let nx = (at(x - 1, y) - at(x + 1, y)) * strength;
+      let ny = (at(x, y - 1) - at(x, y + 1)) * strength;
+      const len = Math.hypot(nx, ny, 1);
+      const i = (y * size + x) * 4;
+      data[i] = (nx / len * 0.5 + 0.5) * 255;
+      data[i + 1] = (ny / len * 0.5 + 0.5) * 255;
+      data[i + 2] = (1 / len * 0.5 + 0.5) * 255;
+      data[i + 3] = 255;
+    }
+  }
+  const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  tex.needsUpdate = true;
+  return tex;
+}
+
+function createRegolithMaterial() {
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff, // vertex colours carry the elevation tint
+    vertexColors: true,
+    roughness: 0.96,
+    metalness: 0.0,
+    envMapIntensity: 0.55,
+    side: THREE.FrontSide
+  });
+  const detail = createRegolithDetailTexture();
+  const normals = createRegolithNormalTexture();
+
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.tRegolith = { value: detail };
+    shader.uniforms.tRegolithNormal = { value: normals };
+
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vTerrainWorld;
+        varying vec3 vTerrainNormal;`)
+      .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
+        vTerrainWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        vTerrainNormal = normalize(mat3(modelMatrix) * objectNormal);`);
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform sampler2D tRegolith;
+        uniform sampler2D tRegolithNormal;
+        varying vec3 vTerrainWorld;
+        varying vec3 vTerrainNormal;
+        float terrainRock;
+        float terrainNear;
+        vec2 rot2(vec2 p, float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c) * p; }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        {
+          vec2 wp = vTerrainWorld.xz;
+          float dist = length(vTerrainWorld - cameraPosition);
+          vec4 dMacro = texture2D(tRegolith, rot2(wp, 0.3) / 900.0);
+          vec4 dA = texture2D(tRegolith, wp / 140.0);
+          vec4 dB = texture2D(tRegolith, rot2(wp, 1.1) / 31.0);
+          vec4 dC = texture2D(tRegolith, rot2(wp, 2.3) / 6.5);
+          float slope = 1.0 - clamp(normalize(vTerrainNormal).y, 0.0, 1.0);
+          terrainNear = 1.0 - smoothstep(35.0, 110.0, dist);
+
+          vec3 albedo = diffuseColor.rgb;
+          // Bright dust vs darker, coarser plains at the kilometre scale
+          albedo *= mix(0.74, 1.14, smoothstep(0.32, 0.68, dMacro.r * 0.55 + dA.r * 0.45));
+          // Wind-swept sheets of dark basaltic sand
+          float darkSand = smoothstep(0.56, 0.72, dMacro.a * 0.6 + dA.a * 0.4);
+          albedo = mix(albedo, vec3(0.19, 0.105, 0.075), darkSand * 0.55);
+          // Mottling at the tens-of-metres scale
+          albedo *= 0.86 + 0.28 * dB.r;
+
+          // Slopes break out into layered sedimentary rock
+          terrainRock = smoothstep(0.07, 0.2, slope + (dB.a - 0.5) * 0.12);
+          float strata = 0.5 + 0.5 * sin(vTerrainWorld.y * 1.9 + dA.r * 7.0);
+          vec3 rockCol = vec3(0.40, 0.21, 0.12) * (0.72 + 0.4 * strata);
+          albedo = mix(albedo, rockCol, terrainRock);
+
+          // Near-field grit and scattered dark pebbles (faded out before they could shimmer)
+          albedo *= mix(1.0, 0.95 + 0.1 * dC.b, terrainNear);
+          // Pebbles gather in patches rather than dusting everything evenly
+          float pebbles = smoothstep(0.45, 0.85, dC.g) * smoothstep(0.45, 0.7, dB.a);
+          albedo = mix(albedo, albedo * vec3(0.62, 0.6, 0.63), pebbles * terrainNear * 0.35);
+          diffuseColor.rgb = albedo;
+        }`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = mix(roughnessFactor, 0.82, terrainRock);`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        {
+          vec2 wp = vTerrainWorld.xz;
+          vec3 n1 = texture2D(tRegolithNormal, rot2(wp, 0.7) / 47.0).xyz * 2.0 - 1.0;
+          vec3 n2 = texture2D(tRegolithNormal, wp / 9.0).xyz * 2.0 - 1.0;
+          vec3 n3 = texture2D(tRegolithNormal, rot2(wp, 1.9) / 2.3).xyz * 2.0 - 1.0;
+          // Whiteout blend of the three scales; rock gets extra relief
+          vec2 slopeXY = n1.xy * (0.55 + 0.9 * terrainRock) + n2.xy * 0.35 + n3.xy * 0.18 * terrainNear;
+          vec3 tn = normalize(vec3(slopeXY, n1.z * n2.z));
+          vec3 N = normalize(vTerrainNormal);
+          vec3 T = normalize(vec3(1.0, 0.0, 0.0) - N * N.x);
+          vec3 B = cross(N, T);
+          vec3 worldN = normalize(T * tn.x + B * tn.y + N * tn.z);
+          normal = normalize((viewMatrix * vec4(worldN, 0.0)).xyz);
+        }`);
+  };
+  return material;
 }
 
 function createRealisticMarsTerrain() {
@@ -7884,25 +8485,8 @@ function createRealisticMarsTerrain() {
       fog: true
     });
   } else {
-    // Desktop: Phong — per-fragment lighting so the normal map actually shows,
-    // but NOT physically based, so vertex colours don't get crushed under ACES
-    // tone mapping the way MeshStandardMaterial would. Low shininess + near-black
-    // specular keeps the regolith matte.
-    const normalMap = createMarsNormalMap();
-    normalMap.repeat.set(terrainSize / 45, terrainSize / 45); // tile the detail across the ground
-    if (renderer && renderer.capabilities) {
-      normalMap.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    }
-    material = new THREE.MeshPhongMaterial({
-      color: 0xffffff, // white base so vertex colours are the sole tint
-      vertexColors: true,
-      side: THREE.FrontSide,
-      fog: true,
-      shininess: 3,
-      specular: 0x0a0805,
-      normalMap: normalMap,
-      normalScale: new THREE.Vector2(0.55, 0.55)
-    });
+    // Desktop: physically based regolith with shader-side detail layers
+    material = createRegolithMaterial();
   }
 
   const terrain = new THREE.Mesh(geometry, material);
@@ -7964,76 +8548,6 @@ function createRealisticMarsTerrain() {
   return terrain;
 }
 
-// Create a SEAMLESSLY TILING rocky normal map for Mars terrain.
-// Builds a periodic fBm height field, then derives normals from it via central
-// differences so the map can repeat across the terrain without visible seams.
-function createMarsNormalMap() {
-  const size = 256; // small but tiles many times across the terrain
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext('2d');
-  const img = context.createImageData(size, size);
-  const data = img.data;
-
-  // Periodic value noise: wrapping the integer lattice modulo P makes it tile.
-  const phash = (x, y, P) => {
-    x = ((x % P) + P) % P;
-    y = ((y % P) + P) % P;
-    const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
-    return h - Math.floor(h);
-  };
-  const pnoise = (x, y, P) => {
-    const xi = Math.floor(x), yi = Math.floor(y);
-    const xf = x - xi, yf = y - yi;
-    const u = xf * xf * (3 - 2 * xf);
-    const v = yf * yf * (3 - 2 * yf);
-    const a = phash(xi, yi, P), b = phash(xi + 1, yi, P);
-    const c = phash(xi, yi + 1, P), d = phash(xi + 1, yi + 1, P);
-    return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
-  };
-
-  // Precompute the periodic height field once (cheap), then difference it.
-  const H = new Float32Array(size * size);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      let val = 0, amp = 0.5, norm = 0, P = 8;
-      for (let o = 0; o < 4; o++) {
-        val += amp * pnoise((x / size) * P, (y / size) * P, P);
-        norm += amp;
-        amp *= 0.5;
-        P *= 2;
-      }
-      H[y * size + x] = val / norm;
-    }
-  }
-  const at = (x, y) => H[(((y % size) + size) % size) * size + (((x % size) + size) % size)];
-
-  const strength = 2.2; // bump intensity
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const hL = at(x - 1, y), hR = at(x + 1, y);
-      const hD = at(x, y - 1), hU = at(x, y + 1);
-      let nx = (hL - hR) * strength;
-      let ny = (hD - hU) * strength;
-      let nz = 1.0;
-      const len = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1;
-      nx /= len; ny /= len; nz /= len;
-      const idx = (y * size + x) * 4;
-      data[idx]     = (nx * 0.5 + 0.5) * 255;
-      data[idx + 1] = (ny * 0.5 + 0.5) * 255;
-      data[idx + 2] = (nz * 0.5 + 0.5) * 255;
-      data[idx + 3] = 255;
-    }
-  }
-  context.putImageData(img, 0, 0);
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  return texture;
-}
-
 // Create a skybox with procedural shader sky, Milky Way, and planets
 function createSpaceSkybox() {
   console.log("Creating shader-based night sky...");
@@ -8049,7 +8563,8 @@ function createSpaceSkybox() {
   const skyboxMaterial = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0.0 },
-      uDayAmount: { value: 0.0 }
+      uDayAmount: { value: 0.0 },
+      uSunDir: { value: marsAtmosphere.sunDir }
     },
     vertexShader: `
       varying vec3 vWorldPos;
@@ -8061,7 +8576,9 @@ function createSpaceSkybox() {
     fragmentShader: `
       uniform float uTime;
       uniform float uDayAmount;
+      uniform vec3 uSunDir;
       varying vec3 vWorldPos;
+      ${MARS_SKY_GLSL}
 
       // --- Hash / noise helpers (GPU-friendly) ---
       float hash3(vec3 p) {
@@ -8098,24 +8615,15 @@ function createSpaceSkybox() {
         vec3 dir = normalize(vWorldPos);
         float elevation = dir.y; // -1 bottom, +1 top
 
-        // --- Sky gradient: interpolates from deep Mars night to dusty daylight ---
-        vec3 nightZenith  = vec3(0.010, 0.013, 0.026);
-        vec3 nightHorizon = vec3(0.028, 0.016, 0.013);
-        vec3 nightNadir   = vec3(0.0, 0.0, 0.0);
-        vec3 dayZenith    = vec3(0.30, 0.47, 0.62);
-        vec3 dayHorizon   = vec3(0.86, 0.44, 0.25);
-        vec3 dayNadir     = vec3(0.33, 0.17, 0.10);
-        vec3 zenith  = mix(nightZenith, dayZenith, uDayAmount);
-        vec3 horizon = mix(nightHorizon, dayHorizon, uDayAmount);
-        vec3 nadir   = mix(nightNadir, dayNadir, uDayAmount);
+        // Physically inspired Mars sky (shared with the haze and the IBL)
+        vec3 sky = marsSkyRadiance(dir, uSunDir);
 
-        float t = elevation * 0.5 + 0.5; // remap to 0..1
-        vec3 sky = mix(nadir, horizon, smoothstep(0.0, 0.45, t));
-        sky = mix(sky, zenith, smoothstep(0.45, 1.0, t));
-
-        // Very faint warm dust line tight to the horizon only
-        float horizonGlow = exp(-abs(elevation) * 16.0);
-        sky += vec3(0.045, 0.016, 0.009) * horizonGlow * 0.12;
+        // The sun: ~2/3 the size it looks from Earth, but drawn a little
+        // larger to read on screen. HDR-bright so bloom gives it real glare.
+        float sunCos = dot(dir, uSunDir);
+        float disk = smoothstep(0.99990, 0.99994, sunCos) * smoothstep(-0.01, 0.01, elevation);
+        vec3 sunTint = mix(vec3(1.0, 0.55, 0.30), vec3(1.0, 0.94, 0.86), smoothstep(0.0, 0.3, uSunDir.y));
+        sky += sunTint * disk * 60.0;
 
         // --- Milky Way band: subtle, high in the sky, and faded out toward the
         // horizon so it never reads as ground-level "smoke". ---
@@ -8144,7 +8652,7 @@ function createSpaceSkybox() {
           milky *= 1.0 - smoothstep(0.40, 0.62, dust) * 0.8;
 
           // Desaturated, dim so it's a hint of galaxy, not a glowing cloud
-          vec3 milkyColor = vec3(0.28, 0.32, 0.44);
+          vec3 milkyColor = vec3(0.16, 0.19, 0.28);
           sky += milkyColor * milky * 0.26 * (1.0 - uDayAmount);
         }
 
@@ -8152,6 +8660,8 @@ function createSpaceSkybox() {
         // so the sky shader only paints the gradient + faint Milky Way here.
 
         gl_FragColor = vec4(sky, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
       }
     `,
     side: THREE.BackSide,
@@ -8173,15 +8683,10 @@ function createSpaceSkybox() {
   skyboxGroup.add(shootingStarSystem.group);
   skyboxGroup.userData.shootingStars = shootingStarSystem;
 
-  // === LAYER 4: Distant asteroid silhouettes ===
-  const asteroidSystem = createAsteroidSkyLayer();
-  skyboxGroup.add(asteroidSystem.group);
-  skyboxGroup.userData.asteroids = asteroidSystem;
-
-  // === LAYER 5: Small distant planets ===
-  const planetSystem = createDistantPlanetLayer();
-  skyboxGroup.add(planetSystem.group);
-  skyboxGroup.userData.planets = planetSystem;
+  // === LAYER 4: Phobos and Deimos ===
+  const moonSystem = createMarsMoonsLayer();
+  skyboxGroup.add(moonSystem.group);
+  skyboxGroup.userData.moons = moonSystem;
 
   // Store update function for animation loop
   skyboxGroup.userData.update = function(time) {
@@ -8194,10 +8699,8 @@ function createSpaceSkybox() {
     if (starSystem && starSystem.update) starSystem.update(time);
     // Shooting stars
     if (shootingStarSystem && shootingStarSystem.update) shootingStarSystem.update(time);
-    // Distant asteroids
-    if (asteroidSystem && asteroidSystem.update) asteroidSystem.update(time);
-    // Small planets
-    if (planetSystem && planetSystem.update) planetSystem.update(time);
+    // Moons
+    moonSystem.update(time);
   };
 
   skyboxGroup.frustumCulled = false;
@@ -8235,9 +8738,15 @@ function createTwinklingStars() {
       x = horizontalRadius * Math.cos(theta + (Math.random() - 0.5) * 0.035);
       z = horizontalRadius * Math.sin(theta + (Math.random() - 0.5) * 0.035);
     } else {
-      // Distribute on sphere using fibonacci sphere for even distribution
-      const phi = Math.acos(1 - 2 * (i + 0.5) / starCount);
-      const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+      // Fibonacci spiral for even coverage of the visible sky: from the zenith
+      // down to just below the horizon (uniform in y = uniform in area).
+      // Numbering from 0 here matters: the spiral used to start at index
+      // milkyWayStarCount, so it began ~64 degrees down and left the top of
+      // the sky empty, and half of it was wasted under the ground.
+      const j = i - milkyWayStarCount;
+      const spiralCount = starCount - milkyWayStarCount;
+      const phi = Math.acos(1 - 1.14 * (j + 0.5) / spiralCount);
+      const theta = Math.PI * (1 + Math.sqrt(5)) * j;
       // Add small jitter so it doesn't look too uniform
       const jitterPhi = phi + (Math.random() - 0.5) * 0.02;
       const jitterTheta = theta + (Math.random() - 0.5) * 0.02;
@@ -8345,6 +8854,10 @@ function createTwinklingStars() {
       void main() {
         vec4 tex = texture2D(uTexture, gl_PointCoord);
         gl_FragColor = vec4(vColor, 1.0) * tex * (0.45 + vTwinkle) * uVisibility;
+        // Linear light already: brighten into HDR (the biggest stars bloom a touch)
+        gl_FragColor.rgb *= 2.4;
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
       }
     `,
     transparent: true,
@@ -8577,242 +9090,106 @@ function createTrailTexture() {
   ctx.fillRect(0, 0, 256, 16);
 
   const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
   return texture;
 }
 
-function createAsteroidSkyLayer() {
-  const perfSettings = getPerformanceSettings();
+function createMarsMoonsLayer() {
   const group = new THREE.Group();
-  const count = perfSettings.isMobile ? 8 : 22;
-  const radius = 4300;
-  const geometry = new THREE.DodecahedronGeometry(1, 0);
-  const material = new THREE.MeshBasicMaterial({
-    color: 0x8b6a58,
-    transparent: true,
-    opacity: 0.58,
-    depthWrite: false,
-    fog: false
-  });
-  const asteroids = [];
 
-  for (let i = 0; i < count; i++) {
-    const mesh = new THREE.Mesh(geometry, material.clone());
-    const theta = Math.random() * Math.PI * 2;
-    const phi = 0.18 + Math.random() * 0.72; // upper sky only
-    const distance = radius + Math.random() * 700;
-    const size = 8 + Math.random() * 22;
-
-    mesh.position.set(
-      distance * Math.sin(phi) * Math.cos(theta),
-      distance * Math.cos(phi),
-      distance * Math.sin(phi) * Math.sin(theta)
-    );
-    mesh.scale.set(
-      size * (0.75 + Math.random() * 0.8),
-      size * (0.5 + Math.random() * 0.7),
-      size * (0.8 + Math.random() * 1.1)
-    );
-    mesh.rotation.set(
-      Math.random() * Math.PI,
-      Math.random() * Math.PI,
-      Math.random() * Math.PI
-    );
-    mesh.material.color.setHSL(0.05 + Math.random() * 0.05, 0.25, 0.34 + Math.random() * 0.16);
-    mesh.material.opacity = 0.38 + Math.random() * 0.25;
-    mesh.frustumCulled = false;
-    group.add(mesh);
-    asteroids.push({
-      mesh,
-      spinX: 0.00003 + Math.random() * 0.00008,
-      spinY: 0.00004 + Math.random() * 0.00010
-    });
+  // Phobos: a dark (~7% albedo), lumpy 27 km moon that crosses the sky west
+  // to east, drawn a little larger than its real ~0.2 degrees so it reads
+  const phobosGeometry = new THREE.IcosahedronGeometry(1, 5);
+  {
+    const p = phobosGeometry.attributes.position;
+    const v = new THREE.Vector3();
+    for (let i = 0; i < p.count; i++) {
+      v.fromBufferAttribute(p, i).normalize();
+      const lump = 1 + 0.16 * Math.sin(v.x * 3.1 + 0.4) * Math.cos(v.y * 2.3) + 0.09 * Math.sin(v.z * 5.7 + v.x * 2.0);
+      v.multiplyScalar(lump);
+      p.setXYZ(i, v.x * 1.3, v.y * 0.95, v.z * 0.86);
+    }
+    phobosGeometry.computeVertexNormals();
   }
-
-  group.frustumCulled = false;
-
-  return {
-    group,
-    update(time) {
-      const t = time || 0;
-      group.rotation.y = t * 0.000006;
-      group.rotation.x = Math.sin(t * 0.00004) * 0.015;
-      for (const asteroid of asteroids) {
-        asteroid.mesh.rotation.x += asteroid.spinX;
-        asteroid.mesh.rotation.y += asteroid.spinY;
-      }
-    }
-  };
-}
-
-function createDistantPlanetLayer() {
-  const group = new THREE.Group();
-  const planetGeometry = new THREE.SphereGeometry(1, 48, 32);
-
-  // Shared world-space "sunlight" direction so every planet shows a consistent
-  // phase (terminator between lit day side and dark night side).
-  const lightDir = new THREE.Vector3(0.75, 0.32, 0.58).normalize();
-
-  const planets = [
-    {
-      position: new THREE.Vector3(-2850, 2100, -3400),
-      scale: 68,
-      colorA: new THREE.Color(0x9fb4e0), // pale blue
-      colorB: new THREE.Color(0x4a6bb0), // deep blue bands
-      opacity: 0.95,
-      drift: 0.000003
-    },
-    {
-      position: new THREE.Vector3(2500, 1750, -3900),
-      scale: 42,
-      colorA: new THREE.Color(0xe6c79a), // sandy gold
-      colorB: new THREE.Color(0xb07840), // ochre bands
-      opacity: 0.92,
-      drift: -0.000004
-    }
-  ];
-
-  // Per-planet shader: lit hemisphere with soft terminator, fBm surface bands,
-  // limb darkening, and a faint atmospheric rim on the lit edge.
-  const planetVertex = `
-    varying vec3 vN;
-    varying vec3 vLocal;
-    void main() {
-      vN = normalize(mat3(modelMatrix) * normal);
-      vLocal = normal; // unit sphere: local position == normal
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-    }
-  `;
-  const planetFragment = `
-    uniform float uTime;
-    uniform vec3 uLightDir;
-    uniform vec3 uViewDir;   // planet -> camera, world space
-    uniform vec3 uColorA;
-    uniform vec3 uColorB;
-    uniform float uOpacity;
-    varying vec3 vN;
-    varying vec3 vLocal;
-
-    float h3(vec3 p){ p = fract(p * vec3(443.897, 441.423, 437.195)); p += dot(p, p.yzx + 19.19); return fract((p.x + p.y + p.z) * p.x); }
-    float n3(vec3 p){
-      vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
-      return mix(mix(mix(h3(i), h3(i+vec3(1,0,0)), f.x), mix(h3(i+vec3(0,1,0)), h3(i+vec3(1,1,0)), f.x), f.y),
-                 mix(mix(h3(i+vec3(0,0,1)), h3(i+vec3(1,0,1)), f.x), mix(h3(i+vec3(0,1,1)), h3(i+vec3(1,1,1)), f.x), f.y), f.z);
-    }
-    float fb(vec3 p){ float v = 0.0, a = 0.5; for (int i = 0; i < 4; i++){ v += a * n3(p); p *= 2.05; a *= 0.5; } return v; }
-
-    void main() {
-      vec3 N = normalize(vN);
-
-      // Surface: latitudinal bands warped by fBm + mottling
-      float warp = fb(vLocal * 2.5) * 2.5;
-      float bands = sin(vLocal.y * 9.0 + warp) * 0.5 + 0.5;
-      float mottle = fb(vLocal * 3.5 + vec3(0.0, uTime * 0.00001, 0.0));
-      vec3 surf = mix(uColorA, uColorB, clamp(bands * 0.7 + mottle * 0.4, 0.0, 1.0));
-
-      // Phase / day-night terminator
-      float ndl = dot(N, normalize(uLightDir));
-      float lit = smoothstep(-0.18, 0.35, ndl);
-      vec3 col = surf * (0.04 + 0.96 * lit);
-
-      // Limb darkening (1 at disk centre, 0 at silhouette)
-      float vdn = clamp(dot(N, normalize(uViewDir)), 0.0, 1.0);
-      col *= 0.5 + 0.5 * pow(vdn, 0.55);
-
-      // Atmospheric rim glow on the lit limb
-      float rim = pow(1.0 - vdn, 3.0) * lit;
-      col += uColorA * rim * 0.6;
-
-      gl_FragColor = vec4(col, uOpacity);
-    }
-  `;
-
-  const meshes = planets.map(config => {
-    const viewDir = config.position.clone().multiplyScalar(-1).normalize(); // planet -> camera (origin)
-    const material = new THREE.ShaderMaterial({
-      uniforms: {
-        uTime: { value: 0.0 },
-        uLightDir: { value: lightDir.clone() },
-        uViewDir: { value: viewDir },
-        uColorA: { value: config.colorA },
-        uColorB: { value: config.colorB },
-        uOpacity: { value: config.opacity }
-      },
-      vertexShader: planetVertex,
-      fragmentShader: planetFragment,
-      transparent: true,
-      depthWrite: false,
-      side: THREE.FrontSide,
-      fog: false
-    });
-    const mesh = new THREE.Mesh(planetGeometry, material);
-    mesh.position.copy(config.position);
-    mesh.scale.setScalar(config.scale);
-    mesh.frustumCulled = false;
-    mesh.userData.drift = config.drift;
-    mesh.userData.material = material;
-    group.add(mesh);
-    return mesh;
-  });
-
-  // Saturn-like ring for the second planet, with radial banding, a Cassini-style
-  // gap and soft edges instead of a flat translucent disk.
-  const ringGeometry = new THREE.RingGeometry(50, 78, 96, 1);
-  const ringMaterial = new THREE.ShaderMaterial({
+  const phobosMaterial = new THREE.ShaderMaterial({
     uniforms: {
-      uColor: { value: new THREE.Color(0xd8bd95) },
-      uInner: { value: 50.0 },
-      uOuter: { value: 78.0 }
+      uSunDir: { value: marsAtmosphere.sunDir },
+      uDay: { value: 0 }
     },
     vertexShader: `
-      varying vec2 vUv;
-      varying float vRadius;
+      varying vec3 vN;
+      varying vec3 vLocal;
       void main() {
-        vUv = uv;
-        vRadius = length(position.xy);
+        vN = normalize(mat3(modelMatrix) * normal);
+        vLocal = position;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
     fragmentShader: `
-      uniform vec3 uColor;
-      uniform float uInner;
-      uniform float uOuter;
-      varying float vRadius;
+      uniform vec3 uSunDir;
+      uniform float uDay;
+      varying vec3 vN;
+      varying vec3 vLocal;
+      float h3(vec3 p) { p = fract(p * vec3(443.897, 441.423, 437.195)); p += dot(p, p.yzx + 19.19); return fract((p.x + p.y + p.z) * p.x); }
+      // Crater field: distance to jittered cell centres gives bowls with bright rims
+      float craters(vec3 p) {
+        vec3 i = floor(p), f = fract(p);
+        float d = 1.0;
+        for (int z = -1; z <= 1; z++) for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
+          vec3 o = vec3(x, y, z);
+          vec3 c = o + vec3(h3(i + o), h3(i + o + 7.1), h3(i + o + 3.3)) - f;
+          d = min(d, dot(c, c));
+        }
+        return d;
+      }
       void main() {
-        float t = clamp((vRadius - uInner) / (uOuter - uInner), 0.0, 1.0);
-        // Soft inner/outer edges
-        float edge = smoothstep(0.0, 0.08, t) * smoothstep(1.0, 0.9, t);
-        // Fine ring banding
-        float bands = 0.6 + 0.4 * sin(t * 60.0);
-        // Cassini-style gap
-        float gap = smoothstep(0.42, 0.46, t) * smoothstep(0.54, 0.50, t);
-        float alpha = edge * bands * (1.0 - gap * 0.85) * 0.55;
-        gl_FragColor = vec4(uColor, alpha);
+        vec3 N = normalize(vN);
+        float d = craters(vLocal * 3.2);
+        float bowl = smoothstep(0.0, 0.18, d);
+        // Stickney: the one huge crater on the leading face
+        float stickney = smoothstep(0.35, 0.55, length(vLocal - vec3(1.15, 0.1, 0.2)));
+        float albedo = 0.07 * (0.75 + 0.35 * bowl) * (0.7 + 0.3 * stickney);
+        float lit = max(dot(N, normalize(uSunDir)), 0.0);
+        vec3 col = vec3(1.0, 0.93, 0.86) * albedo * (lit * 9.0 + 0.004);
+        gl_FragColor = vec4(col, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
       }
     `,
-    transparent: true,
-    side: THREE.DoubleSide,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
     fog: false
   });
-  const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-  ring.position.copy(meshes[1].position);
-  ring.rotation.set(Math.PI * 0.58, 0.18, -0.35);
-  ring.frustumCulled = false;
-  group.add(ring);
+  const phobos = new THREE.Mesh(phobosGeometry, phobosMaterial);
+  phobos.scale.setScalar(22);
+  phobos.frustumCulled = false;
+  group.add(phobos);
+
+  // Deimos: tiny and far, just a bright, steady star-like point
+  const deimos = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 8, 6),
+    new THREE.MeshBasicMaterial({ color: 0xfff2e2, depthWrite: false, fog: false })
+  );
+  deimos.scale.setScalar(3.2);
+  deimos.frustumCulled = false;
+  group.add(deimos);
 
   group.frustumCulled = false;
+  const radius = 4600;
+  const place = (mesh, angle, tilt) => {
+    mesh.position.set(Math.cos(angle) * radius, Math.sin(angle) * radius * Math.cos(tilt), Math.sin(angle) * radius * Math.sin(tilt) - radius * 0.25);
+    mesh.lookAt(0, 0, 0);
+  };
 
   return {
     group,
     update(time) {
-      const t = time || 0;
-      for (const mesh of meshes) {
-        mesh.rotation.y = t * mesh.userData.drift; // slow surface spin
-        mesh.userData.material.uniforms.uTime.value = t;
-      }
-      ring.rotation.z = -0.35 + Math.sin(t * 0.00008) * 0.015;
+      const t = (time || 0) * 0.001;
+      // Phobos rises in the west and races east; Deimos drifts slowly the other way
+      place(phobos, Math.PI - ((t * 0.035) % (Math.PI * 2)), 0.42);
+      place(deimos, 0.8 + t * 0.004, 0.25);
+      deimos.visible = phobosMaterial.uniforms.uDay.value < 0.5;
+      phobosMaterial.uniforms.uDay.value = marsAtmosphere.dayAmount;
     }
   };
 }
@@ -8895,18 +9272,7 @@ function loadCoreComponents() {
 
   // Sunlight comes from the single shadow-casting sunLight, driven by updateDayNightCycle
 
-  // Create a simple sun sphere for daytime only; hidden at night to avoid extra "planets"
-  const sunGeometry = new THREE.SphereGeometry(36, 16, 16); // Reduced geometry complexity
-  const sunMaterial = new THREE.MeshBasicMaterial({
-    color: 0xc66a32,
-    transparent: true,
-    opacity: isDaytime ? 0.75 : 0.0
-  });
-  sunSphere = new THREE.Mesh(sunGeometry, sunMaterial);
-  sunSphere.position.set(500, 300, -1000);
-  sunSphere.visible = isDaytime;
-  scene.add(sunSphere);
-  console.log("Sun sphere added to scene");
+  // The sun itself is drawn by the sky shader (disk + dust aureole)
 
   // Eagerly create MarsSceneManager on desktop so colony and rockets
   // are always available even if lazy loading is delayed.
@@ -8972,23 +9338,6 @@ function loadNonEssentialComponents() {
   if (perfSettings.detailLevel !== 'low') {
     lazyLoader.loadInBackground('atmosphericEffects', () => {
       window.atmosphericEffects = new MarsAtmosphericEffects(scene);
-      return Promise.resolve();
-    });
-  }
-
-  // Add sun glow effect only for higher performance settings
-  if (perfSettings.detailLevel === 'high') {
-    lazyLoader.loadInBackground('sunGlow', () => {
-      if (!sunSphere || !isDaytime) return Promise.resolve();
-      const sunGlowGeometry = new THREE.SphereGeometry(60, 32, 32);
-      const sunGlowMaterial = new THREE.MeshBasicMaterial({
-        color: 0xffdd44,
-        transparent: true,
-        opacity: 0.4,
-        side: THREE.BackSide
-      });
-      const sunGlow = new THREE.Mesh(sunGlowGeometry, sunGlowMaterial);
-      sunSphere.add(sunGlow);
       return Promise.resolve();
     });
   }
