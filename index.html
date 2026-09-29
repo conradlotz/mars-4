@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="permissions-policy" content="accelerometer=*, autoplay=*, camera=*, clipboard-write=*, encrypted-media=*, fullscreen=*, geolocation=*, gyroscope=*, magnetometer=*, microphone=*, midi=*, payment=*, picture-in-picture=*, publickey-credentials-get=*, screen-wake-lock=*, sync-xhr=*, usb=*, web-share=*, xr-spatial-tracking=*">
   <title>Drive on Mars</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -237,7 +237,10 @@
       transition: background 0.2s ease, transform 0.3s ease;
     }
 
-    .settings-toggle:hover { background: rgba(40, 28, 24, 0.7); transform: rotate(30deg); }
+    .settings-toggle:hover { background: rgba(40, 28, 24, 0.7); }
+    #settings-toggle:hover { transform: rotate(30deg); }
+    #sound-toggle .icon-off, #sound-toggle.muted .icon-on { display: none; }
+    #sound-toggle.muted .icon-off { display: block; }
     .settings-toggle svg { width: 18px; height: 18px; }
 
     /* In-game HUD */
@@ -357,8 +360,29 @@
 
     @media (max-width: 768px) {
       #controls-hint { display: none !important; }
-      #speed-hud { bottom: auto; top: 18px; left: auto; right: 18px; transform: none; }
-      #mission-hud { max-width: calc(100vw - 150px); }
+      #sound-toggle { display: none !important; } /* music starts on first touch */
+      #mission-hud {
+        top: calc(10px + env(safe-area-inset-top));
+        left: calc(10px + env(safe-area-inset-left));
+        min-width: 0;
+        max-width: calc(100vw - 132px);
+        padding: 8px 11px;
+        border-radius: 12px;
+      }
+      #mission-objective { font-size: 13px; }
+      #tour-status { font-size: 11px; }
+      #speed-hud {
+        top: calc(10px + env(safe-area-inset-top));
+        bottom: auto;
+        left: auto;
+        right: calc(10px + env(safe-area-inset-right));
+        transform: none;
+        padding: 6px 12px 7px;
+      }
+      #speed-value { font-size: 18px; }
+      #speed-unit { font-size: 10px; margin-left: 4px; }
+      #speed-heading { display: none; }
+      #mission-toast { top: calc(84px + env(safe-area-inset-top)); font-size: 12px; }
     }
 
     /* Device indicator */
@@ -390,34 +414,74 @@
       display: block;
     }
     
-    /* Virtual Joystick */
+    /* Virtual Joystick: sits low in the left thumb zone, with a visible ring */
     #virtual-joystick {
       position: absolute;
-      bottom: 40px;
-      left: 40px;
-      width: 140px;
-      height: 140px;
-      background: transparent;
-      border: none;
+      bottom: calc(16px + env(safe-area-inset-bottom));
+      left: calc(16px + env(safe-area-inset-left));
+      width: 128px;
+      height: 128px;
       border-radius: 50%;
+      background: radial-gradient(circle, rgba(255, 255, 255, 0.02) 40%, rgba(255, 255, 255, 0.07) 100%);
+      border: 1.5px solid rgba(255, 255, 255, 0.22);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
       pointer-events: auto;
       touch-action: none;
-      box-shadow: none;
     }
-    
+
     #joystick-knob {
       position: absolute;
       top: 50%;
       left: 50%;
-      width: 50px;
-      height: 50px;
-      background: linear-gradient(145deg, #ff6b35, #e55a2b);
+      width: 52px;
+      height: 52px;
       border-radius: 50%;
       transform: translate(-50%, -50%);
-      transition: all 0.1s ease;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-      border: 2px solid rgba(255, 255, 255, 0.3);
+      background: radial-gradient(circle at 35% 30%, #ffb07a, #ff6b35 60%, #d9501f);
+      border: 1.5px solid rgba(255, 255, 255, 0.45);
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
     }
+
+    #virtual-joystick.released #joystick-knob { transition: transform 0.15s ease-out; }
+
+    /* Hold to boost (and drive forward) */
+    #boost-button {
+      position: absolute;
+      right: calc(22px + env(safe-area-inset-right));
+      bottom: calc(30px + env(safe-area-inset-bottom));
+      width: 92px;
+      height: 92px;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      border-radius: 50%;
+      color: var(--ui-text);
+      font-family: var(--ui-font);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      background: var(--ui-glass);
+      border: 1.5px solid rgba(255, 138, 76, 0.55);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      pointer-events: auto;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+    }
+
+    #boost-button svg { width: 26px; height: 26px; margin-bottom: -10px; color: var(--ui-accent); }
+
+    #boost-button.active {
+      transform: scale(0.94);
+      background: rgba(255, 110, 50, 0.55);
+      box-shadow: 0 0 28px rgba(255, 110, 50, 0.6);
+    }
+
+    #boost-button.active svg { color: #fff; }
     
     /* Mobile Action Buttons */
     
@@ -496,12 +560,6 @@
       
       /* Mobile controls positioning - removed since controls panel is disabled on mobile */
       
-      /* Ensure mobile navigation doesn't interfere with HUD */
-      #virtual-joystick {
-        bottom: 30px !important;
-        left: 30px !important;
-        z-index: 120 !important;
-      }
       
       /* Hide non-essential UI on mobile */
       #loading-tips,
@@ -546,17 +604,6 @@
         font-size: 9px;
       }
       
-      #virtual-joystick {
-        width: 150px;
-        height: 150px;
-        bottom: 30px;
-        left: 30px;
-      }
-      
-      #joystick-knob {
-        width: 55px;
-        height: 55px;
-      }
     }
     
     /* Joystick touch feedback */
@@ -661,12 +708,22 @@
     </svg>
   </button>
 
+  <button class="settings-toggle" id="sound-toggle" aria-label="Mute soundtrack" title="Mute soundtrack (M)" style="right: 66px;">
+    <svg class="icon-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/>
+    </svg>
+    <svg class="icon-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M22 9l-6 6"/><path d="M16 9l6 6"/>
+    </svg>
+  </button>
+
   <!-- Desktop control reference; fades out once you have been driving a while -->
   <div id="controls-hint" class="hud-panel" style="display: none;">
     <div><kbd>W</kbd><kbd>S</kbd>drive &nbsp; <kbd>A</kbd><kbd>D</kbd>steer</div>
     <div><kbd>Space</kbd>boost</div>
     <div><kbd>Drag</kbd>look &nbsp; <kbd>Scroll</kbd>zoom</div>
     <div><kbd>C</kbd>camera &nbsp; <kbd>L</kbd>day / night</div>
+    <div><kbd>M</kbd>music on / off</div>
   </div>
   
   <div id="device-info">
@@ -682,6 +739,16 @@
     <div id="virtual-joystick">
       <div id="joystick-knob"></div>
     </div>
+
+    <!-- Hold to boost -->
+    <button id="boost-button" aria-label="Boost">
+      <span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M6 17l6-6 6 6"/><path d="M6 11l6-6 6 6"/>
+        </svg>
+        <div>BOOST</div>
+      </span>
+    </button>
     
 
   </div>
@@ -1140,8 +1207,9 @@
           // Load YouTube audio with autoplay (background music)
           // Source: https://www.youtube.com/watch?v=tmT-iuVrXD4
           const videoId = 'tmT-iuVrXD4';
+          const muted = typeof window.isSoundtrackMuted === 'function' && window.isSoundtrackMuted();
           youtubePlayer.loadVideo(videoId, {
-            autoplay: true,
+            autoplay: !muted,
             loop: true,
             volume: 25
           });
@@ -1556,9 +1624,7 @@
                   // Try to play immediately
                   setTimeout(() => {
                     try {
-                      event.target.playVideo();
-                      this.isPlaying = true;
-                      console.log('Autoplay successful');
+                      event.target.playVideo(); // may be blocked; onStateChange reports PLAYING
                     } catch (error) {
                       console.log('Autoplay blocked by browser policy:', error);
                     }
@@ -1569,8 +1635,6 @@
                     if (!this.isPlaying) {
                       try {
                         event.target.playVideo();
-                        this.isPlaying = true;
-                        console.log('Delayed autoplay successful');
                       } catch (error) {
                         console.log('Delayed autoplay also blocked');
                       }
@@ -1698,7 +1762,49 @@
       }
     };
     
-    // YouTube audio now auto-loads silently in the background with no visible controls
+    // Browsers block audible autoplay until the visitor interacts with the
+    // page, so the soundtrack starts on the first tap, click or key press
+    // (unless it was muted). The M key and the speaker button toggle it.
+    (function setupSoundtrackStart() {
+      let muted = false;
+      try { muted = localStorage.getItem('mars_music_muted') === '1'; } catch (e) {}
+      const button = document.getElementById('sound-toggle');
+      const render = () => {
+        if (!button) return;
+        button.classList.toggle('muted', muted);
+        button.setAttribute('aria-label', muted ? 'Play soundtrack' : 'Mute soundtrack');
+        button.title = muted ? 'Play soundtrack (M)' : 'Mute soundtrack (M)';
+      };
+      const play = () => {
+        const p = youtubePlayer.player;
+        if (!p || typeof p.playVideo !== 'function' || youtubePlayer.disabled) return;
+        if (typeof p.unMute === 'function') p.unMute();
+        p.playVideo();
+      };
+      const pause = () => {
+        const p = youtubePlayer.player;
+        if (p && typeof p.pauseVideo === 'function') p.pauseVideo();
+      };
+      const setMuted = (value) => {
+        muted = value;
+        try { localStorage.setItem('mars_music_muted', muted ? '1' : '0'); } catch (e) {}
+        if (muted) pause(); else play();
+        render();
+      };
+      const onFirstGesture = () => {
+        if (!muted && !youtubePlayer.isPlaying) play();
+      };
+      ['pointerdown', 'keydown', 'touchstart'].forEach(type =>
+        window.addEventListener(type, onFirstGesture, { capture: true, passive: true }));
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'm' || e.key === 'M') setMuted(!muted);
+      });
+      if (button) {
+        button.addEventListener('click', () => setMuted(!muted));
+        render();
+      }
+      window.isSoundtrackMuted = () => muted;
+    })();
   </script>
 
   <script>
@@ -1710,7 +1816,7 @@
       const knob = document.getElementById('joystick-knob');
       if (!joystick || !knob) return;
 
-      const RADIUS = 45;   // max knob travel (px) from center
+      const RADIUS = 40;   // max knob travel (px) from center
       const DEADZONE = 14; // minimum displacement before input registers
 
       let active = false;
@@ -1726,6 +1832,7 @@
       function releaseAll() {
         applyKey('w', false); applyKey('s', false);
         applyKey('a', false); applyKey('d', false);
+        joystick.classList.add('released');
         knob.style.transform = 'translate(-50%, -50%)';
       }
 
@@ -1736,6 +1843,7 @@
         centerX = rect.left + rect.width / 2;
         centerY = rect.top + rect.height / 2;
         active = true;
+        joystick.classList.remove('released');
         onMove(e);
       }
 
@@ -1769,6 +1877,20 @@
       joystick.addEventListener('touchmove',   onMove,  { passive: false });
       joystick.addEventListener('touchend',    onEnd,   { passive: false });
       joystick.addEventListener('touchcancel', onEnd,   { passive: false });
+
+      // BOOST: hold to boost and drive forward (steer with the joystick)
+      const boost = document.getElementById('boost-button');
+      if (boost) {
+        const setBoost = (on) => (e) => {
+          e.preventDefault();
+          boost.classList.toggle('active', on);
+          if (window.keys) window.keys.boost = on;
+        };
+        boost.addEventListener('touchstart', setBoost(true), { passive: false });
+        boost.addEventListener('touchend', setBoost(false), { passive: false });
+        boost.addEventListener('touchcancel', setBoost(false), { passive: false });
+        boost.addEventListener('contextmenu', (e) => e.preventDefault());
+      }
 
       // Retry until mars.js exposes window.keys
       (function waitForKeys() {

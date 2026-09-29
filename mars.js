@@ -220,9 +220,10 @@ const cameraFov = 62;
 const camera = new THREE.PerspectiveCamera(cameraFov, window.innerWidth / window.innerHeight, 0.1, 10000);
 camera.position.set(0, 10, 20);
 const renderer = new THREE.WebGLRenderer({
-  // Desktop renders into a multisampled post-processing target, so the
-  // default framebuffer never needs its own MSAA
-  antialias: false,
+  // Desktop renders into a multisampled post-processing target, so only
+  // phones (which draw straight to the canvas) need MSAA here; tile-based
+  // mobile GPUs resolve it almost for free
+  antialias: perfSettings.isMobile && perfSettings.mobileTier !== 'low',
   powerPreference: perfSettings.isMobile ? 'low-power' : 'high-performance',
   precision: perfSettings.isMobile ? 'mediump' : 'highp',
   alpha: false,
@@ -244,8 +245,10 @@ if (window.webglContextManager && typeof window.webglContextManager.register ===
 
 // Adaptive pixel ratio for better visual quality - capped at 1 for mobile emergency performance
 // (desktop draws through a multisampled HDR post chain, so it is capped lower)
-const pixelRatio = perfSettings.isMobile ? 1 :
-                   Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 1.5 : 1.25);
+// Phones used to render at 1x on 2.5-3x screens, which looked pixelated
+const pixelRatio = perfSettings.isMobile
+  ? Math.min(window.devicePixelRatio, perfSettings.mobileTier === 'high' ? 2 : perfSettings.mobileTier === 'medium' ? 1.5 : 1)
+  : Math.min(window.devicePixelRatio, perfSettings.graphicsQuality === 'high' ? 1.5 : 1.25);
 renderer.setPixelRatio(pixelRatio);
 
 // Colour pipeline: materials work in linear light, the output is sRGB and
@@ -1408,6 +1411,7 @@ function resetRoverMotion(clearInput = false) {
     keys.s = false;
     keys.d = false;
     keys[' '] = false;
+    keys.boost = false;
   }
   if (typeof cameraSpring !== 'undefined' && cameraSpring.velocity) {
     cameraSpring.velocity.set(0, 0, 0);
@@ -1514,14 +1518,15 @@ const cameraRig = {
   yaw: 0,                 // orbit offset from straight behind the rover (rad)
   pitch: 0.2,             // camera elevation above the rover (rad)
   defaultPitch: 0.2,
-  distance: perfSettings.isMobile ? 7.5 : 8.5,
+  // Phones are usually portrait (a narrow horizontal view), so sit further back
+  distance: perfSettings.isMobile ? 12 : 8.5,
   minDistance: 4.5,
   maxDistance: 28,
   lookYaw: 0,             // first-person head turn relative to the rover
   lookPitch: -0.08,
   dragging: false,
   lastInput: -Infinity,
-  fov: perfSettings.isMobile ? 62 : 62,
+  fov: perfSettings.isMobile ? 70 : 62,
   firstPersonFov: 74,
   currentFov: camera.fov
 };
@@ -6894,7 +6899,7 @@ function _lerpColorHex(a, b, t, target = new THREE.Color()) {
 // stainless, colony cladding) had nothing to reflect and rendered flat grey.
 // Re-baked only when the light has changed noticeably (~every few seconds).
 function createMarsEnvironment() {
-  if (perfSettings.isMobile || !THREE.PMREMGenerator) return null;
+  if ((perfSettings.isMobile && perfSettings.mobileTier !== 'high') || !THREE.PMREMGenerator) return null;
   try {
     const pmrem = new THREE.PMREMGenerator(renderer);
     const envScene = new THREE.Scene();
@@ -7277,8 +7282,9 @@ function animate(time) {
   previousPosition.copy(rover.position);
 
   // Smooth acceleration/deceleration physics
-  if (keys.w) {
-    const boosting = !!keys[' '];
+  if (keys.w || keys.boost) {
+    // keys.boost comes from the touch BOOST button: boost and drive forward
+    const boosting = !!(keys[' '] || keys.boost);
     const topSpeed = boosting ? BOOST_SPEED : MAX_SPEED;
     if (velocity < 0) {
       velocity = Math.min(velocity + DECELERATION * controlFrameScale, 0);
@@ -7977,8 +7983,7 @@ function _periodicWorley(x, y, P, seed) {
 }
 
 // RGBA detail: R broad fBm, G pebble mask, B fine grit, A second broad fBm
-function createRegolithDetailTexture() {
-  const size = 512;
+function createRegolithDetailTexture(size = 512) {
   const data = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -8006,8 +8011,7 @@ function createRegolithDetailTexture() {
 
 // Tangent-space normals of a rocky height field: fBm undulation plus rounded
 // pebbles (Worley bumps) and fine grit
-function createRegolithNormalTexture() {
-  const size = 512;
+function createRegolithNormalTexture(size = 512) {
   const H = new Float32Array(size * size);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -8043,7 +8047,7 @@ function createRegolithNormalTexture() {
   return tex;
 }
 
-function createRegolithMaterial() {
+function createRegolithMaterial(textureSize = 512) {
   const material = new THREE.MeshStandardMaterial({
     color: 0xffffff, // vertex colours carry the elevation tint
     vertexColors: true,
@@ -8052,8 +8056,8 @@ function createRegolithMaterial() {
     envMapIntensity: 0.55,
     side: THREE.FrontSide
   });
-  const detail = createRegolithDetailTexture();
-  const normals = createRegolithNormalTexture();
+  const detail = createRegolithDetailTexture(textureSize);
+  const normals = createRegolithNormalTexture(textureSize);
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.tRegolith = { value: detail };
@@ -8143,7 +8147,7 @@ function createRealisticMarsTerrain() {
                      perfSettings.detailLevel === 'high' ? 5000 :
                      perfSettings.detailLevel === 'normal' ? 5000 : 3000;
 
-  const segments = perfSettings.isMobile ? 64 :
+  const segments = perfSettings.isMobile ? (perfSettings.mobileTier === 'low' ? 64 : 128) :
                    perfSettings.detailLevel === 'high' ? 288 :
                    perfSettings.detailLevel === 'normal' ? 224 : 128;
   
@@ -8166,32 +8170,9 @@ function createRealisticMarsTerrain() {
     // Multi-layered noise for more realistic terrain (adaptive)
     let elevation = 0;
     
-    if (perfSettings.isMobile) {
-      // Mobile: Enhanced terrain generation based on device tier
-      const mobileTier = perfSettings.mobileTier || 'low';
-      
-      // Base terrain features for all mobile devices
-      const baseElevation = Math.sin(x * 0.01) * Math.cos(z * 0.01) * 8 +
-                           Math.sin(x * 0.02 + 5) * Math.cos(z * 0.015) * 6;
-      
-      // Add medium features for mid-range and high-end mobile
-      const mediumFeatures = (mobileTier === 'medium' || mobileTier === 'high') ? 
-        Math.sin(x * 0.03 + 2) * Math.cos(z * 0.025) * 4 +
-        Math.sin(x * 0.05 + 1) * Math.cos(z * 0.04) * 2 : 0;
-      
-      // Add fine details for high-end mobile devices
-      const fineFeatures = (mobileTier === 'high') ? 
-        Math.sin(x * 0.08 + 3) * Math.cos(z * 0.06) * 1.5 +
-        Math.sin(x * 0.12 + 4) * Math.cos(z * 0.09) * 1 : 0;
-      
-      // Add crater-like features for more interesting terrain
-      const craterFeatures = Math.sin(x * 0.006) * Math.cos(z * 0.006) * 
-                            Math.sin(x * 0.004 + 1) * Math.cos(z * 0.008) * 3;
-      
-      elevation = baseElevation + mediumFeatures + fineFeatures + craterFeatures;
-    } else {
-      // Desktop: natural terrain via domain-warped fBm instead of summed
-      // sin/cos (which reads as repetitive grid-aligned waves). Domain warping
+    {
+      // Natural terrain via domain-warped fBm instead of summed sin/cos
+      // (which reads as repetitive grid-aligned waves; phones used that). Domain warping
       // breaks up the regularity; a ridged octave adds rocky spines.
       const warpX = _terrainFbm(x * 0.0009 + 11.2, z * 0.0009 + 4.7, 3) - 0.5;
       const warpZ = _terrainFbm(x * 0.0009 + 23.5, z * 0.0009 + 9.1, 3) - 0.5;
@@ -8586,9 +8567,9 @@ function createRealisticMarsTerrain() {
   const terrainPerfSettings = getPerformanceSettings();
   let material;
   
-  if (terrainPerfSettings.isMobile) {
-    // Mobile: cheap per-vertex Lambert lighting. (An unlit MeshBasicMaterial
-    // stayed fully bright through the night.)
+  if (terrainPerfSettings.isMobile && terrainPerfSettings.mobileTier === 'low') {
+    // Low-end phones: cheap per-vertex Lambert lighting. (An unlit
+    // MeshBasicMaterial stayed fully bright through the night.)
     material = new THREE.MeshLambertMaterial({
       color: 0xffffff, // vertex colours carry the regolith tint (as on desktop)
       vertexColors: true,
@@ -8596,8 +8577,9 @@ function createRealisticMarsTerrain() {
       fog: true
     });
   } else {
-    // Desktop: physically based regolith with shader-side detail layers
-    material = createRegolithMaterial();
+    // Physically based regolith with shader-side detail layers (smaller
+    // detail textures on phones: quicker to generate at load)
+    material = createRegolithMaterial(terrainPerfSettings.isMobile ? 256 : 512);
   }
 
   const terrain = new THREE.Mesh(geometry, material);
