@@ -827,27 +827,28 @@ function createRealisticRover() {
 
   if (perfSettings.isMobile) {
     // Mobile: one cheap point light at the front, no spotlights
-    const roverLight = new THREE.PointLight(0xfff2d8, lampIntensity(1.6, 28, 6), 28);
-    roverLight.position.set(0, 2, -2.5);
+    // Kept ~2.5 m ahead of the nose so it lights the ground, not the rover
+    const roverLight = new THREE.PointLight(0xfff2d8, lampIntensity(1.6, 28, 6) * 0.5, 28);
+    roverLight.position.set(0, 1.8, -4.2);
     roverGroup.add(roverLight);
     roverLights.push(roverLight);
     console.log('Minimal mobile rover lighting added for performance');
   } else {
-    // Desktop: two forward spotlight cones for real headlight beams,
-    // plus a soft warm fill so the rover body and nearby ground read at night.
+    // Desktop: two forward spotlight cones for real headlight beams. (A warm
+    // fill light used to sit 1-2 m above the deck; with physical inverse-square
+    // falloff it blew the white body out to a glare blob, so it's gone.)
     lampPositions.forEach(([lx, ly, lz]) => {
-      const spot = new THREE.SpotLight(0xfff2d8, lampIntensity(3.0, 85, 16), 85, Math.PI * 0.22, 0.5, 2);
-      spot.position.set(lx, ly, lz);
+      // 1/d falloff rather than inverse-square: the beam keeps its brightness
+      // 16 m out but the ground right under the lamps (dead centre in the mast
+      // camera) no longer flares ~40x brighter than the road ahead
+      const spot = new THREE.SpotLight(0xfff2d8, 3.0 * LEGACY_LIGHT_SCALE * (1 - 16 / 85) * 16, 85, Math.PI * 0.22, 0.5, 1);
+      spot.position.set(lx, ly, lz - 0.15); // just clear of the chassis lip
       spot.target.position.set(lx * 1.5, -3, lz - 34); // aim forward and slightly down
       spot.castShadow = false;
       roverGroup.add(spot);
       roverGroup.add(spot.target);
       roverLights.push(spot);
     });
-    const fill = new THREE.PointLight(0xffe9cc, lampIntensity(0.8, 20, 4) * 0.3, 20);
-    fill.position.set(0, 2.2, -2.0);
-    roverGroup.add(fill);
-    roverLights.push(fill);
   }
   // Lamps switch on as daylight fails (see updateDayNightCycle)
   roverLights.forEach(light => { light.userData.nightIntensity = light.intensity; });
@@ -935,6 +936,13 @@ function createSolarPanelTexture() {
 }
 
 const { rover, wheels, originalWheelPositions } = createRealisticRover();
+// Scratch state for positionRoverOnTerrain(). Declared here, before anything
+// can call it: the mobile start-up path positions the rover straight away and
+// hit these in their temporal dead zone, crashing the game on phones.
+const _roverUp = new THREE.Vector3(0, 1, 0);
+const _roverGroundNormal = new THREE.Vector3(0, 1, 0);
+const _roverTargetNormal = new THREE.Vector3();
+const _roverTiltQuat = new THREE.Quaternion();
 // Collision helpers in MarsSceneManager look the rover up here
 window.rover = rover;
 // Set initial rotation to face away from the screen
@@ -958,11 +966,9 @@ if (perfSettingsForRover.isMobile) {
   console.log('Camera position:', camera.position);
   console.log('Camera looking at rover area');
   
-  // Ensure rover is at a visible position
+  // Ensure rover is at a visible position (it is set on the terrain just
+  // before the first frame; positionRoverOnTerrain can't run this early)
   rover.position.set(0, 0, 0);
-  
-  // Position rover on terrain initially
-  positionRoverOnTerrain();
   
   // Force rover to be visible
   rover.visible = true;
@@ -7094,7 +7100,7 @@ function updateDayNightCycle(time) {
   if (typeof rover !== 'undefined' && rover && rover.userData.lamps) {
     const night = 1 - _smoothstep(0.2, 0.65, dayAmount);
     for (const light of rover.userData.lamps.lights) light.intensity = light.userData.nightIntensity * night;
-    rover.userData.lamps.material.color.setHex(0xfff6e0).multiplyScalar(0.2 + 0.8 * night);
+    rover.userData.lamps.material.color.setHex(0xfff6e0).multiplyScalar(0.25 + 0.35 * night);
   }
 }
 
@@ -7638,10 +7644,6 @@ function gradeTerrainAlongPath(points, closed, halfWidth = 7, shoulder = 24, max
   marsSurface.geometry.attributes.position.needsUpdate = true;
 }
 
-const _roverUp = new THREE.Vector3(0, 1, 0);
-const _roverGroundNormal = new THREE.Vector3(0, 1, 0);
-const _roverTargetNormal = new THREE.Vector3();
-const _roverTiltQuat = new THREE.Quaternion();
 
 function positionRoverOnTerrain() {
   const x = rover.position.x;
@@ -7877,6 +7879,8 @@ function updateCamera(deltaMs) {
   }
 }
 
+// Everything positionRoverOnTerrain() needs exists by now
+positionRoverOnTerrain();
 scheduleAnimationFrame();
 // Add a simple HUD to show camera mode
 
