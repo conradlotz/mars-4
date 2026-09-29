@@ -3228,6 +3228,432 @@ function createPlasmaMaterial() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Falcon Heavy: a core plus two side boosters (3.7 m wide, ~42 m tall) and an
+// upper stage under a payload fairing. Each part is a few merged meshes.
+// Local frame: engine plane at y = 0, nose up +Y.
+// ---------------------------------------------------------------------------
+const FALCON = {
+  R: 1.83,
+  boosterLen: 42,
+  sideNose: 5.5,
+  interstage: 4.5,
+  upperLen: 12.5,
+  fairingR: 2.6,
+  fairingLen: 13,
+  sideOffset: 4.05, // side booster centre from the core centre
+  legReach: 5.2,
+  legDrop: 1.9      // deployed feet sit this far below the engine plane
+};
+
+function buildFalconBoosterGeometries(isCore) {
+  const { R, boosterLen: L } = FALCON;
+  const white = [], black = [], engines = [], legs = [];
+  const add = (list, geometry, matrix) => list.push({ geometry, matrix });
+
+  add(white, new THREE.CylinderGeometry(R, R, L, 28, 1, true), _xf(0, L / 2, 0));
+  // Octaweb skirt and the thin black bands where the tanks join
+  add(black, new THREE.CylinderGeometry(R * 1.02, R * 1.05, 1.6, 28), _xf(0, 0.8, 0));
+  add(black, new THREE.CylinderGeometry(R * 1.005, R * 1.005, 0.35, 28, 1, true), _xf(0, L * 0.62, 0));
+  if (isCore) {
+    // Black carbon interstage (the upper stage sits on top of it)
+    add(black, new THREE.CylinderGeometry(R, R, FALCON.interstage, 28), _xf(0, L + FALCON.interstage / 2, 0));
+  } else {
+    // Side boosters carry an aerodynamic nose cone
+    const profile = [];
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10;
+      profile.push(new THREE.Vector2(Math.max(0.08, R * Math.pow(1 - t, 0.6)), L + t * FALCON.sideNose));
+    }
+    add(white, new THREE.LatheGeometry(profile, 28), null);
+  }
+  // Four titanium grid fins near the top, and the folded landing legs
+  const finY = L - 1.6;
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+    const c = Math.cos(a), s = Math.sin(a);
+    add(black, new THREE.BoxGeometry(1.5, 1.2, 0.18), _xf(c * (R + 0.55), finY, s * (R + 0.55), 0, -a + Math.PI / 2, 0));
+    add(black, new THREE.BoxGeometry(0.5, 9.5, 0.16), _xf(c * (R + 0.06), 5.5, s * (R + 0.06), 0, -a + Math.PI / 2, 0));
+    // Deployed legs: struts angled out to a foot below the engines
+    const reach = FALCON.legReach, drop = FALCON.legDrop, topY = 7.5;
+    const dx = reach - R, dy = topY + drop;
+    const len = Math.hypot(dx, dy);
+    const tilt = Math.atan2(dx, dy);
+    add(legs, new THREE.BoxGeometry(0.45, len, 0.3),
+      _xf(c * (R + dx / 2), topY - dy / 2, s * (R + dx / 2), 0, -a, tilt, 1, 1, 1, 'YXZ'));
+    add(legs, new THREE.CylinderGeometry(0.45, 0.55, 0.25, 10), _xf(c * reach, -drop + 0.12, s * reach));
+  }
+  // Nine Merlins: eight in a ring and one in the middle
+  add(engines, new THREE.CylinderGeometry(0.2, 0.42, 1.1, 14, 1, true), _xf(0, -0.55, 0));
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2;
+    add(engines, new THREE.CylinderGeometry(0.2, 0.42, 1.1, 14, 1, true), _xf(Math.cos(a) * 1.15, -0.55, Math.sin(a) * 1.15));
+  }
+  return {
+    white: mergeGeometryList(white),
+    black: mergeGeometryList(black),
+    engines: mergeGeometryList(engines),
+    legs: mergeGeometryList(legs)
+  };
+}
+
+function buildFalconUpperGeometries() {
+  const { R, upperLen: U, fairingR: FR, fairingLen: FL } = FALCON;
+  const white = [], black = [];
+  white.push({ geometry: new THREE.CylinderGeometry(R, R, U, 28, 1, true), matrix: _xf(0, U / 2, 0) });
+  black.push({ geometry: new THREE.CylinderGeometry(R * 0.6, FR, 1.4, 28, 1, true), matrix: _xf(0, U + 0.7, 0) });
+  // Payload fairing: a short barrel and an ogive
+  white.push({ geometry: new THREE.CylinderGeometry(FR, FR, FL * 0.45, 28, 1, true), matrix: _xf(0, U + 1.4 + FL * 0.225, 0) });
+  const profile = [];
+  for (let i = 0; i <= 12; i++) {
+    const t = i / 12;
+    profile.push(new THREE.Vector2(Math.max(0.1, FR * Math.pow(1 - t * t, 0.6)), U + 1.4 + FL * 0.45 + t * FL * 0.55));
+  }
+  white.push({ geometry: new THREE.LatheGeometry(profile, 28), matrix: null });
+  return { white: mergeGeometryList(white), black: mergeGeometryList(black) };
+}
+
+// Falcon Heavy flights from their own launch complex beside the Starship
+// spaceport: all 27 engines light, the stack climbs and pitches downrange,
+// the side boosters peel away, flip, burn back and land side by side, then
+// the centre core does the same while the upper stage carries on to orbit.
+class FalconHeavyFleet {
+  constructor(spaceport, options) {
+    this.port = spaceport;
+    this.scene = spaceport.scene;
+    const count = options.count;
+    this.plumeGeom = options.plumeGeom;
+    this.flareTex = options.flareTex;
+
+    // Scratch objects (no per-frame allocation)
+    this._yAxis = new THREE.Vector3(0, 1, 0);
+    this._qYaw = new THREE.Quaternion();
+    this._qTilt = new THREE.Quaternion();
+    this._qTarget = new THREE.Quaternion();
+    this._v = new THREE.Vector3();
+    this._axis = new THREE.Vector3();
+
+    // Launch pads further from the colony than the Starship line; each
+    // rocket has three landing zones out beyond them (downrange side)
+    this.pads = [];
+    this.zones = [];
+    for (let i = 0; i < 3; i++) {
+      const v = (i - 1) * 170;
+      const p = spaceport.local(-215, v);
+      this.pads.push({ x: p.x, z: p.z, y: sampleTerrainHeight(p.x, p.z) + 1.0 });
+      const set = [];
+      for (let k = 0; k < 3; k++) {
+        const q = spaceport.local(-335, v + (k - 1) * 42);
+        set.push({ x: q.x, z: q.z, y: sampleTerrainHeight(q.x, q.z) + 0.4 });
+      }
+      this.zones.push(set);
+    }
+    this._buildGround();
+
+    const boosterGeoms = { side: buildFalconBoosterGeometries(false), core: buildFalconBoosterGeometries(true) };
+    const upperGeoms = buildFalconUpperGeometries();
+    this.whiteMat = new THREE.MeshStandardMaterial({ color: 0xd6d5d0, roughness: 0.42, metalness: 0.15, fog: false });
+    this.blackMat = new THREE.MeshStandardMaterial({ color: 0x151517, roughness: 0.55, metalness: 0.3, fog: false });
+    this.engineMat = new THREE.MeshStandardMaterial({ color: 0x3a3632, metalness: 0.85, roughness: 0.45, side: THREE.DoubleSide, fog: false });
+
+    this.rockets = [];
+    for (let i = 0; i < count; i++) {
+      const pad = this.pads[i % this.pads.length];
+      const zones = this.zones[i % this.zones.length];
+      const boosters = [
+        this._makeBooster(boosterGeoms.side, -1, zones[0]),
+        this._makeBooster(boosterGeoms.core, 0, zones[1]),
+        this._makeBooster(boosterGeoms.side, 1, zones[2])
+      ];
+      const upper = new THREE.Group();
+      upper.add(new THREE.Mesh(upperGeoms.white, this.whiteMat), new THREE.Mesh(upperGeoms.black, this.blackMat));
+      upper.children.forEach(m => { m.castShadow = true; });
+      this.scene.add(upper);
+      const rocket = {
+        pad, boosters, upper,
+        state: 'pad',
+        t: 0,
+        timer: 12 + i * 35 + Math.random() * 15,
+        pos: new THREE.Vector3(pad.x, pad.y, pad.z),
+        vel: new THREE.Vector3(),
+        quat: new THREE.Quaternion(),
+        upperAttached: true
+      };
+      this._resetOnPad(rocket);
+      this.rockets.push(rocket);
+    }
+  }
+
+  _makeBooster(geoms, side, zone) {
+    const group = new THREE.Group();
+    const white = new THREE.Mesh(geoms.white, this.whiteMat);
+    const black = new THREE.Mesh(geoms.black, this.blackMat);
+    const engines = new THREE.Mesh(geoms.engines, this.engineMat);
+    const legs = new THREE.Mesh(geoms.legs, this.blackMat);
+    white.castShadow = black.castShadow = legs.castShadow = true;
+    legs.visible = false;
+    group.add(white, black, engines, legs);
+
+    const plumeMat = createPlumeMaterial();
+    const plume = new THREE.Mesh(this.plumeGeom, plumeMat);
+    plume.position.y = -1.0;
+    plume.frustumCulled = false;
+    plume.visible = false;
+    group.add(plume);
+
+    const flare = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this.flareTex, color: 0xffe2c0, blending: THREE.AdditiveBlending,
+      depthWrite: false, transparent: true, sizeAttenuation: false, fog: false
+    }));
+    flare.position.y = -3;
+    flare.visible = false;
+    group.add(flare);
+    this.scene.add(group);
+
+    return {
+      group, legs, plume, plumeMat, flare, plasma: null, side, zone,
+      plumeScale: 0.55,
+      phase: 'attached', t: 0,
+      pad: zone, // ground reference for dust and the engine light
+      pos: new THREE.Vector3(), vel: new THREE.Vector3(),
+      p0: new THREE.Vector3(), v0: new THREE.Vector3(),
+      throttle: 0, heat: 0, dustCarry: 0
+    };
+  }
+
+  _buildGround() {
+    const port = this.port;
+    const pads = [], marks = [], tower = [];
+    const toColony = Math.atan2(port.U.x, port.U.z);
+    for (const pad of this.pads) {
+      pads.push({ geometry: new THREE.CylinderGeometry(16, 18, 2, 40), matrix: _xf(pad.x, pad.y - 1, pad.z) });
+      marks.push({ geometry: new THREE.RingGeometry(9, 9.8, 48), matrix: _xf(pad.x, pad.y + 0.02, pad.z, -Math.PI / 2) });
+      // Integration tower beside the pad, on the colony side
+      const tx = pad.x + port.U.x * 14, tz = pad.z + port.U.z * 14;
+      tower.push({ geometry: new THREE.BoxGeometry(4.5, 78, 4.5), matrix: _xf(tx, pad.y + 39, tz, 0, toColony, 0) });
+      for (let k = 0; k < 7; k++) {
+        tower.push({ geometry: new THREE.BoxGeometry(5.2, 0.6, 5.2), matrix: _xf(tx, pad.y + 8 + k * 10, tz, 0, toColony, 0) });
+      }
+      // Crew-access and umbilical arms reaching toward the rocket
+      tower.push({ geometry: new THREE.BoxGeometry(0.8, 0.8, 9), matrix: _xf(tx - port.U.x * 5.5, pad.y + 52, tz - port.U.z * 5.5, 0, toColony, 0) });
+      tower.push({ geometry: new THREE.BoxGeometry(0.6, 0.6, 9), matrix: _xf(tx - port.U.x * 5.5, pad.y + 30, tz - port.U.z * 5.5, 0, toColony, 0) });
+    }
+    for (const set of this.zones) {
+      for (const z of set) {
+        pads.push({ geometry: new THREE.CylinderGeometry(13, 14, 0.8, 36), matrix: _xf(z.x, z.y - 0.4, z.z) });
+        marks.push({ geometry: new THREE.RingGeometry(10.2, 11, 40), matrix: _xf(z.x, z.y + 0.02, z.z, -Math.PI / 2) });
+        // The "X" landing target
+        marks.push({ geometry: new THREE.PlaneGeometry(14, 1.2), matrix: _xf(z.x, z.y + 0.03, z.z, -Math.PI / 2, 0, Math.PI / 4) });
+        marks.push({ geometry: new THREE.PlaneGeometry(14, 1.2), matrix: _xf(z.x, z.y + 0.03, z.z, -Math.PI / 2, 0, -Math.PI / 4) });
+      }
+    }
+    const padMesh = new THREE.Mesh(mergeGeometryList(pads), new THREE.MeshStandardMaterial({ color: 0x3a302b, roughness: 0.92, metalness: 0.05 }));
+    padMesh.receiveShadow = true;
+    const markMesh = new THREE.Mesh(mergeGeometryList(marks), new THREE.MeshStandardMaterial({ color: 0xd8d4cc, roughness: 0.7, metalness: 0.0 }));
+    const towerMesh = new THREE.Mesh(mergeGeometryList(tower), new THREE.MeshStandardMaterial({ color: 0x2c2d31, roughness: 0.6, metalness: 0.7 }));
+    towerMesh.castShadow = towerMesh.receiveShadow = true;
+    this.scene.add(padMesh, markMesh, towerMesh);
+  }
+
+  collidables() {
+    const out = this.pads.map(p => ({ x: p.x, z: p.z, r: 18 }));
+    for (const set of this.zones) for (const z of set) out.push({ x: z.x, z: z.z, r: 6 });
+    return out;
+  }
+
+  // Stack attitude: nose tilted by `tilt` from vertical toward the
+  // horizontal direction d, with the side boosters along the pitch axis
+  _stackQuat(target, d, tilt) {
+    const ax = d.z, az = -d.x; // up x d
+    const len = Math.hypot(ax, az) || 1;
+    this._axis.set(ax / len, 0, az / len);
+    this._qYaw.setFromAxisAngle(this._yAxis, Math.atan2(-this._axis.z, this._axis.x));
+    this._qTilt.setFromAxisAngle(this._axis, tilt);
+    return target.copy(this._qTilt).multiply(this._qYaw);
+  }
+
+  _placeAttached(rocket) {
+    for (const b of rocket.boosters) {
+      if (b.phase !== 'attached') continue;
+      this._v.set(b.side * FALCON.sideOffset, 0, 0).applyQuaternion(rocket.quat);
+      b.pos.copy(rocket.pos).add(this._v);
+      b.group.position.copy(b.pos);
+      b.group.quaternion.copy(rocket.quat);
+      b.vel.copy(rocket.vel);
+    }
+    if (rocket.upperAttached) {
+      this._v.set(0, FALCON.boosterLen + FALCON.interstage, 0).applyQuaternion(rocket.quat);
+      rocket.upper.position.copy(rocket.pos).add(this._v);
+      rocket.upper.quaternion.copy(rocket.quat);
+    }
+  }
+
+  _resetOnPad(rocket) {
+    rocket.state = 'pad';
+    rocket.t = 0;
+    rocket.pos.set(rocket.pad.x, rocket.pad.y, rocket.pad.z);
+    rocket.vel.set(0, 0, 0);
+    this._stackQuat(rocket.quat, this.port.downrange, 0);
+    rocket.upperAttached = true;
+    rocket.upper.visible = true;
+    for (const b of rocket.boosters) {
+      b.phase = 'attached';
+      b.t = 0;
+      b.throttle = 0;
+      b.legs.visible = false;
+      b.group.visible = true;
+      b.pad = rocket.pad;
+    }
+    this._placeAttached(rocket);
+  }
+
+  _separate(rocket, b) {
+    b.phase = 'coast';
+    b.t = 0;
+    b.p0.copy(b.pos);
+    // Side boosters are pushed gently outward as the struts release
+    if (b.side !== 0) {
+      this._v.set(b.side, 0, 0).applyQuaternion(rocket.quat);
+      b.vel.addScaledVector(this._v, 4);
+    }
+    b.pad = b.zone;
+  }
+
+  update(dt, cameraPos) {
+    const g = MARS_GRAVITY;
+    let best = null, bestScore = 0;
+
+    for (const rocket of this.rockets) {
+      rocket.t += dt;
+      const firing = rocket.state === 'ignition' || rocket.state === 'ascent';
+
+      if (rocket.state === 'pad') {
+        if (rocket.t >= rocket.timer) { rocket.state = 'ignition'; rocket.t = 0; }
+      } else if (rocket.state === 'ignition') {
+        if (rocket.t >= 3) { rocket.state = 'ascent'; rocket.t = 0; }
+      } else if (rocket.state === 'ascent') {
+        const t = rocket.t;
+        // Vertical rise, then a gravity turn downrange; thrust-to-weight
+        // climbs as propellant burns off (and again once the sides drop)
+        const pitch = t < 7 ? 0 : Math.min(1.3, 0.02 * (t - 7) + 0.0006 * (t - 7) * (t - 7));
+        const accel = 9 + 0.25 * t;
+        const d = this.port.downrange;
+        rocket.vel.x += Math.sin(pitch) * d.x * accel * dt;
+        rocket.vel.y += (Math.cos(pitch) * accel - g) * dt;
+        rocket.vel.z += Math.sin(pitch) * d.z * accel * dt;
+        rocket.pos.addScaledVector(rocket.vel, dt);
+        this._stackQuat(rocket.quat, d, pitch);
+
+        if (t >= 22 && rocket.boosters[0].phase === 'attached') {
+          this._separate(rocket, rocket.boosters[0]);
+          this._separate(rocket, rocket.boosters[2]);
+        }
+        if (t >= 30 && rocket.boosters[1].phase === 'attached') this._separate(rocket, rocket.boosters[1]);
+        const far = Math.hypot(rocket.pos.x - rocket.pad.x, rocket.pos.z - rocket.pad.z) + rocket.pos.y;
+        if (t > 75 || far > 9000) {
+          // Anything still attached comes home too, or the rocket never resets
+          for (const b of rocket.boosters) if (b.phase === 'attached') this._separate(rocket, b);
+          rocket.state = 'recovering';
+          rocket.t = 0;
+          rocket.upper.visible = false;
+        }
+      } else if (rocket.state === 'recovering') {
+        if (rocket.boosters.every(b => b.phase === 'landed' && b.t > 25)) {
+          rocket.timer = 25 + Math.random() * 55;
+          this._resetOnPad(rocket);
+        }
+      }
+      this._placeAttached(rocket);
+
+      // Attached boosters burn with the stack
+      const stackThrottle = rocket.state === 'ignition' ? Math.min(1, rocket.t / 3) * 0.9 : firing ? 1 : 0;
+      for (const b of rocket.boosters) {
+        let throttle = b.phase === 'attached' ? stackThrottle : this._flyBooster(b, dt);
+        b.throttle += (throttle - b.throttle) * Math.min(1, dt * 6);
+        this.port._updateEffects(b, dt);
+        if (b.throttle > 0.05 && b.group.visible) {
+          const dx = b.pos.x - cameraPos.x, dz = b.pos.z - cameraPos.z;
+          const score = b.throttle / (1 + Math.hypot(dx, dz, b.pos.y - cameraPos.y) / 500);
+          if (score > bestScore) { bestScore = score; best = b; }
+        }
+      }
+    }
+    return best ? { obj: best, score: bestScore } : null;
+  }
+
+  // Independent flight after separation; returns the throttle
+  _flyBooster(b, dt) {
+    b.t += dt;
+    const zone = b.zone;
+    const hoverY = zone.y + 700;
+    let throttle = 0;
+    let upX = 0, upY = 1, upZ = 0, turnRate = 1.3;
+
+    switch (b.phase) {
+      case 'coast': {
+        b.vel.y -= MARS_GRAVITY * dt;
+        b.pos.addScaledVector(b.vel, dt);
+        this._v.set(0, 1, 0).applyQuaternion(b.group.quaternion);
+        upX = this._v.x; upY = this._v.y; upZ = this._v.z;
+        if (b.t >= 2.5) { b.phase = 'return'; b.t = 0; b.p0.copy(b.pos); b.v0.copy(b.vel); }
+        break;
+      }
+      case 'return': {
+        // Hermite arc from separation back to a point above the landing
+        // zone, arriving falling straight down at landing-burn speed
+        const D = b.side === 0 ? 32 : 26;
+        const s = Math.min(1, b.t / D);
+        const s2 = s * s, s3 = s2 * s;
+        const h00 = 2 * s3 - 3 * s2 + 1, h10 = s3 - 2 * s2 + s, h01 = -2 * s3 + 3 * s2, h11 = s3 - s2;
+        const d00 = 6 * s2 - 6 * s, d10 = 3 * s2 - 4 * s + 1, d01 = -6 * s2 + 6 * s, d11 = 3 * s2 - 2 * s;
+        const endVy = -125;
+        b.pos.set(
+          h00 * b.p0.x + h10 * D * b.v0.x + h01 * zone.x,
+          h00 * b.p0.y + h10 * D * b.v0.y + h01 * hoverY + h11 * D * endVy,
+          h00 * b.p0.z + h10 * D * b.v0.z + h01 * zone.z
+        );
+        b.vel.set(
+          (d00 * b.p0.x + d10 * D * b.v0.x + d01 * zone.x) / D,
+          (d00 * b.p0.y + d10 * D * b.v0.y + d01 * hoverY + d11 * D * endVy) / D,
+          (d00 * b.p0.z + d10 * D * b.v0.z + d01 * zone.z) / D
+        );
+        // Engines lead the way: point the tail along the direction of travel
+        const sp = b.vel.length() || 1;
+        upX = -b.vel.x / sp; upY = -b.vel.y / sp; upZ = -b.vel.z / sp;
+        // Boostback burn, then a short entry burn
+        if (s < 0.22) throttle = 0.85;
+        else if (s > 0.62 && s < 0.7) throttle = 0.7;
+        if (s >= 1) { b.phase = 'landing'; b.t = 0; }
+        break;
+      }
+      case 'landing': {
+        const T = 11, u = Math.min(1, b.t / T);
+        const k = (1 - u) * (1 - u);
+        b.pos.set(zone.x, zone.y + FALCON.legDrop + 700 * k, zone.z);
+        throttle = 0.55 + 0.3 * (1 - u);
+        turnRate = 2.5;
+        b.legs.visible = u > 0.45;
+        if (u >= 1) { b.phase = 'landed'; b.t = 0; }
+        break;
+      }
+      case 'landed': {
+        b.pos.set(zone.x, zone.y + FALCON.legDrop, zone.z);
+        b.legs.visible = true;
+        turnRate = 3;
+        break;
+      }
+    }
+
+    // Swing toward the wanted attitude at a limited rate (a real flip)
+    this._v.set(upX, upY, upZ);
+    this._qTarget.setFromUnitVectors(this._yAxis, this._v);
+    const angle = b.group.quaternion.angleTo(this._qTarget);
+    if (angle > 1e-4) b.group.quaternion.rotateTowards(this._qTarget, turnRate * dt);
+    b.group.position.copy(b.pos);
+    return throttle;
+  }
+}
+
 // A fleet of Starships flying real mission profiles from a spaceport a safe
 // distance from the colony: refuel on the pad, ignite, climb vertically and
 // pitch over downrange; returning ships fall belly-first through entry,
@@ -3366,6 +3792,13 @@ class StarshipSpaceport {
     this.dust = new TruckDust(scene, this.isMobile ? 500 : 1600,
       { size: 4, grow: 38, opacity: 0.42, gravity: 0.02, drag: 0.45 });
 
+    // Falcon Heavy launch complex beside the Starship pads
+    this.falcon = new FalconHeavyFleet(this, {
+      count: options.falconCount || (this.isMobile ? 1 : 3),
+      plumeGeom,
+      flareTex
+    });
+
   }
 
   // Returning ships come in from the far side, spread over a 50 degree arc
@@ -3502,6 +3935,7 @@ class StarshipSpaceport {
     }
     const b = this.local(this.hubU + 20, 55);
     out.push({ x: b.x, z: b.z, r: 14 });
+    if (this.falcon) out.push(...this.falcon.collidables());
     return out;
   }
 
@@ -3612,6 +4046,9 @@ class StarshipSpaceport {
       }
     }
 
+    const falconBest = this.falcon ? this.falcon.update(dt, camera.position) : null;
+    if (falconBest && falconBest.score > lightScore) { lightScore = falconBest.score; lightShip = falconBest.obj; }
+
     // Engine light on the ship that matters most to the viewer; it only
     // shows near the ground, where there is something for it to light
     if (lightShip && lightShip.pos.y - lightShip.pad.y < 400) {
@@ -3637,10 +4074,11 @@ class StarshipSpaceport {
       // the near-vacuum, balloons outward
       const spread = Math.min(1, alt / 2500);
       const u = ship.plumeMat.uniforms;
+      const k = ship.plumeScale || 1;
       u.uThrottle.value = ship.throttle * (0.9 + Math.random() * 0.15);
-      u.uLen.value = (30 + 220 * spread) * (0.6 + 0.4 * ship.throttle);
-      u.uR0.value = 3.0;
-      u.uR1.value = 7 + 60 * spread;
+      u.uLen.value = (30 + 220 * spread) * (0.6 + 0.4 * ship.throttle) * k;
+      u.uR0.value = 3.0 * k;
+      u.uR1.value = (7 + 60 * spread) * k;
     }
     // The flare marks engine burns, and during entry the glowing plasma
     // (the only part of an inbound ship visible from the ground)
@@ -3657,8 +4095,10 @@ class StarshipSpaceport {
       }
       ship.flare.scale.set(f, f, 1);
     }
-    ship.plasma.visible = ship.heat > 0.01;
-    if (ship.plasma.visible) ship.plasmaMat.uniforms.uHeat.value = ship.heat * (0.85 + Math.random() * 0.15);
+    if (ship.plasma) {
+      ship.plasma.visible = ship.heat > 0.01;
+      if (ship.plasma.visible) ship.plasmaMat.uniforms.uHeat.value = ship.heat * (0.85 + Math.random() * 0.15);
+    }
 
     // Regolith blasted off the pad when the engines fire close to the ground
     const alt = ship.pos.y - ship.pad.y;

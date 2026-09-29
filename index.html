@@ -414,11 +414,12 @@
       display: block;
     }
     
-    /* Virtual Joystick: sits low in the left thumb zone, with a visible ring */
+    /* Virtual Joystick: low in the right thumb zone (most people steer with
+       the right thumb), with a visible ring */
     #virtual-joystick {
       position: absolute;
       bottom: calc(16px + env(safe-area-inset-bottom));
-      left: calc(16px + env(safe-area-inset-left));
+      right: calc(16px + env(safe-area-inset-right));
       width: 128px;
       height: 128px;
       border-radius: 50%;
@@ -445,10 +446,10 @@
 
     #virtual-joystick.released #joystick-knob { transition: transform 0.15s ease-out; }
 
-    /* Hold to boost (and drive forward) */
+    /* Hold to boost (and drive forward), under the left thumb */
     #boost-button {
       position: absolute;
-      right: calc(22px + env(safe-area-inset-right));
+      left: calc(22px + env(safe-area-inset-left));
       bottom: calc(30px + env(safe-area-inset-bottom));
       width: 92px;
       height: 92px;
