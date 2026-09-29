@@ -225,7 +225,10 @@ const renderer = new THREE.WebGLRenderer({
   // mobile GPUs resolve it almost for free
   antialias: perfSettings.isMobile && perfSettings.mobileTier !== 'low',
   powerPreference: perfSettings.isMobile ? 'low-power' : 'high-performance',
-  precision: perfSettings.isMobile ? 'mediump' : 'highp',
+  // highp everywhere: WebGL 2 guarantees it in fragment shaders, and the
+  // world-space terrain texturing turned into a blocky checkerboard on
+  // phones at mediump (half floats can't hold coordinates in the thousands)
+  precision: 'highp',
   alpha: false,
   stencil: false,
   depth: true,
@@ -7809,7 +7812,7 @@ function updateCamera(deltaMs) {
 
       // Behind the rover (it faces -Z), swung round by the orbit yaw
       const heading = roverYaw + rig.yaw;
-      const distance = rig.distance + 3.0 * boost01; // drop back a little at boost speed
+      const distance = rig.distance + 1.5 * boost01; // drop back a little at boost speed
       const horizontal = distance * Math.cos(rig.pitch);
       const pivotY = rover.position.y + 1.5;
       vectors.target.set(
@@ -7833,6 +7836,15 @@ function updateCamera(deltaMs) {
       // drag should feel direct, so stiffen the spring while looking around
       const stiffness = rig.dragging ? 40.0 : 11.0;
       const damping = rig.dragging ? 12.0 : 7.0;
+
+      // The spring trails a moving target by speed x damping / stiffness
+      // (~46 m at full boost). Lead the target by half of the boost share of
+      // that, so boosting pulls away half as far; cruising is unchanged.
+      if (boost01 > 0) {
+        const lead = Math.abs(velocity) * 60 * (damping / stiffness) * 0.5 * boost01 * Math.sign(velocity);
+        vectors.target.x += -Math.sin(roverYaw) * lead;
+        vectors.target.z += -Math.cos(roverYaw) * lead;
+      }
       const displacement = vectors.head.subVectors(vectors.target, camera.position);
       cameraSpring.velocity.addScaledVector(displacement, stiffness * dt);
       cameraSpring.velocity.multiplyScalar(Math.max(0, 1 - damping * dt));
@@ -8065,7 +8077,7 @@ function createRegolithMaterial(textureSize = 512) {
 
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', `#include <common>
-        varying vec3 vTerrainWorld;
+        varying highp vec3 vTerrainWorld;
         varying vec3 vTerrainNormal;`)
       .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
         vTerrainWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
@@ -8075,7 +8087,7 @@ function createRegolithMaterial(textureSize = 512) {
       .replace('#include <common>', `#include <common>
         uniform sampler2D tRegolith;
         uniform sampler2D tRegolithNormal;
-        varying vec3 vTerrainWorld;
+        varying highp vec3 vTerrainWorld;
         varying vec3 vTerrainNormal;
         float terrainRock;
         float terrainNear;
