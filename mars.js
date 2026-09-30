@@ -1370,6 +1370,28 @@ function createPostProcessing() {
 }
 const postProcessing = createPostProcessing();
 
+// Phones: hold the frame rate by adapting the render resolution. Launch
+// plumes and dust clouds are large transparent layers, heavy on fill rate at
+// 2x; step down quickly when frames get slow, climb back slowly once calm.
+const adaptiveResolution = {
+  max: renderer.getPixelRatio(),
+  min: 1,
+  avgMs: 16.7,
+  lastChange: 0,
+  update(deltaMs, now) {
+    if (!perfSettings.isMobile || this.max <= this.min) return;
+    this.avgMs += (deltaMs - this.avgMs) * 0.06;
+    const ratio = renderer.getPixelRatio();
+    if (this.avgMs > 24 && ratio > this.min && now - this.lastChange > 1200) {
+      renderer.setPixelRatio(Math.max(this.min, ratio - 0.25));
+      this.lastChange = now;
+    } else if (this.avgMs < 15 && ratio < this.max && now - this.lastChange > 6000) {
+      renderer.setPixelRatio(Math.min(this.max, ratio + 0.25));
+      this.lastChange = now;
+    }
+  }
+};
+
 function renderFrame(timeMs) {
   if (postProcessing) postProcessing.render(timeMs);
   else renderer.render(scene, camera);
@@ -3022,6 +3044,40 @@ function mergeGeometryListIndexed(parts) {
   return out;
 }
 
+// Merge [[parts, hexColour], ...] into one geometry carrying a per-vertex
+// colour, so a multi-coloured object (e.g. a white booster with black
+// interstage and grey engines) costs a single draw call.
+function mergeColoredGeometryLists(groups) {
+  const merged = groups
+    .filter(([parts]) => parts.length)
+    .map(([parts, hex]) => [mergeGeometryList(parts), new THREE.Color(hex)]);
+  let count = 0;
+  merged.forEach(([g]) => { count += g.attributes.position.count; });
+  const pos = new Float32Array(count * 3);
+  const nor = new Float32Array(count * 3);
+  const uv = new Float32Array(count * 2);
+  const col = new Float32Array(count * 3);
+  let o = 0;
+  for (const [g, c] of merged) {
+    const n = g.attributes.position.count;
+    pos.set(g.attributes.position.array, o * 3);
+    nor.set(g.attributes.normal.array, o * 3);
+    uv.set(g.attributes.uv.array, o * 2);
+    for (let i = 0; i < n; i++) {
+      col[(o + i) * 3] = c.r; col[(o + i) * 3 + 1] = c.g; col[(o + i) * 3 + 2] = c.b;
+    }
+    o += n;
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  out.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  out.computeBoundingSphere();
+  return out;
+}
+
 // Collapse a group of static meshes into one mesh per material and shadow
 // setting, flattening the hierarchy. Procedural settlements are assembled
 // from hundreds of small meshes; drawn as-is, the ~20 in range cost ~1,600
@@ -3290,10 +3346,8 @@ function buildFalconBoosterGeometries(isCore) {
     add(engines, new THREE.CylinderGeometry(0.2, 0.42, 1.1, 14, 1, true), _xf(Math.cos(a) * 1.15, -0.55, Math.sin(a) * 1.15));
   }
   return {
-    white: mergeGeometryList(white),
-    black: mergeGeometryList(black),
-    engines: mergeGeometryList(engines),
-    legs: mergeGeometryList(legs)
+    body: mergeColoredGeometryLists([[white, 0xd6d5d0], [black, 0x151517], [engines, 0x3a3632]]),
+    legs: mergeColoredGeometryLists([[legs, 0x151517]])
   };
 }
 
@@ -3310,7 +3364,7 @@ function buildFalconUpperGeometries() {
     profile.push(new THREE.Vector2(Math.max(0.1, FR * Math.pow(1 - t * t, 0.6)), U + 1.4 + FL * 0.45 + t * FL * 0.55));
   }
   white.push({ geometry: new THREE.LatheGeometry(profile, 28), matrix: null });
-  return { white: mergeGeometryList(white), black: mergeGeometryList(black) };
+  return mergeColoredGeometryLists([[white, 0xd6d5d0], [black, 0x151517]]);
 }
 
 // Falcon Heavy flights from their own launch complex beside the Starship
@@ -3318,12 +3372,25 @@ function buildFalconUpperGeometries() {
 // the side boosters peel away, flip, burn back and land side by side, then
 // the centre core does the same while the upper stage carries on to orbit.
 class FalconHeavyFleet {
+  // options: count, plumeGeom, flareTex, and optionally a site of its own
+  // ({ x, z, ux, uz }: centre and unit vector toward the colony; launches
+  // head the other way) with padCount / padSpacing / padU / zoneU in metres
   constructor(spaceport, options) {
     this.port = spaceport;
     this.scene = spaceport.scene;
     const count = options.count;
     this.plumeGeom = options.plumeGeom;
     this.flareTex = options.flareTex;
+    const site = options.site || spaceport.site;
+    this.U = { x: site.ux, z: site.uz };
+    this.V = { x: -site.uz, z: site.ux };
+    this.downrange = { x: -site.ux, z: -site.uz };
+    this.local = (u, v) => ({ x: site.x + this.U.x * u + this.V.x * v, z: site.z + this.U.z * u + this.V.z * v });
+    const padCount = options.padCount || 3;
+    const padSpacing = options.padSpacing || 170;
+    const padU = options.padU ?? -215;
+    const zoneU = options.zoneU ?? -335;
+    const timerOffset = options.timerOffset || 0;
 
     // Scratch objects (no per-frame allocation)
     this._yAxis = new THREE.Vector3(0, 1, 0);
@@ -3337,13 +3404,13 @@ class FalconHeavyFleet {
     // rocket has three landing zones out beyond them (downrange side)
     this.pads = [];
     this.zones = [];
-    for (let i = 0; i < 3; i++) {
-      const v = (i - 1) * 170;
-      const p = spaceport.local(-215, v);
+    for (let i = 0; i < padCount; i++) {
+      const v = (i - (padCount - 1) / 2) * padSpacing;
+      const p = this.local(padU, v);
       this.pads.push({ x: p.x, z: p.z, y: sampleTerrainHeight(p.x, p.z) + 1.0 });
       const set = [];
       for (let k = 0; k < 3; k++) {
-        const q = spaceport.local(-335, v + (k - 1) * 42);
+        const q = this.local(zoneU, v + (k - 1) * 42);
         set.push({ x: q.x, z: q.z, y: sampleTerrainHeight(q.x, q.z) + 0.4 });
       }
       this.zones.push(set);
@@ -3352,9 +3419,8 @@ class FalconHeavyFleet {
 
     const boosterGeoms = { side: buildFalconBoosterGeometries(false), core: buildFalconBoosterGeometries(true) };
     const upperGeoms = buildFalconUpperGeometries();
-    this.whiteMat = new THREE.MeshStandardMaterial({ color: 0xd6d5d0, roughness: 0.42, metalness: 0.15, fog: false });
-    this.blackMat = new THREE.MeshStandardMaterial({ color: 0x151517, roughness: 0.55, metalness: 0.3, fog: false });
-    this.engineMat = new THREE.MeshStandardMaterial({ color: 0x3a3632, metalness: 0.85, roughness: 0.45, side: THREE.DoubleSide, fog: false });
+    // One vertex-coloured material: each booster and upper stage is one draw
+    this.bodyMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.48, metalness: 0.25, side: THREE.DoubleSide, fog: false });
 
     this.rockets = [];
     for (let i = 0; i < count; i++) {
@@ -3365,15 +3431,14 @@ class FalconHeavyFleet {
         this._makeBooster(boosterGeoms.core, 0, zones[1]),
         this._makeBooster(boosterGeoms.side, 1, zones[2])
       ];
-      const upper = new THREE.Group();
-      upper.add(new THREE.Mesh(upperGeoms.white, this.whiteMat), new THREE.Mesh(upperGeoms.black, this.blackMat));
-      upper.children.forEach(m => { m.castShadow = true; });
+      const upper = new THREE.Mesh(upperGeoms, this.bodyMat);
+      upper.castShadow = true;
       this.scene.add(upper);
       const rocket = {
         pad, boosters, upper,
         state: 'pad',
         t: 0,
-        timer: 12 + i * 35 + Math.random() * 15,
+        timer: timerOffset + 12 + i * 35 + Math.random() * 15,
         pos: new THREE.Vector3(pad.x, pad.y, pad.z),
         vel: new THREE.Vector3(),
         quat: new THREE.Quaternion(),
@@ -3386,13 +3451,11 @@ class FalconHeavyFleet {
 
   _makeBooster(geoms, side, zone) {
     const group = new THREE.Group();
-    const white = new THREE.Mesh(geoms.white, this.whiteMat);
-    const black = new THREE.Mesh(geoms.black, this.blackMat);
-    const engines = new THREE.Mesh(geoms.engines, this.engineMat);
-    const legs = new THREE.Mesh(geoms.legs, this.blackMat);
-    white.castShadow = black.castShadow = legs.castShadow = true;
+    const body = new THREE.Mesh(geoms.body, this.bodyMat);
+    const legs = new THREE.Mesh(geoms.legs, this.bodyMat);
+    body.castShadow = legs.castShadow = true;
     legs.visible = false;
-    group.add(white, black, engines, legs);
+    group.add(body, legs);
 
     const plumeMat = createPlumeMaterial();
     const plume = new THREE.Mesh(this.plumeGeom, plumeMat);
@@ -3422,21 +3485,21 @@ class FalconHeavyFleet {
   }
 
   _buildGround() {
-    const port = this.port;
     const pads = [], marks = [], tower = [];
-    const toColony = Math.atan2(port.U.x, port.U.z);
+    const U = this.U;
+    const toColony = Math.atan2(U.x, U.z);
     for (const pad of this.pads) {
       pads.push({ geometry: new THREE.CylinderGeometry(16, 18, 2, 40), matrix: _xf(pad.x, pad.y - 1, pad.z) });
       marks.push({ geometry: new THREE.RingGeometry(9, 9.8, 48), matrix: _xf(pad.x, pad.y + 0.02, pad.z, -Math.PI / 2) });
       // Integration tower beside the pad, on the colony side
-      const tx = pad.x + port.U.x * 14, tz = pad.z + port.U.z * 14;
+      const tx = pad.x + U.x * 14, tz = pad.z + U.z * 14;
       tower.push({ geometry: new THREE.BoxGeometry(4.5, 78, 4.5), matrix: _xf(tx, pad.y + 39, tz, 0, toColony, 0) });
       for (let k = 0; k < 7; k++) {
         tower.push({ geometry: new THREE.BoxGeometry(5.2, 0.6, 5.2), matrix: _xf(tx, pad.y + 8 + k * 10, tz, 0, toColony, 0) });
       }
       // Crew-access and umbilical arms reaching toward the rocket
-      tower.push({ geometry: new THREE.BoxGeometry(0.8, 0.8, 9), matrix: _xf(tx - port.U.x * 5.5, pad.y + 52, tz - port.U.z * 5.5, 0, toColony, 0) });
-      tower.push({ geometry: new THREE.BoxGeometry(0.6, 0.6, 9), matrix: _xf(tx - port.U.x * 5.5, pad.y + 30, tz - port.U.z * 5.5, 0, toColony, 0) });
+      tower.push({ geometry: new THREE.BoxGeometry(0.8, 0.8, 9), matrix: _xf(tx - U.x * 5.5, pad.y + 52, tz - U.z * 5.5, 0, toColony, 0) });
+      tower.push({ geometry: new THREE.BoxGeometry(0.6, 0.6, 9), matrix: _xf(tx - U.x * 5.5, pad.y + 30, tz - U.z * 5.5, 0, toColony, 0) });
     }
     for (const set of this.zones) {
       for (const z of set) {
@@ -3493,7 +3556,7 @@ class FalconHeavyFleet {
     rocket.t = 0;
     rocket.pos.set(rocket.pad.x, rocket.pad.y, rocket.pad.z);
     rocket.vel.set(0, 0, 0);
-    this._stackQuat(rocket.quat, this.port.downrange, 0);
+    this._stackQuat(rocket.quat, this.downrange, 0);
     rocket.upperAttached = true;
     rocket.upper.visible = true;
     for (const b of rocket.boosters) {
@@ -3537,7 +3600,7 @@ class FalconHeavyFleet {
         // climbs as propellant burns off (and again once the sides drop)
         const pitch = t < 7 ? 0 : Math.min(1.3, 0.02 * (t - 7) + 0.0006 * (t - 7) * (t - 7));
         const accel = 9 + 0.25 * t;
-        const d = this.port.downrange;
+        const d = this.downrange;
         rocket.vel.x += Math.sin(pitch) * d.x * accel * dt;
         rocket.vel.y += (Math.cos(pitch) * accel - g) * dt;
         rocket.vel.z += Math.sin(pitch) * d.z * accel * dt;
@@ -3789,14 +3852,24 @@ class StarshipSpaceport {
     this.engineLight = new THREE.PointLight(0xffc48a, 0, 900, 0);
     scene.add(this.engineLight);
 
-    this.dust = new TruckDust(scene, this.isMobile ? 500 : 1600,
-      { size: 4, grow: 38, opacity: 0.42, gravity: 0.02, drag: 0.45 });
+    // Phones get fewer, smaller dust puffs: each one is a big transparent quad
+    this.dust = new TruckDust(scene, this.isMobile ? 180 : 1600,
+      { size: 4, grow: this.isMobile ? 22 : 38, opacity: 0.42, gravity: 0.02, drag: 0.45 });
 
-    // Falcon Heavy launch complex beside the Starship pads
+    // Falcon Heavy launch complex beside the Starship pads, plus any
+    // stand-alone complexes elsewhere (they share the plume geometry, flare
+    // texture, dust and the single engine light)
     this.falcon = new FalconHeavyFleet(this, {
       count: options.falconCount || (this.isMobile ? 1 : 3),
       plumeGeom,
       flareTex
+    });
+    this.falcons = [this.falcon];
+    (options.falconSites || []).forEach((site, k) => {
+      this.falcons.push(new FalconHeavyFleet(this, {
+        site, count: 5, padCount: 5, padSpacing: 130, padU: 70, zoneU: -70,
+        timerOffset: 20 + k * 45, plumeGeom, flareTex
+      }));
     });
 
   }
@@ -3935,7 +4008,7 @@ class StarshipSpaceport {
     }
     const b = this.local(this.hubU + 20, 55);
     out.push({ x: b.x, z: b.z, r: 14 });
-    if (this.falcon) out.push(...this.falcon.collidables());
+    for (const fleet of this.falcons || []) out.push(...fleet.collidables());
     return out;
   }
 
@@ -4046,8 +4119,10 @@ class StarshipSpaceport {
       }
     }
 
-    const falconBest = this.falcon ? this.falcon.update(dt, camera.position) : null;
-    if (falconBest && falconBest.score > lightScore) { lightScore = falconBest.score; lightShip = falconBest.obj; }
+    for (const fleet of this.falcons || []) {
+      const best = fleet.update(dt, camera.position);
+      if (best && best.score > lightScore) { lightScore = best.score; lightShip = best.obj; }
+    }
 
     // Engine light on the ship that matters most to the viewer; it only
     // shows near the ground, where there is something for it to light
@@ -4074,7 +4149,8 @@ class StarshipSpaceport {
       // the near-vacuum, balloons outward
       const spread = Math.min(1, alt / 2500);
       const u = ship.plumeMat.uniforms;
-      const k = ship.plumeScale || 1;
+      // Slimmer plumes on phones (they fill a lot of screen when close)
+      const k = (ship.plumeScale || 1) * (this.isMobile ? 0.7 : 1);
       u.uThrottle.value = ship.throttle * (0.9 + Math.random() * 0.15);
       u.uLen.value = (30 + 220 * spread) * (0.6 + 0.4 * ship.throttle) * k;
       u.uR0.value = 3.0 * k;
@@ -4104,7 +4180,7 @@ class StarshipSpaceport {
     const alt = ship.pos.y - ship.pad.y;
     if (firing && alt < 150) {
       const strength = ship.throttle * (1 - alt / 150);
-      ship.dustCarry += strength * (this.isMobile ? 35 : 110) * dt;
+      ship.dustCarry += strength * (this.isMobile ? 12 : 110) * dt;
       while (ship.dustCarry >= 1) {
         ship.dustCarry -= 1;
         const a = Math.random() * Math.PI * 2;
@@ -4174,6 +4250,15 @@ class MarsSceneManager {
     const near = (c, r) => c && (c.x - x) * (c.x - x) + (c.z - z) * (c.z - z) < r * r;
     if (near(this.colonyCenter, 480) || near(this.secondaryColonyCenter, 420)) return false;
     if (this.spaceportSite && near(this.spaceportSite, 650)) return false;
+    for (const c of this.expansionCities || []) if (near(c.center, 560)) return false;
+    for (const f of this.falconSites || []) if (near(f, 620)) return false;
+    for (const d of this.biodomes || []) if (near(d, d.r + 260)) return false;
+    for (const line of this.railLines || []) {
+      const lx = line.end.x - line.start.x, lz = line.end.z - line.start.z;
+      const l2 = lx * lx + lz * lz || 1;
+      const t = Math.max(0, Math.min(1, ((x - line.start.x) * lx + (z - line.start.z) * lz) / l2));
+      if (near({ x: line.start.x + lx * t, z: line.start.z + lz * t }, 140)) return false;
+    }
     for (const route of this.aiRoutes || []) {
       for (let i = 0; i < route.points.length; i += 4) {
         if (near(route.points[i], 120)) return false;
@@ -4236,12 +4321,320 @@ class MarsSceneManager {
     this.spaceportSite = { x, z, y, ux: ux / len, uz: uz / len };
   }
 
+  // Desktop: four permanent cities around the map, joined to the colonies by
+  // maglev, and two more Falcon Heavy launch complexes. Their ground is
+  // flattened here, before the haul roads are graded and anything is placed.
+  prepareExpansionSites() {
+    this.expansionCities = [];
+    this.falconSites = [];
+    if (getPerformanceSettings().isMobile) {
+      this.planBiodomes();
+      return;
+    }
+    const level = (x, z, r) => {
+      let sum = 0, n = 0;
+      for (let dx = -r; dx <= r; dx += r / 3) {
+        for (let dz = -r; dz <= r; dz += r / 3) { sum += sampleTerrainHeight(x + dx, z + dz); n++; }
+      }
+      return sum / n;
+    };
+    const cities = [
+      { name: 'Olympus', x: -1900, z: 700, seed: 0x51a7 },
+      { name: 'Tharsis', x: -700, z: 1650, seed: 0x7a31 },
+      { name: 'Elysium', x: 2050, z: 1350, seed: 0x2c9d },
+      { name: 'Hellas', x: 700, z: -1850, seed: 0x6e05 }
+    ];
+    for (const c of cities) {
+      const y = level(c.x, c.z, 220);
+      flattenMarsTerrain(c.x, c.z, 460, y);
+      this.expansionCities.push({ name: c.name, seed: c.seed, center: new THREE.Vector3(c.x, y, c.z) });
+    }
+    for (const [x, z] of [[-1950, -1900], [1750, -1950]]) {
+      const y = level(x, z, 260);
+      flattenMarsTerrain(x, z, 560, y);
+      const ux = COLONY_SITE_X - x, uz = COLONY_SITE_Z - z;
+      const len = Math.hypot(ux, uz) || 1;
+      this.falconSites.push({ x, z, y, ux: ux / len, uz: uz / len });
+    }
+    this.planBiodomes();
+  }
+
+  // Large greenhouse biodomes scattered over open ground, clear of every
+  // colony, city, launch site, haul road and rail line (12 on desktop, 5 on
+  // phones). Deterministic, so the map is the same every visit.
+  planBiodomes() {
+    const mobile = getPerformanceSettings().isMobile;
+    const half = marsSurface.geometry.userData.heightGrid.half;
+    const colony = { x: COLONY_SITE_X, z: COLONY_SITE_Z };
+    const round = [
+      { x: colony.x, z: colony.z, r: 700 },
+      { x: colony.x + 2600, z: colony.z, r: 520 },
+      { x: 900, z: 1220, r: 520 },
+      { x: SPACEPORT_X, z: SPACEPORT_Z, r: 720 },
+      { x: 0, z: 0, r: 300 }
+    ];
+    (this.expansionCities || []).forEach(c => round.push({ x: c.center.x, z: c.center.z, r: 560 }));
+    (this.falconSites || []).forEach(f => round.push({ x: f.x, z: f.z, r: 640 }));
+    // Rail lines (hub -> city) and the colony-to-colony line
+    const segs = [[colony, { x: colony.x + 2600, z: colony.z }], [{ x: colony.x + 2600, z: colony.z }, { x: 900, z: 1220 }]];
+    const cityAt = name => (this.expansionCities || []).find(c => c.name === name);
+    [['Olympus', colony], ['Tharsis', colony], ['Hellas', colony], ['Elysium', { x: colony.x + 2600, z: colony.z }]].forEach(([n, hub]) => {
+      const c = cityAt(n);
+      if (c) segs.push([hub, { x: c.center.x, z: c.center.z }]);
+    });
+    const segDist = (x, z, a, b) => {
+      const lx = b.x - a.x, lz = b.z - a.z, l2 = lx * lx + lz * lz || 1;
+      const t = Math.max(0, Math.min(1, ((x - a.x) * lx + (z - a.z) * lz) / l2));
+      return Math.hypot(x - (a.x + lx * t), z - (a.z + lz * t));
+    };
+    const hash = (x, z) => { const h = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453; return h - Math.floor(h); };
+
+    const candidates = [];
+    const step = mobile ? 520 : 650;
+    for (let gx = -half; gx <= half; gx += step) {
+      for (let gz = -half; gz <= half; gz += step) {
+        const x = gx + (hash(gx, gz) - 0.5) * step * 0.5;
+        const z = gz + (hash(gz, gx) - 0.5) * step * 0.5;
+        const r = mobile ? 55 + hash(x, z) * 30 : 60 + hash(x, z) * 55;
+        if (Math.abs(x) > half - r * 2 - 120 || Math.abs(z) > half - r * 2 - 120) continue;
+        if (round.some(o => Math.hypot(x - o.x, z - o.z) < o.r + r)) continue;
+        if (segs.some(([a, b]) => segDist(x, z, a, b) < 160 + r)) continue;
+        // The haul roads all lie in this box around the colony
+        if (x > -1350 && x < 150 && z > -1250 && z < 170) continue;
+        candidates.push({ x, z, r, order: hash(z, x) });
+      }
+    }
+    candidates.sort((a, b) => a.order - b.order);
+    this.biodomes = [];
+    for (const c of candidates) {
+      if (this.biodomes.length >= (mobile ? 5 : 12)) break;
+      if (this.biodomes.some(d => Math.hypot(d.x - c.x, d.z - c.z) < d.r + c.r + 250)) continue;
+      let sum = 0, n = 0;
+      for (let dx = -c.r; dx <= c.r; dx += c.r / 2) {
+        for (let dz = -c.r; dz <= c.r; dz += c.r / 2) { sum += sampleTerrainHeight(c.x + dx, c.z + dz); n++; }
+      }
+      const y = sum / n;
+      flattenMarsTerrain(c.x, c.z, c.r * 1.9, y);
+      this.biodomes.push({ x: c.x, z: c.z, y, r: c.r });
+    }
+  }
+
+  // All biodomes share five merged meshes: glass, frame, base, garden, water
+  buildBiodomes() {
+    if (!this.biodomes || !this.biodomes.length) return;
+    const glass = [], frame = [], base = [];
+    const soil = [], grass = [], trunks = [], leafA = [], leafB = [], leafC = [], water = [];
+    let seed = 1;
+    const rand = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+
+    for (const d of this.biodomes) {
+      const { x, z, y, r } = d;
+      seed = Math.floor(Math.abs(x * 31 + z * 17)) % 2147483646 + 1;
+      glass.push({ geometry: new THREE.SphereGeometry(r, 48, 16, 0, Math.PI * 2, 0, Math.PI / 2), matrix: _xf(x, y + 0.5, z) });
+      // Geodesic-style frame: meridian arches and three latitude rings
+      for (let k = 0; k < 10; k++) {
+        frame.push({ geometry: new THREE.TorusGeometry(r + 0.2, 0.32, 4, 40, Math.PI), matrix: _xf(x, y + 0.5, z, 0, (k / 10) * Math.PI, 0) });
+      }
+      for (const phi of [0.28, 0.7, 1.12]) {
+        frame.push({ geometry: new THREE.TorusGeometry((r + 0.2) * Math.cos(phi), 0.3, 4, 64), matrix: _xf(x, y + 0.5 + r * Math.sin(phi), z, Math.PI / 2, 0, 0) });
+      }
+      // Base wall, a ring of concrete, and an airlock toward the colony
+      base.push({ geometry: new THREE.CylinderGeometry(r + 1.6, r + 2.6, 3.4, 64, 1, true), matrix: _xf(x, y + 1.1, z) });
+      base.push({ geometry: new THREE.RingGeometry(r - 0.2, r + 1.8, 64), matrix: _xf(x, y + 2.8, z, -Math.PI / 2) });
+      const toColony = Math.atan2(COLONY_SITE_X - x, COLONY_SITE_Z - z);
+      base.push({ geometry: new THREE.BoxGeometry(9, 7, 14), matrix: _xf(x + Math.sin(toColony) * (r + 5), y + 3.5, z + Math.cos(toColony) * (r + 5), 0, toColony, 0) });
+
+      // Garden floor, a pond, and trees that stay clear of the glass
+      soil.push({ geometry: new THREE.CircleGeometry(r, 56), matrix: _xf(x, y + 0.25, z, -Math.PI / 2) });
+      const pondA = rand() * Math.PI * 2, pondD = r * 0.35, pondR = r * 0.16;
+      const px = x + Math.cos(pondA) * pondD, pz = z + Math.sin(pondA) * pondD;
+      water.push({ geometry: new THREE.CircleGeometry(pondR, 32), matrix: _xf(px, y + 0.32, pz, -Math.PI / 2) });
+      for (let k = 0; k < 6; k++) {
+        const a = rand() * Math.PI * 2, rr = rand() * r * 0.8;
+        grass.push({ geometry: new THREE.CircleGeometry(r * (0.15 + rand() * 0.15), 20), matrix: _xf(x + Math.cos(a) * rr, y + 0.28, z + Math.sin(a) * rr, -Math.PI / 2) });
+      }
+      const trees = Math.round(r * 0.5);
+      for (let k = 0; k < trees; k++) {
+        const a = rand() * Math.PI * 2, dist = Math.sqrt(rand()) * r * 0.86;
+        const tx = x + Math.cos(a) * dist, tz = z + Math.sin(a) * dist;
+        if (Math.hypot(tx - px, tz - pz) < pondR + 3) continue;
+        const room = Math.sqrt(r * r - dist * dist) - 4; // height under the glass here
+        const h = Math.min(room, 6 + rand() * 16);
+        if (h < 4) continue;
+        const canopy = 2 + rand() * 3.5;
+        trunks.push({ geometry: new THREE.CylinderGeometry(0.35, 0.55, h * 0.55, 6), matrix: _xf(tx, y + h * 0.275, tz) });
+        const leaves = rand();
+        const list = leaves < 0.4 ? leafA : leaves < 0.75 ? leafB : leafC;
+        if (rand() < 0.35) {
+          list.push({ geometry: new THREE.ConeGeometry(canopy, h * 0.75, 8), matrix: _xf(tx, y + h * 0.6, tz) });
+        } else {
+          list.push({ geometry: new THREE.IcosahedronGeometry(canopy, 0), matrix: _xf(tx, y + h * 0.55 + canopy * 0.5, tz, 0, rand() * 3, 0, 1, 0.85, 1) });
+        }
+      }
+      this.registerCollidable({ x, z }, r + 2);
+    }
+
+    const night = (params, dayValue, nightValue) => {
+      const m = new THREE.MeshStandardMaterial(params);
+      this.nightEmissives.push({ material: m, day: dayValue, night: nightValue });
+      return m;
+    };
+    // Faint, reflective glass; warm grow lights make the domes glow at night
+    const glassMat = night({
+      color: 0xc6e4ff, metalness: 0.1, roughness: 0.05, transparent: true, opacity: 0.14,
+      depthWrite: false, envMapIntensity: 1.6, emissive: 0xb06cff, emissiveIntensity: 0
+    }, 0.0, 0.1);
+    const frameMat = new THREE.MeshStandardMaterial({ color: 0xe6e6ea, metalness: 0.65, roughness: 0.35 });
+    const baseMat = new THREE.MeshStandardMaterial({ color: 0x6b6258, metalness: 0.05, roughness: 0.9 });
+    const gardenMat = night({ vertexColors: true, roughness: 0.85, metalness: 0.0, emissive: 0x6a2a7a, emissiveIntensity: 0 }, 0.0, 0.35);
+    const waterMat = new THREE.MeshStandardMaterial({ color: 0x1d4a5c, metalness: 0.2, roughness: 0.08, envMapIntensity: 1.4 });
+
+    const add = (geometry, material, cast, receive) => {
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.castShadow = cast;
+      mesh.receiveShadow = receive;
+      this.scene.add(mesh);
+      return mesh;
+    };
+    add(mergeGeometryList(base), baseMat, true, true);
+    add(mergeGeometryList(frame), frameMat, true, true);
+    add(mergeColoredGeometryLists([
+      [soil, 0x2c1c10], [grass, 0x1e4212], [trunks, 0x3a2616],
+      [leafA, 0x1b5016], [leafB, 0x2f6a1c], [leafC, 0x113a14]
+    ]), gardenMat, true, true);
+    add(mergeGeometryList(water), waterMat, false, true);
+    const glassMesh = add(mergeGeometryList(glass), glassMat, false, false);
+    glassMesh.renderOrder = 2; // after the opaque garden inside
+  }
+
+  buildExpansionCities() {
+    for (const city of this.expansionCities || []) {
+      const group = mergeStaticGroup(this._buildSettlement('city', city.center, city.seed));
+      this.scene.add(group);
+      city.group = group;
+    }
+  }
+
+  // Maglev lines from the colonies out to the new cities
+  buildRailNetwork() {
+    const byName = name => (this.expansionCities || []).find(c => c.name === name);
+    const links = [
+      [this.colonyCenter, byName('Olympus')],
+      [this.colonyCenter, byName('Tharsis')],
+      [this.colonyCenter, byName('Hellas')],
+      [this.secondaryColonyCenter, byName('Elysium')]
+    ];
+    this.railLines = this.railLines || [];
+    const parts = { white: [], metal: [], lamp: [], deck: [], pylon: [] };
+    for (const [hub, city] of links) {
+      if (hub && city) this._planMaglevLine(hub, city.center, parts);
+    }
+    // Everything static in the network is a handful of merged meshes
+    const mats = this.getColonyMaterials();
+    const deckMat = new THREE.MeshStandardMaterial({ color: 0xc9c9d4, roughness: 0.25, metalness: 0.85 });
+    const pylonMat = new THREE.MeshStandardMaterial({ color: 0x5c5d63, roughness: 0.45, metalness: 0.8 });
+    [[parts.white, mats.white, true], [parts.metal, mats.metal, true], [parts.lamp, mats.lamp, false],
+     [parts.deck, deckMat, true], [parts.pylon, pylonMat, true]].forEach(([list, mat, shadow]) => {
+      if (!list.length) return;
+      const mesh = new THREE.Mesh(mergeGeometryList(list), mat);
+      mesh.castShadow = shadow;
+      mesh.receiveShadow = true;
+      this.scene.add(mesh);
+    });
+  }
+
+  // One elevated line between a hub (colony) and a city: a terminal at the
+  // edge of each, pylons and a deck high enough to clear every rise, and a
+  // train shuttling between them with a short dwell at each platform
+  _planMaglevLine(hub, cityCenter, parts) {
+    const dx = cityCenter.x - hub.x, dz = cityCenter.z - hub.z;
+    const len = Math.hypot(dx, dz);
+    const ux = dx / len, uz = dz / len;
+    // Hub terminals sit outside the colony ring road; city ones at its edge
+    const a = { x: hub.x + ux * 400, z: hub.z + uz * 400 };
+    const b = { x: cityCenter.x - ux * 250, z: cityCenter.z - uz * 250 };
+    const ga = this.getTerrainHeight(a.x, a.z), gb = this.getTerrainHeight(b.x, b.z);
+    let H = 24;
+    for (let i = 1; i < 80; i++) {
+      const t = i / 80;
+      const ground = this.getTerrainHeight(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t);
+      H = Math.max(H, ground - (ga + (gb - ga) * t) + 14);
+    }
+    const start = this._planRailTerminal(a, ux, uz, H, parts);
+    const end = this._planRailTerminal(b, -ux, -uz, H, parts);
+
+    const horiz = Math.hypot(end.x - start.x, end.z - start.z);
+    const yaw = Math.atan2(end.x - start.x, end.z - start.z);
+    const slope = Math.atan2(end.y - start.y, horiz);
+    const trackLen = start.distanceTo(end);
+    parts.deck.push({
+      geometry: new THREE.BoxGeometry(8, 1.2, trackLen),
+      matrix: _xf((start.x + end.x) / 2, (start.y + end.y) / 2 - 2, (start.z + end.z) / 2, -slope, yaw, 0, 1, 1, 1, 'YXZ')
+    });
+    // Pylons every ~140 m, kept off the haul roads
+    const nearRoad = (x, z) => (this.aiRoutes || []).some(r => r.points.some(p => (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z) < 16 * 16));
+    const count = Math.max(2, Math.round(horiz / 140));
+    for (let i = 1; i < count; i++) {
+      const t = i / count;
+      const x = start.x + (end.x - start.x) * t, z = start.z + (end.z - start.z) * t;
+      if (nearRoad(x, z)) continue;
+      const top = start.y + (end.y - start.y) * t - 2.6;
+      const g = this.getTerrainHeight(x, z);
+      const h = top - g + 1;
+      parts.pylon.push({ geometry: new THREE.CylinderGeometry(1.8, 2.8, h, 10), matrix: _xf(x, g + h / 2 - 0.5, z) });
+    }
+
+    // Trains carry no lights of their own (every extra light costs every lit
+    // pixel on screen); their glowing strips read at night
+    const train = this.createBulletTrainMesh({ headlight: false });
+    train.position.copy(start);
+    train.rotation.y = yaw;
+    this.scene.add(train);
+    this.bulletTrains = this.bulletTrains || [];
+    this.bulletTrains.push({
+      mesh: train, start, end, yaw,
+      t: Math.random(), direction: Math.random() < 0.5 ? 1 : -1,
+      speed: 120 / trackLen, // ~430 km/h
+      dwellTime: 8, dwell: 0,
+      lastTime: null
+    });
+    this.railLines.push({ start, end });
+  }
+
+  // Elevated terminal whose platform runs along (dx, dz); returns the point
+  // where the track leaves it
+  _planRailTerminal(p, dx, dz, H, parts) {
+    const sx = -dz, sz = dx;
+    const yaw = Math.atan2(dx, dz);
+    const y = this.getTerrainHeight(p.x, p.z);
+    const at = (along, side) => ({ x: p.x + dx * along + sx * side, z: p.z + dz * along + sz * side });
+    for (const a of [5, 20, 35, 50]) {
+      for (const sd of [-4, 4]) {
+        const q = at(a, sd);
+        parts.metal.push({ geometry: new THREE.BoxGeometry(1.6, H, 1.6), matrix: _xf(q.x, y + H / 2, q.z, 0, yaw, 0) });
+      }
+      const q = at(a, 0);
+      this.registerCollidable({ x: q.x, z: q.z }, 5);
+    }
+    let q = at(28, 0);
+    parts.metal.push({ geometry: new THREE.BoxGeometry(13, 1.4, 56), matrix: _xf(q.x, y + H, q.z, 0, yaw, 0) });
+    q = at(30, 3);
+    parts.white.push({ geometry: new THREE.CylinderGeometry(3.4, 3.4, 40, 20), matrix: _xf(q.x, y + H + 4.2, q.z, Math.PI / 2, yaw, 0, 1, 1, 1, 'YXZ') });
+    q = at(30, -0.45);
+    parts.lamp.push({ geometry: new THREE.BoxGeometry(0.3, 0.8, 36), matrix: _xf(q.x, y + H + 4.6, q.z, 0, yaw, 0) });
+    parts.white.push({ geometry: new THREE.CylinderGeometry(3, 3, H + 5, 20), matrix: _xf(p.x, y + (H + 5) / 2, p.z) });
+    this.registerCollidable({ x: p.x, z: p.z }, 3.5);
+    q = at(55, 0);
+    return new THREE.Vector3(q.x, y + H + 2, q.z);
+  }
+
   initializeRocketLaunchSystem() {
     if (this.spaceport) return;
     try {
       if (!this.spaceportSite) this.prepareSpaceportSite();
       this.spaceport = new StarshipSpaceport(this.scene, this.spaceportSite, {
-        roadMaterials: this.getRoadMaterials()
+        roadMaterials: this.getRoadMaterials(),
+        falconSites: this.falconSites || []
       });
       this.spaceport.collidables().forEach(c => this.registerCollidable({ x: c.x, z: c.z }, c.r));
       console.log('MarsSceneManager: spaceport ready with', this.spaceport.ships.length, 'Starships');
@@ -4641,6 +5034,8 @@ class MarsSceneManager {
     // surrounding ground.
     flattenMarsTerrain(colonyOffsetX, colonyOffsetZ, 330, groundY);
     this.prepareSpaceportSite();
+    this.prepareExpansionSites();
+    this.buildBiodomes();
 
     // Grade the haul roads into the ground before anything else is placed on
     // it, so lamps, crates and pads all stand on the final surface
@@ -4674,6 +5069,8 @@ class MarsSceneManager {
         console.log('✅ Secondary colony created at', sc.x, sc.z);
 
         this.createBulletTrainSystem();
+        this.buildExpansionCities();
+        this.buildRailNetwork();
 
         // Queue creation of the third futuristic city node in the background
         try {
@@ -7077,7 +7474,7 @@ class MarsSceneManager {
   }
 
   // Build a 4-car high-speed train that carries Optimus-style robots
-  createBulletTrainMesh() {
+  createBulletTrainMesh(options = {}) {
     const train = new THREE.Group();
 
     const carCount = 4;
@@ -7154,9 +7551,11 @@ class MarsSceneManager {
         frontStrip.position.set(0, 2.4, -carLength / 2 - 1.6);
         car.add(frontStrip);
 
-        const headLight = new THREE.PointLight(0xffffff, lampIntensity(1.7, 140), 140);
-        headLight.position.set(0, 2.4, -carLength / 2 - 1.9);
-        car.add(headLight);
+        if (options.headlight !== false) {
+          const headLight = new THREE.PointLight(0xffffff, lampIntensity(1.7, 140), 140);
+          headLight.position.set(0, 2.4, -carLength / 2 - 1.9);
+          car.add(headLight);
+        }
       }
 
       const offsetZ = trainOriginOffset + i * (carLength + carGap);
@@ -7164,7 +7563,8 @@ class MarsSceneManager {
       train.add(car);
     }
 
-    return train;
+    // ~170 small meshes per train collapse to a few (one per material)
+    return mergeStaticGroup(train);
   }
 
   // Animate bullet train along its elevated track
@@ -7185,21 +7585,27 @@ class MarsSceneManager {
       train.lastTime = currentTime;
       const dt = Math.min(deltaMs, 120) / 1000; // clamp
 
+      // Stand at the platform for a moment before heading back
+      if (train.dwell > 0) {
+        train.dwell -= dt;
+        return;
+      }
+
       let t = train.t + train.speed * dt * train.direction;
 
       // Ping-pong between endpoints
-      if (t > 1) {
-        t = 1 - (t - 1);
+      if (t >= 1) {
+        t = 1;
         train.direction = -1;
-      } else if (t < 0) {
-        t = -t;
+        train.dwell = train.dwellTime || 0;
+      } else if (t <= 0) {
+        t = 0;
         train.direction = 1;
+        train.dwell = train.dwellTime || 0;
       }
 
       train.t = t;
-
-      const pos = new THREE.Vector3().lerpVectors(train.start, train.end, t);
-      train.mesh.position.copy(pos);
+      train.mesh.position.lerpVectors(train.start, train.end, t);
 
       // Flip heading when changing direction so the nose always points forward
       const baseYaw = train.yaw;
@@ -7635,6 +8041,7 @@ function animate(time) {
     resetRoverMotion(false);
     return;
   }
+  adaptiveResolution.update(delta, time);
   // Movement constants are tuned per 60 Hz frame. Scale by the real frame time
   // so the rover keeps the same speed at 30 or 144 fps (was capped at 1.0,
   // which made it crawl whenever the frame rate dropped below 60).
