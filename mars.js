@@ -33,7 +33,6 @@ function _getHudElements() {
       health: document.getElementById('rover-health'),
       fuel: document.getElementById('rover-fuel'),
       compass: document.getElementById('rover-heading'),
-      mission: document.getElementById('mission-objective'),
       toast: document.getElementById('mission-toast'),
       speedPanel: document.getElementById('speed-hud'),
       speed: document.getElementById('speed-value'),
@@ -45,16 +44,7 @@ function _getHudElements() {
 
 // HUD panels are styled by index.html (.hud-panel etc.); this only builds them
 function ensureMissionHUD() {
-  if (typeof document === 'undefined' || document.getElementById('mission-hud')) return;
-
-  const hud = document.createElement('div');
-  hud.id = 'mission-hud';
-  hud.className = 'hud-panel';
-  hud.innerHTML = `
-    <div class="hud-eyebrow">Mission</div>
-    <div id="mission-objective">Follow the blue beacon route</div>
-  `;
-  document.body.appendChild(hud);
+  if (typeof document === 'undefined' || document.getElementById('speed-hud')) return;
 
   const speed = document.createElement('div');
   speed.id = 'speed-hud';
@@ -78,22 +68,6 @@ function showMissionToast(message) {
   window._missionToastTimer = setTimeout(() => hud.toast.classList.remove('show'), 2200);
 }
 window.showGameToast = showMissionToast;
-
-function updateMissionObjective() {
-  ensureMissionHUD();
-  const hud = _getHudElements();
-  if (!hud.mission) return;
-  const route = window.guidedRouteProgress || { reached: 0, total: 6 };
-  const scan = window.scanSiteProgress || { reached: 0, total: 4 };
-
-  if (route.reached < route.total) {
-    hud.mission.textContent = `Reach beacon ${route.reached + 1}`;
-  } else if (scan.reached < scan.total) {
-    hud.mission.textContent = `${isDaytime ? 'Daylight survey' : 'Night scan'}: anomaly ${scan.reached + 1}`;
-  } else {
-    hud.mission.textContent = 'Return to the command colony';
-  }
-}
 
 // Compass direction lookup (avoid recreating every frame)
 const _compassDirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
@@ -139,7 +113,6 @@ function updateGameHUD() {
     hud.compass.textContent = `${_compassDirs[idx]} (${degrees.toFixed(0)}°)`;
   }
 
-  updateMissionObjective();
 }
 
 // Performance-aware initialization with mobile detection
@@ -3858,7 +3831,11 @@ class StarshipSpaceport {
     }
 
     // One shared engine light (a fixed light count avoids shader recompiles)
-    this.engineLight = new THREE.PointLight(0xffc48a, 0, 900, 0);
+    // Inverse-square falloff (decay 2): bright on the pad and the ground right
+    // beneath a burn, a faint warm wash 100-200 m out, nothing beyond ~600 m.
+    // (With no falloff it lit the whole desert at several times the sun's
+    // strength during every launch, with hard bright and dark patches.)
+    this.engineLight = new THREE.PointLight(0xffc48a, 0, 650, 2);
     scene.add(this.engineLight);
 
     // Phones get fewer, smaller dust puffs: each one is a big transparent quad
@@ -4139,7 +4116,7 @@ class StarshipSpaceport {
       const s = lightShip;
       this._down.set(0, -1, 0).applyQuaternion(s.group.quaternion);
       this.engineLight.position.copy(s.pos).addScaledVector(this._down, 12);
-      this.engineLight.intensity = 5 * LEGACY_LIGHT_SCALE * s.throttle * (1 - 0.6 * dayAmount);
+      this.engineLight.intensity = 6000 * s.throttle * (1 - 0.6 * dayAmount);
     } else {
       this.engineLight.intensity = 0;
     }

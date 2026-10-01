@@ -257,23 +257,6 @@
       pointer-events: none;
     }
 
-    #mission-hud {
-      top: 18px;
-      left: 18px;
-      min-width: 210px;
-      max-width: min(320px, calc(100vw - 100px));
-      padding: 12px 14px;
-    }
-
-    .hud-eyebrow {
-      font-size: 10px;
-      font-weight: 600;
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
-      color: var(--ui-cyan);
-    }
-
-    #mission-objective { margin-top: 4px; font-size: 14px; font-weight: 600; }
 
     #mission-toast {
       position: fixed;
@@ -360,15 +343,6 @@
     @media (max-width: 768px) {
       #controls-hint { display: none !important; }
       #sound-toggle { display: none !important; } /* music starts on first touch */
-      #mission-hud {
-        top: calc(10px + env(safe-area-inset-top));
-        left: calc(10px + env(safe-area-inset-left));
-        min-width: 0;
-        max-width: calc(100vw - 132px);
-        padding: 8px 11px;
-        border-radius: 12px;
-      }
-      #mission-objective { font-size: 13px; }
       #speed-hud {
         top: calc(10px + env(safe-area-inset-top));
         bottom: auto;
