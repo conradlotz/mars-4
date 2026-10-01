@@ -1372,25 +1372,43 @@ const postProcessing = createPostProcessing();
 
 // Phones: hold the frame rate by adapting the render resolution. Launch
 // plumes and dust clouds are large transparent layers, heavy on fill rate at
-// 2x; step down quickly when frames get slow, climb back slowly once calm.
+// 2x; step down when frames get slow, climb back once they are calm.
+// "Slow" and "calm" are measured against the display's own refresh interval:
+// a 60 Hz screen never delivers frames faster than 16.7 ms, so a fixed
+// "under 15 ms" test could never pass and the resolution never came back.
 const adaptiveResolution = {
   max: renderer.getPixelRatio(),
-  min: 1,
+  // Below ~1.25 a 2.5-3x phone screen looks visibly pixelated
+  min: perfSettings.isMobile && perfSettings.mobileTier === 'high' ? 1.25 : 1,
   avgMs: 16.7,
+  refreshMs: 16.7,
   lastChange: 0,
+  calmSince: 0,
   update(deltaMs, now) {
     if (!perfSettings.isMobile || this.max <= this.min) return;
-    this.avgMs += (deltaMs - this.avgMs) * 0.06;
+    // Refresh interval: snaps down to any faster frame, creeps up slowly
+    this.refreshMs = Math.max(6, Math.min(this.refreshMs + 0.004, deltaMs));
+    // Single long frames (a settlement spawning) must not count as slowness
+    this.avgMs += (Math.min(deltaMs, this.refreshMs * 3) - this.avgMs) * 0.05;
     const ratio = renderer.getPixelRatio();
-    if (this.avgMs > 24 && ratio > this.min && now - this.lastChange > 1200) {
+    const slow = this.avgMs > this.refreshMs * 1.5;
+    const calm = this.avgMs < this.refreshMs * 1.15;
+    if (!calm) this.calmSince = now;
+    if (slow && ratio > this.min && now - this.lastChange > 1500) {
       renderer.setPixelRatio(Math.max(this.min, ratio - 0.25));
       this.lastChange = now;
-    } else if (this.avgMs < 15 && ratio < this.max && now - this.lastChange > 6000) {
+    } else if (calm && ratio < this.max && now - this.calmSince > 3000 && now - this.lastChange > 3000) {
       renderer.setPixelRatio(Math.min(this.max, ratio + 0.25));
       this.lastChange = now;
     }
   }
 };
+
+// Phones: the scene manager (rockets, settlements, beacons) used to run once
+// every 60 frames with its time step capped at 0.1 s, so rockets advanced at a
+// tenth of real speed in once-a-second jumps. It is cheap and self-throttled
+// for its heavy parts, so it now runs every frame (every third on low tier)
+let _mobileSceneDelta = 0;
 
 function renderFrame(timeMs) {
   if (postProcessing) postProcessing.render(timeMs);
@@ -3860,7 +3878,7 @@ class StarshipSpaceport {
     // stand-alone complexes elsewhere (they share the plume geometry, flare
     // texture, dust and the single engine light)
     this.falcon = new FalconHeavyFleet(this, {
-      count: options.falconCount || (this.isMobile ? 1 : 3),
+      count: options.falconCount || (this.isMobile ? 2 : 3),
       plumeGeom,
       flareTex
     });
@@ -6112,21 +6130,25 @@ class MarsSceneManager {
   // appeared after you had already driven past. Now: everything in range is
   // built during the loading screen (prewarm), then new ones are built as you
   // drive within a small per-check time budget, ones ahead of you first.
-  updateSettlements(playerPosition, { prewarm = false } = {}) {
+  updateSettlements(playerPosition, { prewarm = false, prewarmMax = Infinity } = {}) {
     const now = performance.now();
     const moving = typeof velocity === 'number' && Math.abs(velocity) > 0.012;
     if (!prewarm && now - this.lastSettlementCheck < (moving ? 250 : 600)) return;
     this.lastSettlementCheck = now;
 
     const perfSettings = getPerformanceSettings();
-    if (perfSettings.isMobile) return;
+    if (perfSettings.isMobile && perfSettings.mobileTier === 'low') return;
 
     const px = playerPosition.x;
     const pz = playerPosition.z;
     const grid = this.settlementGrid;
+    // Keep sites on the terrain mesh (phones have a smaller map)
+    const half = marsSurface.geometry.userData.heightGrid.half - 160;
+    const spawnDist = this.settlementSpawnDist;
+    const despawnDist = this.settlementDespawnDist;
 
     // Determine which grid cells are within spawn range
-    const scanRadius = Math.ceil(this.settlementSpawnDist / grid) + 1;
+    const scanRadius = Math.ceil(spawnDist / grid) + 1;
     const playerGX = Math.floor(px / grid);
     const playerGZ = Math.floor(pz / grid);
 
@@ -6134,7 +6156,7 @@ class MarsSceneManager {
     for (const [key, settlement] of this.settlements) {
       const dx = settlement.center.x - px;
       const dz = settlement.center.z - pz;
-      if (dx * dx + dz * dz > this.settlementDespawnDist * this.settlementDespawnDist) {
+      if (dx * dx + dz * dz > despawnDist * despawnDist) {
         // Remove from scene
         this.scene.remove(settlement.group);
         settlement.group.traverse(child => {
@@ -6183,7 +6205,8 @@ class MarsSceneManager {
         const dx = cx - px;
         const dz2 = cz - pz;
         const distSq = dx * dx + dz2 * dz2;
-        if (distSq > this.settlementSpawnDist * this.settlementSpawnDist) continue;
+        if (distSq > spawnDist * spawnDist) continue;
+        if (Math.abs(cx) > half || Math.abs(cz) > half) continue; // off the edge of the map
         const minSpawnDist = 260;
         if (distSq < minSpawnDist * minSpawnDist) continue;
         if (!this._isSettlementSiteClear(cx, cz)) continue;
@@ -6194,15 +6217,25 @@ class MarsSceneManager {
     }
     candidates.sort((a, b) => a.score - b.score);
 
-    const budgetMs = prewarm ? Infinity : (moving ? 6 : 12);
+    // Phones are 3-5x slower at building geometry, and each settlement adds
+    // ~20 draw calls: a smaller time budget and a cap on how many stay live
+    const budgetMs = prewarm ? Infinity : perfSettings.isMobile ? (moving ? 4 : 8) : (moving ? 6 : 12);
+    const maxLive = perfSettings.isMobile ? (perfSettings.mobileTier === 'high' ? 14 : 9) : Infinity;
+    let builtNow = 0;
     for (const { key, hash, cx, cz } of candidates) {
       if (performance.now() - now > budgetMs) break;
+      if (this.settlements.size >= maxLive || builtNow >= prewarmMax) break;
       // Determine settlement type from hash bits
       const typeBits = (hash >>> 24) & 0xff;
       let type;
       if (typeBits < 100) type = 'outpost';       // ~39% — small
       else if (typeBits < 200) type = 'base';      // ~39% — medium
       else type = 'city';                           // ~22% — large
+
+      // A city is ~3x the build cost of a base; on a phone, wait until the
+      // rover is stationary rather than hitch mid-drive
+      if (type === 'city' && perfSettings.isMobile && moving && !prewarm) continue;
+      builtNow++;
 
       const groundY = this.getTerrainHeight(cx, cz);
       const center = new THREE.Vector3(cx, groundY, cz);
@@ -8091,8 +8124,12 @@ function animate(time) {
     const sceneUpdateThrottle = currentPerfSettings.mobileTier === 'high' ? 10 : 
                                currentPerfSettings.mobileTier === 'medium' ? 20 : 40;
     
-    if (window.marsSceneManager && rover && frameCount % (frameThrottle * sceneUpdateThrottle) === 0) {
-      window.marsSceneManager.update(rover.position, delta * frameThrottle * sceneUpdateThrottle);
+    if (window.marsSceneManager && rover) {
+      _mobileSceneDelta += delta;
+      if (currentPerfSettings.mobileTier !== 'low' || frameCount % 3 === 0) {
+        window.marsSceneManager.update(rover.position, _mobileSceneDelta);
+        _mobileSceneDelta = 0;
+      }
     }
     
     // Disable all atmospheric effects and particles on mobile in emergency mode
@@ -8841,16 +8878,27 @@ function _periodicWorley(x, y, P, seed) {
   return best;
 }
 
+// fBm whose finest octave still spans >= 6 texels per cycle at this texture
+// size. Anything finer aliases into per-pixel noise (the "pixelated ground"),
+// which low-angle night lighting then makes obvious. Returns 0.5 (flat) when
+// even the base frequency is too fine to represent.
+function _bandLimitedFbm(u, v, base, octaves, seed, size) {
+  const maxCycles = size / 6;
+  if (base > maxCycles) return 0.5;
+  const fit = Math.max(1, Math.min(octaves, Math.floor(Math.log2(maxCycles / base)) + 1));
+  return _periodicFbm(u * base, v * base, base, fit, seed);
+}
+
 // RGBA detail: R broad fBm, G pebble mask, B fine grit, A second broad fBm
 function createRegolithDetailTexture(size = 512) {
   const data = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const u = x / size, v = y / size;
-      const broad = _periodicFbm(u * 4, v * 4, 4, 5, 1);
+      const broad = _bandLimitedFbm(u, v, 4, 5, 1, size);
       const pebble = Math.max(0, 1 - _periodicWorley(u * 24, v * 24, 24, 3) * 1.9);
-      const grit = _periodicFbm(u * 64, v * 64, 64, 2, 7);
-      const broad2 = _periodicFbm(u * 3 + 0.5, v * 3 + 0.5, 3, 5, 11);
+      const grit = _bandLimitedFbm(u, v, 32, 2, 7, size);
+      const broad2 = _bandLimitedFbm(u + 0.5 / 3, v + 0.5 / 3, 3, 5, 11, size);
       const i = (y * size + x) * 4;
       data[i] = broad * 255;
       data[i + 1] = Math.min(1, pebble * (0.6 + 0.8 * _periodicHash(Math.floor(u * 24), Math.floor(v * 24), 24, 5))) * 255;
@@ -8875,15 +8923,19 @@ function createRegolithNormalTexture(size = 512) {
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const u = x / size, v = y / size;
-      const undulation = _periodicFbm(u * 6, v * 6, 6, 5, 21);
+      const undulation = _bandLimitedFbm(u, v, 6, 5, 21, size);
       const stones = Math.pow(Math.max(0, 1 - _periodicWorley(u * 18, v * 18, 18, 23) * 2.2), 1.5);
-      const grit = _periodicFbm(u * 96, v * 96, 96, 2, 29);
-      H[y * size + x] = undulation * 0.9 + stones * 0.55 + grit * 0.12;
+      const grit = _bandLimitedFbm(u, v, 48, 2, 29, size);
+      H[y * size + x] = undulation * 0.9 + stones * 0.55 + grit * 0.1;
     }
   }
-  const at = (x, y) => H[(((y % size) + size) % size) * size + (((x % size) + size) % size)];
+  const raw = (x, y) => H[(((y % size) + size) % size) * size + (((x % size) + size) % size)];
+  // 3x3 tent blur: stops the finite differences below from amplifying
+  // single-texel noise
+  const at = (x, y) => (4 * raw(x, y) + 2 * (raw(x - 1, y) + raw(x + 1, y) + raw(x, y - 1) + raw(x, y + 1))
+    + raw(x - 1, y - 1) + raw(x + 1, y - 1) + raw(x - 1, y + 1) + raw(x + 1, y + 1)) / 16;
   const data = new Uint8Array(size * size * 4);
-  const strength = 6.0;
+  const strength = size >= 512 ? 5.0 : 3.6;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       let nx = (at(x - 1, y) - at(x + 1, y)) * strength;
@@ -8954,8 +9006,8 @@ function createRegolithMaterial(textureSize = 512) {
           // Bright dust vs darker, coarser plains at the kilometre scale
           albedo *= mix(0.74, 1.14, smoothstep(0.32, 0.68, dMacro.r * 0.55 + dA.r * 0.45));
           // Wind-swept sheets of dark basaltic sand
-          float darkSand = smoothstep(0.56, 0.72, dMacro.a * 0.6 + dA.a * 0.4);
-          albedo = mix(albedo, vec3(0.19, 0.105, 0.075), darkSand * 0.55);
+          float darkSand = smoothstep(0.5, 0.8, dMacro.a * 0.6 + dA.a * 0.4);
+          albedo = mix(albedo, vec3(0.19, 0.105, 0.075), darkSand * 0.42);
           // Mottling at the tens-of-metres scale
           albedo *= 0.86 + 0.28 * dB.r;
 
@@ -8968,8 +9020,8 @@ function createRegolithMaterial(textureSize = 512) {
           // Near-field grit and scattered dark pebbles (faded out before they could shimmer)
           albedo *= mix(1.0, 0.95 + 0.1 * dC.b, terrainNear);
           // Pebbles gather in patches rather than dusting everything evenly
-          float pebbles = smoothstep(0.45, 0.85, dC.g) * smoothstep(0.45, 0.7, dB.a);
-          albedo = mix(albedo, albedo * vec3(0.62, 0.6, 0.63), pebbles * terrainNear * 0.35);
+          float pebbles = smoothstep(0.4, 0.9, dC.g) * smoothstep(0.4, 0.75, dB.a);
+          albedo = mix(albedo, albedo * vec3(0.7, 0.68, 0.7), pebbles * terrainNear * 0.3);
           diffuseColor.rgb = albedo;
         }`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
@@ -10268,6 +10320,9 @@ function loadNonEssentialComponents() {
         if (window.marsSceneManager.disableRocketLaunches && perfSettings.mobileTier === 'low') {
           window.marsSceneManager.disableRocketLaunches();
         }
+        // Settlements around the landing site exist from the first frame
+        // (a handful, so loading stays quick on a phone)
+        window.marsSceneManager.updateSettlements(rover.position, { prewarm: true, prewarmMax: 6 });
         return Promise.resolve();
       });
     }, 50); // Reduced from 2000ms to 50ms for immediate driving capability
