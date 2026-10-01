@@ -33,7 +33,6 @@ function _getHudElements() {
       health: document.getElementById('rover-health'),
       fuel: document.getElementById('rover-fuel'),
       compass: document.getElementById('rover-heading'),
-      route: document.getElementById('tour-status'),
       mission: document.getElementById('mission-objective'),
       toast: document.getElementById('mission-toast'),
       speedPanel: document.getElementById('speed-hud'),
@@ -54,7 +53,6 @@ function ensureMissionHUD() {
   hud.innerHTML = `
     <div class="hud-eyebrow">Mission</div>
     <div id="mission-objective">Follow the blue beacon route</div>
-    <div id="tour-status">Tour: 0/6 beacons</div>
   `;
   document.body.appendChild(hud);
 
@@ -141,13 +139,6 @@ function updateGameHUD() {
     hud.compass.textContent = `${_compassDirs[idx]} (${degrees.toFixed(0)}°)`;
   }
 
-  // Update guided route HUD status
-  if (hud.route && window.guidedRouteProgress) {
-    const { reached, total } = window.guidedRouteProgress;
-    const scan = window.scanSiteProgress;
-    const scanText = scan ? ` | Scans: ${scan.reached}/${scan.total}` : '';
-    hud.route.textContent = reached >= total ? `Tour: Complete${scanText}` : `Tour: ${reached}/${total} beacons${scanText}`;
-  }
   updateMissionObjective();
 }
 
