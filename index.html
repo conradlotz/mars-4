@@ -4,7 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="permissions-policy" content="accelerometer=*, autoplay=*, camera=*, clipboard-write=*, encrypted-media=*, fullscreen=*, geolocation=*, gyroscope=*, magnetometer=*, microphone=*, midi=*, payment=*, picture-in-picture=*, publickey-credentials-get=*, screen-wake-lock=*, sync-xhr=*, usb=*, web-share=*, xr-spatial-tracking=*">
-  <title>Drive on Mars</title>
+  <title>Drive on Mars — a 3D rover in your browser | Conrad Lotz</title>
+  <meta name="description" content="Drive a rover across a 3D Martian landscape in your browser. A hobby project by Conrad Lotz, built with three.js and WebGL.">
+  <link rel="canonical" href="https://mars.conradlotz.com/">
+  <meta name="author" content="Conrad Lotz">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Drive on Mars">
+  <meta property="og:url" content="https://mars.conradlotz.com/">
+  <meta property="og:title" content="Drive on Mars — a 3D rover in your browser">
+  <meta property="og:description" content="Drive a rover across a 3D Martian landscape in your browser. A hobby project by Conrad Lotz, built with three.js and WebGL.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:creator" content="@conradlotz">
+  <meta name="twitter:title" content="Drive on Mars — a 3D rover in your browser">
+  <meta name="twitter:description" content="Drive a rover across a 3D Martian landscape in your browser. A hobby project by Conrad Lotz, built with three.js and WebGL.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
@@ -614,6 +626,29 @@
     button[style*="bottom: 60px"][style*="right: 20px"] {
       display: none !important;
     }
+
+    /* Small link back to the author's site */
+    #home-link {
+      position: fixed;
+      top: calc(18px + env(safe-area-inset-top));
+      left: calc(18px + env(safe-area-inset-left));
+      z-index: 1001;
+      padding: 6px 11px;
+      font: 500 11px/1 var(--ui-font);
+      letter-spacing: 0.02em;
+      color: var(--ui-muted);
+      text-decoration: none;
+      background: var(--ui-glass);
+      border: 1px solid var(--ui-line);
+      border-radius: 999px;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      opacity: 0.75;
+      transition: opacity 0.2s ease, color 0.2s ease;
+    }
+    #home-link:hover, #home-link:focus-visible { opacity: 1; color: var(--ui-text); }
+    #preloader .by-line { margin-top: 18px; font-size: 12px; color: var(--ui-muted); }
+    #preloader .by-line a { color: var(--ui-accent); text-decoration: none; }
   </style>
   <!-- Three.js ships as ES modules only. The module below imports the core and
        the add-ons the game uses, then exposes them as a global THREE namespace
@@ -658,7 +693,10 @@
     <div id="loading-tips">
       <span id="loading-tip-text">WASD to drive · hold Space to boost · drag to look around</span>
     </div>
+    <div class="by-line">A project by <a href="https://www.conradlotz.com">Conrad Lotz</a></div>
   </div>
+
+  <a id="home-link" href="https://www.conradlotz.com" title="More projects by Conrad Lotz">by Conrad Lotz &#8599;</a>
 
   <!-- Performance Settings -->
   <div id="performance-settings">
