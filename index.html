@@ -713,7 +713,8 @@
   <!-- YouTube button and UI removed; audio now auto-loads silently in background -->
   
   <!-- YouTube Audio Container (hidden background player only) -->
-  <div id="youtube-audio-container" style="display: none;">
+  <!-- Kept rendered but off screen: YouTube may not play from a hidden or tiny player -->
+  <div id="youtube-audio-container" style="display: block; position: fixed; left: -10000px; top: 0; right: auto; bottom: auto; width: 200px; height: 200px; padding: 0; overflow: hidden; pointer-events: none;" aria-hidden="true">
     <div id="youtube-player-wrapper"></div>
   </div>
   
@@ -1517,9 +1518,8 @@
         // Create iframe placeholder for the YouTube API to replace
         const playerDiv = document.createElement('div');
         playerDiv.id = 'youtube-iframe';
-        playerDiv.style.width = '1px';
-        playerDiv.style.height = '1px';
-        playerDiv.style.opacity = '0.01';
+        playerDiv.style.width = '200px';
+        playerDiv.style.height = '200px';
         playerDiv.style.pointerEvents = 'none';
         
         // Add placeholder to the DOM
@@ -1558,8 +1558,8 @@
           }
           
           this.player = new YT.Player('youtube-iframe', {
-            height: '1',
-            width: '1',
+            height: '200',
+            width: '200',
             videoId: this.videoId,
             playerVars: {
               autoplay: options.autoplay ? 1 : 0,
@@ -1647,6 +1647,9 @@
                   console.warn('YouTube audio cannot be embedded or played here (error code', code, '). Continuing without background music.');
                 } else {
                   console.error('YouTube player error:', code);
+                }
+                if (typeof window.showGameToast === 'function') {
+                  window.showGameToast('Soundtrack unavailable (YouTube error ' + code + ')');
                 }
               }
             }
