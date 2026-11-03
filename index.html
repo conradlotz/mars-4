@@ -1171,7 +1171,9 @@
           // Browsers block audible autoplay until the visitor interacts with the
           // page; if the track is still silent after a few seconds, invite a tap.
           setTimeout(() => {
-            if (!muted && !youtubePlayer.isPlaying) this.showClickToPlayNotification();
+            const p = youtubePlayer.player;
+            const silent = !youtubePlayer.isPlaying || (p && p.isMuted());
+            if (!muted && silent) this.showClickToPlayNotification();
           }, 3000);
 
         }, 500); // Start soon after game loads so audio begins immediately when allowed
@@ -1581,6 +1583,7 @@
                 // A tap that landed before the player was ready is replayed here
                 if (this.wantsPlay) {
                   this.wantsPlay = false;
+                  event.target.unMute();
                   event.target.playVideo();
                 }
 
@@ -1699,6 +1702,7 @@
         try {
           if (typeof this.player.playVideo === 'function') {
             console.log('Force starting YouTube playback...');
+            this.player.unMute();
             this.player.playVideo();
             this.isPlaying = true;
             const playPauseButton = document.getElementById('youtube-play-pause');
@@ -1759,10 +1763,16 @@
         render();
       };
       const onFirstGesture = () => {
-        if (muted || youtubePlayer.isPlaying) return;
+        if (muted) return;
         // The player may still be loading; remember the request so onReady starts it
-        if (youtubePlayer.player) play();
-        else youtubePlayer.wantsPlay = true;
+        if (!youtubePlayer.player) {
+          youtubePlayer.wantsPlay = true;
+          return;
+        }
+        // Autoplay can start the track muted and still report it as playing,
+        // so unmute on the first gesture even when playback has begun
+        if (youtubePlayer.player.isMuted()) youtubePlayer.player.unMute();
+        if (!youtubePlayer.isPlaying) play();
       };
       ['pointerdown', 'keydown', 'touchstart'].forEach(type =>
         window.addEventListener(type, onFirstGesture, { capture: true, passive: true }));
