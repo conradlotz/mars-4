@@ -1738,7 +1738,9 @@
     // (unless it was muted). The M key and the speaker button toggle it.
     (function setupSoundtrackStart() {
       let muted = false;
-      try { muted = localStorage.getItem('mars_music_muted') === '1'; } catch (e) {}
+      // Key is versioned so mute choices saved before this change are ignored once
+      const MUTE_KEY = 'mars_music_muted_v2';
+      try { muted = localStorage.getItem(MUTE_KEY) === '1'; } catch (e) {}
       const button = document.getElementById('sound-toggle');
       const render = () => {
         if (!button) return;
@@ -1758,7 +1760,7 @@
       };
       const setMuted = (value) => {
         muted = value;
-        try { localStorage.setItem('mars_music_muted', muted ? '1' : '0'); } catch (e) {}
+        try { localStorage.setItem(MUTE_KEY, muted ? '1' : '0'); } catch (e) {}
         if (muted) pause(); else play();
         render();
       };
