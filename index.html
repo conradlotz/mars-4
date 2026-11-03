@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="permissions-policy" content="accelerometer=*, autoplay=*, camera=*, clipboard-write=*, encrypted-media=*, fullscreen=*, geolocation=*, gyroscope=*, magnetometer=*, microphone=*, midi=*, payment=*, picture-in-picture=*, publickey-credentials-get=*, screen-wake-lock=*, sync-xhr=*, usb=*, web-share=*, xr-spatial-tracking=*">
   <title>Drive on Mars</title>
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
@@ -29,21 +30,6 @@
       background-color: rgba(0, 0, 0, 0.5);
       padding: 10px;
       border-radius: 5px;
-    }
-    .youtube-button {
-      position: absolute;
-      top: 20px;
-      right: 20px;
-      background-color: rgba(0, 0, 0, 0.5);
-      color: white;
-      border: none;
-      padding: 10px 15px;
-      border-radius: 5px;
-      cursor: pointer;
-      font-size: 14px;
-    }
-    .youtube-button:hover {
-      background-color: rgba(0, 0, 0, 0.7);
     }
     #youtube-audio-container {
       position: absolute;
@@ -601,11 +587,6 @@
         transform: scale(1.05); 
         border-color: rgba(255, 107, 53, 0.5);
       }
-    }
-    
-    /* Hide bottom mode buttons (day/night, stylized mode) */
-    .hidden-mode-button {
-      display: none !important;
     }
     
     /* Target specific bottom positioned buttons */
@@ -1186,7 +1167,13 @@
             loop: true,
             volume: 25
           });
-        
+
+          // Browsers block audible autoplay until the visitor interacts with the
+          // page; if the track is still silent after a few seconds, invite a tap.
+          setTimeout(() => {
+            if (!muted && !youtubePlayer.isPlaying) this.showClickToPlayNotification();
+          }, 3000);
+
         }, 500); // Start soon after game loads so audio begins immediately when allowed
       }
       
@@ -1514,6 +1501,7 @@
       player: null,
       videoId: null,
       isPlaying: false,
+      wantsPlay: false,
       
       loadVideo: function(videoId, options = {}) {
         this.videoId = videoId;
@@ -1590,6 +1578,12 @@
                   event.target.setVolume(defaultVolume);
                 }
                 
+                // A tap that landed before the player was ready is replayed here
+                if (this.wantsPlay) {
+                  this.wantsPlay = false;
+                  event.target.playVideo();
+                }
+
                 // Try to auto-play if specified
                 if (options.autoplay && typeof event.target.playVideo === 'function') {
                   console.log('Attempting to autoplay...');
@@ -1765,7 +1759,10 @@
         render();
       };
       const onFirstGesture = () => {
-        if (!muted && !youtubePlayer.isPlaying) play();
+        if (muted || youtubePlayer.isPlaying) return;
+        // The player may still be loading; remember the request so onReady starts it
+        if (youtubePlayer.player) play();
+        else youtubePlayer.wantsPlay = true;
       };
       ['pointerdown', 'keydown', 'touchstart'].forEach(type =>
         window.addEventListener(type, onFirstGesture, { capture: true, passive: true }));

@@ -30,9 +30,6 @@ let _hudElements = null;
 function _getHudElements() {
   if (!_hudElements) {
     _hudElements = {
-      health: document.getElementById('rover-health'),
-      fuel: document.getElementById('rover-fuel'),
-      compass: document.getElementById('rover-heading'),
       toast: document.getElementById('mission-toast'),
       speedPanel: document.getElementById('speed-hud'),
       speed: document.getElementById('speed-value'),
@@ -78,19 +75,6 @@ function updateGameHUD() {
   ensureMissionHUD();
   const hud = _getHudElements();
 
-  // Update health display
-  if (rover.health !== undefined && hud.health) {
-    const h = Math.round(rover.health);
-    hud.health.textContent = h;
-    hud.health.style.color = rover.health < 30 ? '#ff4444' : rover.health < 60 ? '#ffaa44' : '#44ff44';
-  }
-
-  // Update fuel display
-  if (rover.fuel !== undefined && hud.fuel) {
-    hud.fuel.textContent = Math.round(rover.fuel);
-    hud.fuel.style.color = rover.fuel < 100 ? '#ff4444' : rover.fuel < 300 ? '#ffaa44' : '#44aaff';
-  }
-
   // Speedometer (1 world unit = 1 m; velocity is metres per 60 Hz frame)
   if (hud.speed && typeof velocity === 'number') {
     const kmh = String(Math.round(Math.abs(velocity) * 60 * 3.6));
@@ -105,14 +89,6 @@ function updateGameHUD() {
     }
   }
 
-  // Update compass / heading display
-  if (hud.compass && typeof window.roverYaw === 'number') {
-    let degrees = (window.roverYaw * 180 / Math.PI) % 360;
-    if (degrees < 0) degrees += 360;
-    const idx = Math.round(degrees / 45) % 8;
-    hud.compass.textContent = `${_compassDirs[idx]} (${degrees.toFixed(0)}°)`;
-  }
-
 }
 
 // Performance-aware initialization with mobile detection
@@ -120,15 +96,10 @@ function updateGameHUD() {
 let _cachedPerformanceSettings = null;
 
 // Day/night cycle variables - declared early to avoid temporal dead zone issues
-let lastTransitionUpdate = 0;
 let currentTimeOfDay = 0.0; // 0 = midnight, 0.25 = dawn, 0.5 = noon, 0.75 = dusk, 1 = midnight
 let dayNightCycleSpeed = 1 / 120000; // Full night-day-night cycle every 2 minutes
-let isManualTransition = false;
-let manualTransitionTarget = null;
-let manualTransitionSpeed = 0.005;
 let isDaytime = false; // Start at night so the starry sky is visible
 let sun = null;
-let sunSphere = null;
 let dayNightCycleOffset = 0.28; // start just after sunrise: low sun, long shadows
 
 function getPerformanceSettings() {
@@ -1743,10 +1714,6 @@ const mobilePerformanceMonitor = {
 let previousPosition = new THREE.Vector3(0, 0, 0);
 
 // Add these variables at the top level of your script
-let isTransitioning = false;
-let transitionStartTime = 0;
-let transitionDuration = 10000; // 10 seconds in milliseconds
-let transitionStartState = 'day'; // or 'night'
 
 // Mars Atmospheric Effects System
 class MarsAtmosphericEffects {
@@ -2906,7 +2873,7 @@ function buildDrapedDisc(cx, cz, radius, lift) {
     const r0 = (ri / rings) * radius, r1 = ((ri + 1) / rings) * radius;
     for (let s = 0; s < sectors; s++) {
       const a0 = (s / sectors) * Math.PI * 2, a1 = ((s + 1) / sectors) * Math.PI * 2;
-      const p00 = at(r0, a0), p01 = at(r0, a1), p10 = at(r1, a0), p11 = at(r1, a1);
+      const p01 = at(r0, a1), p10 = at(r1, a0), p11 = at(r1, a1);
       verts.push(...p00, ...p01, ...p10);
       verts.push(...p10, ...p01, ...p11);
     }
@@ -4767,7 +4734,7 @@ class MarsSceneManager {
     for (let s = 0; s + dash <= path.length; s += dash + gap) {
       for (let k = 0; k < 2; k++) {
         const s0 = s + (k * dash) / 2, s1 = s + ((k + 1) * dash) / 2;
-        const l0 = corner(s0, 1), r0 = corner(s0, -1), l1 = corner(s1, 1), r1 = corner(s1, -1);
+        const r0 = corner(s0, -1), l1 = corner(s1, 1), r1 = corner(s1, -1);
         verts.push(...l0, ...l1, ...r0, ...l1, ...r1, ...r0);
       }
     }
@@ -6967,7 +6934,7 @@ class MarsSceneManager {
       const towerCount = 10 + Math.floor(rand() * 12);
 
       // Pick a city architectural style
-      const cityStyle = Math.floor(rand() * 4);
+      rand(); // keep the draw so later city layouts stay the same
 
       // Tower generation
       const towerPositions = [];
@@ -8089,8 +8056,6 @@ function animate(time) {
   // Optimize operations for mobile with tier-based updates
   if (currentPerfSettings.isMobile) {
     // Mobile scene manager updates - heavily throttled
-    const sceneUpdateThrottle = currentPerfSettings.mobileTier === 'high' ? 10 : 
-                               currentPerfSettings.mobileTier === 'medium' ? 20 : 40;
     
     if (window.marsSceneManager && rover) {
       _mobileSceneDelta += delta;
