@@ -2873,7 +2873,7 @@ function buildDrapedDisc(cx, cz, radius, lift) {
     const r0 = (ri / rings) * radius, r1 = ((ri + 1) / rings) * radius;
     for (let s = 0; s < sectors; s++) {
       const a0 = (s / sectors) * Math.PI * 2, a1 = ((s + 1) / sectors) * Math.PI * 2;
-      const p01 = at(r0, a1), p10 = at(r1, a0), p11 = at(r1, a1);
+      const p00 = at(r0, a0), p01 = at(r0, a1), p10 = at(r1, a0), p11 = at(r1, a1);
       verts.push(...p00, ...p01, ...p10);
       verts.push(...p10, ...p01, ...p11);
     }
@@ -4734,7 +4734,7 @@ class MarsSceneManager {
     for (let s = 0; s + dash <= path.length; s += dash + gap) {
       for (let k = 0; k < 2; k++) {
         const s0 = s + (k * dash) / 2, s1 = s + ((k + 1) * dash) / 2;
-        const r0 = corner(s0, -1), l1 = corner(s1, 1), r1 = corner(s1, -1);
+        const l0 = corner(s0, 1), r0 = corner(s0, -1), l1 = corner(s1, 1), r1 = corner(s1, -1);
         verts.push(...l0, ...l1, ...r0, ...l1, ...r1, ...r0);
       }
     }
