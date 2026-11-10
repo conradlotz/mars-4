@@ -1,30 +1,3 @@
-function initializeGameSystems(rover, wheels, scene) {
-  const perfSettings = getPerformanceSettings();
-  const gameSystem = {
-    notifications: []
-  };
-  
-  return gameSystem;
-}
-
-
-// Update game systems in the animation loop
-function updateGameSystems(time, delta) {
-  const perfSettings = getPerformanceSettings();
-  
-  if (!gameSystem || !rover) return;
- 
-  // Update visual effects
-  updateVisualEffects(time, delta);
-}
-
-
-// Update visual effects
-function updateVisualEffects(time, delta) {
-  // Update HUD with game system info
-  updateGameHUD();
-}
-
 // Cached DOM references for HUD (avoid getElementById every frame)
 let _hudElements = null;
 function _getHudElements() {
@@ -126,14 +99,7 @@ function getPerformanceSettings() {
     terrainSegments: 128,
     frameThrottle: 2,
     enableCulling: false,
-    maxLights: 8,
-    // Game Features
-    enableDamageSystem: true,
-    enableFuelSystem: true,
-    enablePhotoMode: true,
-    enableEasterEggs: true,
-    enableCustomization: true,
-    enableWeatherForecast: true
+    maxLights: 8
   };
   return _cachedPerformanceSettings;
 }
@@ -390,55 +356,6 @@ ensureSpaceSkybox();
 const fogColor = 0x6B1F00;
 const fogDensity = perfSettings.samsungOptimized ? perfSettings.fogDensityReduction : 1.0;
 scene.fog = new THREE.Fog(fogColor, perfSettings.fogDistance * 0.2 * fogDensity, perfSettings.renderDistance);
-
-// Endless terrain system with reduced complexity
-const terrainSystem = {
-  chunkSize: 200, // Size of each terrain chunk
-  visibleRadius: 50, // Large radius — allow free exploration across the terrain
-  chunks: new Map(), // Store active chunks
-  currentChunk: { x: 0, z: 0 }, // Current chunk coordinates
-  lastUpdateTime: 0, // Track last update time for throttling
-
-  // Get chunk key from coordinates
-  getChunkKey: function (x, z) {
-    return `${x},${z}`;
-  },
-
-  // Get chunk coordinates from world position
-  getChunkCoords: function (worldX, worldZ) {
-    return {
-      x: Math.floor(worldX / this.chunkSize),
-      z: Math.floor(worldZ / this.chunkSize)
-    };
-  },
-
-  // Update visible chunks based on rover position
-  update: function (roverPosition) {
-    const perfSettings = getPerformanceSettings();
-    
-    // More aggressive throttling for mobile devices
-    const throttleTime = perfSettings.isMobile ? 5000 : 1000; // 5 seconds on mobile, 1 second on desktop
-    
-    // Throttle updates based on time instead of frames for more consistent performance
-    const now = performance.now();
-    if (now - this.lastUpdateTime < throttleTime) return;
-
-    // Skip terrain updates entirely on mobile to save performance
-    if (perfSettings.isMobile) {
-      this.lastUpdateTime = now;
-      return;
-    }
-
-    // Get current chunk from rover position
-    const newChunk = this.getChunkCoords(roverPosition.x, roverPosition.z);
-
-    // If rover moved to a new chunk, update visible chunks
-    if (newChunk.x !== this.currentChunk.x || newChunk.z !== this.currentChunk.z) {
-      this.currentChunk = newChunk;
-      this.lastUpdateTime = now;
-    }
-  },
-};
 
 // Command colony site. The terrain generator keeps its set-piece features
 // (mesas, craters, canyons) away from here so the colony, its ring road and
@@ -989,9 +906,6 @@ function showWelcomeMessage() {
   setTimeout(hide, 8000);
 }
 
-// Initialize Game Systems
-const gameSystem = initializeGameSystems(rover, wheels, scene);
-
 // Show welcome message with new features (reduced delay)
 setTimeout(() => {
   showWelcomeMessage();
@@ -1344,6 +1258,7 @@ const adaptiveResolution = {
 // tenth of real speed in once-a-second jumps. It is cheap and self-throttled
 // for its heavy parts, so it now runs every frame (every third on low tier)
 let _mobileSceneDelta = 0;
+let _mobileSkipCounter = 0;
 
 function renderFrame(timeMs) {
   if (postProcessing) postProcessing.render(timeMs);
@@ -1399,11 +1314,6 @@ function resetRoverMotion(clearInput = false) {
 // === DEV DEBUG HELPERS (toggle with V key) ===
 window.showRoadDebug = false;
 let _roadDebugGroup = null;
-
-// Distance tracking variables
-let distanceTraveled = 0;
-let lastUpdateTime = 0;
-const DISTANCE_SCALE_FACTOR = 50; // Increased scale factor to make distance more visible
 
 // Centralized event listener management to prevent duplicates
 if (!window.gameEventListeners) {
@@ -7966,70 +7876,43 @@ function animate(time) {
     if (!emergencyPerformanceMode && mobilePerformanceMonitor.shouldTriggerEmergencyMode()) {
       emergencyPerformanceMode = true;
       mobilePerformanceMonitor.emergencyModeTriggered = true;
-      console.warn('CRITICAL: Emergency performance mode activated - maximum quality reduction');
-      
-      // Hide all objects except rover and essential lights
-      scene.children.forEach(child => {
-        if (child !== rover && child.type !== 'DirectionalLight' && child.type !== 'AmbientLight') {
-          child.visible = false;
-        }
-      });
-      
-      // Drastically reduce rover detail
-      rover.traverse(child => {
-        if (child.isMesh && child.material) {
-          child.material.needsUpdate = false;
-          // Remove ALL textures and use basic material
-          if (child.material.map) {
-            child.material.map.dispose();
-            child.material.map = null;
-          }
-          if (child.material.normalMap) {
-            child.material.normalMap.dispose();
-            child.material.normalMap = null;
-          }
-          // Use basic material
-          child.material = new THREE.MeshBasicMaterial({
-            color: child.material.color || 0xffffff
-          });
-        }
-      });
-      
-      // Force minimal render settings
-      renderer.setPixelRatio(0.5); // Extremely low resolution
+      console.warn('Emergency performance mode: dropping to minimum resolution');
+
+      // Keep the world intact (this used to hide the terrain and sky and strip
+      // the rover's materials for good); just render at the lowest resolution
+      // and stop the optional effects, which check emergencyPerformanceMode
+      renderer.setPixelRatio(0.75);
+      adaptiveResolution.max = adaptiveResolution.min = 0.75; // pins it there
+      if (postProcessing) postProcessing.setSize();
+    }
+
+    // Poor performance: render only every second (high tier) or two of every
+    // three frames. Done before lastTime advances so the next frame's delta
+    // covers the skipped one and the simulation keeps real-time speed.
+    const mobileTier = currentPerfSettings.mobileTier || 'low';
+    const performanceThreshold = mobileTier === 'high' ? 25 :
+                                mobileTier === 'medium' ? 20 : 15;
+    if (lastTime && mobilePerformanceMonitor.isPerformancePoor() &&
+        mobilePerformanceMonitor.getAverageFPS() < performanceThreshold) {
+      _mobileSkipCounter++;
+      if (_mobileSkipCounter % (mobileTier === 'high' ? 2 : 3) === 0) {
+        return;
+      }
     }
   }
 
-  // Calculate delta time for consistent movement regardless of frame rate
-  const delta = lastTime ? time - lastTime : 16.67; // Default to 60fps on the first frame
+  // Frame time for consistent movement regardless of frame rate. A long frame
+  // (a GC pause, a settlement spawning, a resumed tab) is clamped rather than
+  // dropped: dropping it used to zero the rover's speed, so on a slow phone
+  // the rover could barely move. Hidden tabs reset motion in visibilitychange.
+  const delta = lastTime ? Math.min(time - lastTime, 100) : 16.67;
   lastTime = time;
 
-  // Skip frames if browser tab is inactive or delta is too large (indicating lag)
-  if (delta > 100) {
-    resetRoverMotion(false);
-    return;
-  }
   adaptiveResolution.update(delta, time);
   // Movement constants are tuned per 60 Hz frame. Scale by the real frame time
   // so the rover keeps the same speed at 30 or 144 fps (was capped at 1.0,
   // which made it crawl whenever the frame rate dropped below 60).
   const controlFrameScale = Math.min(delta / 16.67, 3.0);
-
-  // Mobile adaptive throttling (frame times were sampled above)
-  if (currentPerfSettings.isMobile) {
-    // Adaptive frame skipping based on performance and device tier
-    const mobileTier = currentPerfSettings.mobileTier || 'low';
-    const performanceThreshold = mobileTier === 'high' ? 25 : 
-                                mobileTier === 'medium' ? 20 : 15;
-    
-    // Skip frames more intelligently based on actual performance
-    if (mobilePerformanceMonitor.isPerformancePoor() && 
-        mobilePerformanceMonitor.getAverageFPS() < performanceThreshold) {
-      if (frameCount % (mobileTier === 'high' ? 2 : 3) === 0) {
-        return;
-      }
-    }
-  }
 
   frameCount++;
 
@@ -8062,20 +7945,6 @@ function animate(time) {
       if (currentPerfSettings.mobileTier !== 'low' || frameCount % 3 === 0) {
         window.marsSceneManager.update(rover.position, _mobileSceneDelta);
         _mobileSceneDelta = 0;
-      }
-    }
-    
-    // Disable all atmospheric effects and particles on mobile in emergency mode
-    if (!emergencyPerformanceMode && !currentPerfSettings.disableAtmosphericEffects && window.atmosphericEffects && 
-        frameCount % (frameThrottle * 20) === 0) {
-      window.atmosphericEffects.update(delta, rover.position);
-    }
-    
-    // Disable dust particles entirely in emergency mode
-    if (!emergencyPerformanceMode && currentPerfSettings.mobileTier === 'high' && 
-        isMoving && frameCount % (frameThrottle * 10) === 0) {
-      if (window.dustParticles) {
-        window.dustParticles.update(rover.position, isMoving);
       }
     }
   } else {
@@ -8170,28 +8039,11 @@ function animate(time) {
     velocity = 0;
   }
 
-  // Update Game Systems
-  updateGameSystems(time, delta);
+  updateGameHUD();
 
   // Update guided driving route progress if available
   if (window.marsSceneManager) {
     window.marsSceneManager.updateGuidedRoute(rover.position);
-  }
-
-  // Update terrain system with current rover position
-  terrainSystem.update(rover.position);
-
-  // Basic collision detection - prevent going off the edge of the current terrain system
-  const currentChunk = terrainSystem.getChunkCoords(rover.position.x, rover.position.z);
-  const chunkDistance = Math.max(
-    Math.abs(currentChunk.x - terrainSystem.currentChunk.x),
-    Math.abs(currentChunk.z - terrainSystem.currentChunk.z)
-  );
-
-  // If we're too far from the current chunk center, update the chunk tracking
-  // (no longer blocks movement — the rover can explore freely)
-  if (chunkDistance > 2) {
-    terrainSystem.currentChunk = { ...currentChunk };
   }
 
   // Handle turning with smooth acceleration - turning radius scales with speed
@@ -8235,8 +8087,9 @@ function animate(time) {
     }
   }
 
-  // Position rover on terrain - throttle for performance
-  if (frameCount % (frameThrottle * 2) === 0) {
+  // While moving the rover was already placed above; when parked, keep easing
+  // its tilt to the ground now and then
+  if (!isMoving && frameCount % (frameThrottle * 2) === 0) {
     positionRoverOnTerrain();
   }
 
@@ -8250,7 +8103,7 @@ function animate(time) {
   updateCamera(delta);
 
   // Update dust particles - only when moving and throttled based on performance
-  if (isMoving && frameCount % (frameThrottle * 2) === 0) {
+  if (isMoving && !emergencyPerformanceMode && frameCount % (frameThrottle * 2) === 0) {
     dustParticles.update(rover.position, isMoving);
   }
 
@@ -8262,48 +8115,9 @@ function animate(time) {
   // Render scene (through the post-processing chain on desktop)
   renderFrame(time);
 
-  // Update distance traveled
-  if (lastUpdateTime === 0) {
-    lastUpdateTime = time;
-  } else {
-    const deltaTime = (time - lastUpdateTime) / 1000; // Convert to seconds
-    lastUpdateTime = time;
-
-      // Update atmospheric effects system (now that deltaTime is available)
-  if (window.atmosphericEffects && rover) {
-    window.atmosphericEffects.update(deltaTime * 1000, rover.position); // Convert back to milliseconds for consistency
+  if (window.atmosphericEffects && rover && !emergencyPerformanceMode) {
+    window.atmosphericEffects.update(delta, rover.position);
   }
-
-  // Update enhanced systems (missions, samples, etc.) - throttled for performance
-  if (typeof updateEnhancedSystems === 'function' && rover && frameCount % (frameThrottle * 3) === 0) {
-    // Update enhanced systems with reduced frequency on mobile
-    if (!perfSettings.isMobile) {
-      updateEnhancedSystems(deltaTime, rover.position);
-    } else {
-      // Mobile: Update with reduced functionality but keep essential systems working
-      updateEnhancedSystems(deltaTime, rover.position);
-    }
-  }
-
-  // Calculate distance based on current speed with scaling factor
-  // Only add distance when moving forward (positive speed)
-  if (currentSpeed > 0) {
-    // Apply a scaling factor to make the distance more noticeable
-    const scaledSpeed = currentSpeed * DISTANCE_SCALE_FACTOR;
-    const speedInMilesPerSecond = scaledSpeed * 0.000621371;
-    distanceTraveled += speedInMilesPerSecond * deltaTime;
-  }
-
-    // Update the HUD with the distance traveled
-    if (window.distanceText) {
-      window.distanceText.innerHTML = `Distance Traveled: ${distanceTraveled.toFixed(2)} miles`;
-    }
-  }
-
-  // Mars Scene Manager events are now updated via marsSceneManager.update() call
-  
-  // Track frame time for performance monitoring
-  window.lastFrameTime = time;
 }
 
 // Helper function to optimize wheel rotation updates
