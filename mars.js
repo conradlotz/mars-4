@@ -1,30 +1,3 @@
-function initializeGameSystems(rover, wheels, scene) {
-  const perfSettings = getPerformanceSettings();
-  const gameSystem = {
-    notifications: []
-  };
-  
-  return gameSystem;
-}
-
-
-// Update game systems in the animation loop
-function updateGameSystems(time, delta) {
-  const perfSettings = getPerformanceSettings();
-  
-  if (!gameSystem || !rover) return;
- 
-  // Update visual effects
-  updateVisualEffects(time, delta);
-}
-
-
-// Update visual effects
-function updateVisualEffects(time, delta) {
-  // Update HUD with game system info
-  updateGameHUD();
-}
-
 // Cached DOM references for HUD (avoid getElementById every frame)
 let _hudElements = null;
 function _getHudElements() {
@@ -126,14 +99,7 @@ function getPerformanceSettings() {
     terrainSegments: 128,
     frameThrottle: 2,
     enableCulling: false,
-    maxLights: 8,
-    // Game Features
-    enableDamageSystem: true,
-    enableFuelSystem: true,
-    enablePhotoMode: true,
-    enableEasterEggs: true,
-    enableCustomization: true,
-    enableWeatherForecast: true
+    maxLights: 8
   };
   return _cachedPerformanceSettings;
 }
@@ -391,55 +357,6 @@ const fogColor = 0x6B1F00;
 const fogDensity = perfSettings.samsungOptimized ? perfSettings.fogDensityReduction : 1.0;
 scene.fog = new THREE.Fog(fogColor, perfSettings.fogDistance * 0.2 * fogDensity, perfSettings.renderDistance);
 
-// Endless terrain system with reduced complexity
-const terrainSystem = {
-  chunkSize: 200, // Size of each terrain chunk
-  visibleRadius: 50, // Large radius — allow free exploration across the terrain
-  chunks: new Map(), // Store active chunks
-  currentChunk: { x: 0, z: 0 }, // Current chunk coordinates
-  lastUpdateTime: 0, // Track last update time for throttling
-
-  // Get chunk key from coordinates
-  getChunkKey: function (x, z) {
-    return `${x},${z}`;
-  },
-
-  // Get chunk coordinates from world position
-  getChunkCoords: function (worldX, worldZ) {
-    return {
-      x: Math.floor(worldX / this.chunkSize),
-      z: Math.floor(worldZ / this.chunkSize)
-    };
-  },
-
-  // Update visible chunks based on rover position
-  update: function (roverPosition) {
-    const perfSettings = getPerformanceSettings();
-    
-    // More aggressive throttling for mobile devices
-    const throttleTime = perfSettings.isMobile ? 5000 : 1000; // 5 seconds on mobile, 1 second on desktop
-    
-    // Throttle updates based on time instead of frames for more consistent performance
-    const now = performance.now();
-    if (now - this.lastUpdateTime < throttleTime) return;
-
-    // Skip terrain updates entirely on mobile to save performance
-    if (perfSettings.isMobile) {
-      this.lastUpdateTime = now;
-      return;
-    }
-
-    // Get current chunk from rover position
-    const newChunk = this.getChunkCoords(roverPosition.x, roverPosition.z);
-
-    // If rover moved to a new chunk, update visible chunks
-    if (newChunk.x !== this.currentChunk.x || newChunk.z !== this.currentChunk.z) {
-      this.currentChunk = newChunk;
-      this.lastUpdateTime = now;
-    }
-  },
-};
-
 // Command colony site. The terrain generator keeps its set-piece features
 // (mesas, craters, canyons) away from here so the colony, its ring road and
 // the haul roads sit on open, gently rolling ground.
@@ -488,6 +405,36 @@ function createRealisticRover() {
     emissiveIntensity: perfSettings.isMobile ? 0.3 : 0.04
   });
   
+  // Panel seams, fasteners, a vent and regolith dust creeping up from below
+  {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 128;
+    const g = c.getContext('2d');
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, 256, 128);
+    g.fillStyle = 'rgba(70, 62, 52, 0.55)';
+    [84, 170].forEach(x => g.fillRect(x, 6, 2, 116));   // vertical seams
+    g.fillRect(6, 30, 244, 2);                           // upper seam
+    g.fillStyle = 'rgba(60, 54, 46, 0.7)';
+    for (let x = 14; x < 250; x += 26) {                 // fasteners
+      g.fillRect(x, 12, 3, 3);
+      g.fillRect(x, 112, 3, 3);
+    }
+    g.fillStyle = 'rgba(40, 38, 36, 0.8)';
+    for (let i = 0; i < 5; i++) g.fillRect(190, 46 + i * 9, 44, 4); // vent louvres
+    g.fillStyle = '#ff8a4c';
+    g.fillRect(6, 20, 244, 5);                           // accent stripe
+    const dust = g.createLinearGradient(0, 128, 0, 62);
+    dust.addColorStop(0, 'rgba(176, 98, 52, 0.6)');
+    dust.addColorStop(1, 'rgba(176, 98, 52, 0)');
+    g.fillStyle = dust;
+    g.fillRect(0, 62, 256, 66);
+    const bodyTexture = new THREE.CanvasTexture(c);
+    bodyTexture.colorSpace = THREE.SRGBColorSpace;
+    bodyTexture.anisotropy = 4;
+    bodyMaterial.map = bodyTexture;
+  }
+
   // Mark this as the main body for color customization
   bodyMaterial.userData = { isBody: true };
   const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
@@ -573,6 +520,17 @@ function createRealisticRover() {
   rightLens.rotation.x = Math.PI / 2;
   cameraBox.add(rightLens);
 
+  // Camera head trim: lens bezels, a sun hood and the pan/tilt neck
+  const trimMaterial = new THREE.MeshStandardMaterial({ color: 0xb4ab9a, roughness: 0.45, metalness: 0.6 });
+  const headTrim = new THREE.Mesh(mergeGeometryList([
+    { geometry: new THREE.CylinderGeometry(0.068, 0.068, 0.03, 16), matrix: _xf(-0.08, 0, 0.095, Math.PI / 2) },
+    { geometry: new THREE.CylinderGeometry(0.068, 0.068, 0.03, 16), matrix: _xf(0.08, 0, 0.095, Math.PI / 2) },
+    { geometry: new THREE.BoxGeometry(0.36, 0.025, 0.3), matrix: _xf(0, 0.115, 0.03) },
+    { geometry: new THREE.CylinderGeometry(0.06, 0.075, 0.1, 12), matrix: _xf(0, -0.15, 0) }
+  ]), trimMaterial);
+  headTrim.castShadow = !perfSettings.isMobile;
+  cameraBox.add(headTrim);
+
   // Solar panels
   const panelGeometry = new THREE.BoxGeometry(2.8, 0.05, 1.8);
   const panelMaterial = new THREE.MeshStandardMaterial({
@@ -607,6 +565,20 @@ function createRealisticRover() {
   panelDetailsBottom.rotation.x = Math.PI / 2;
   panel.add(panelDetailsBottom);
 
+  // Aluminium frame round the array and the posts that carry it off the body
+  const panelFrame = new THREE.Mesh(mergeGeometryList([
+    { geometry: new THREE.BoxGeometry(2.86, 0.08, 0.06), matrix: _xf(0, 0, 0.9) },
+    { geometry: new THREE.BoxGeometry(2.86, 0.08, 0.06), matrix: _xf(0, 0, -0.9) },
+    { geometry: new THREE.BoxGeometry(0.06, 0.08, 1.8), matrix: _xf(1.4, 0, 0) },
+    { geometry: new THREE.BoxGeometry(0.06, 0.08, 1.8), matrix: _xf(-1.4, 0, 0) },
+    { geometry: new THREE.CylinderGeometry(0.04, 0.05, 0.2, 8), matrix: _xf(0.7, -0.12, 0.6) },
+    { geometry: new THREE.CylinderGeometry(0.04, 0.05, 0.2, 8), matrix: _xf(-0.7, -0.12, 0.6) },
+    { geometry: new THREE.CylinderGeometry(0.04, 0.05, 0.2, 8), matrix: _xf(0.7, -0.12, -0.6) },
+    { geometry: new THREE.CylinderGeometry(0.04, 0.05, 0.2, 8), matrix: _xf(-0.7, -0.12, -0.6) }
+  ]), trimMaterial);
+  panelFrame.castShadow = !perfSettings.isMobile;
+  panel.add(panelFrame);
+
   // Communications antenna
   const antennaBaseGeometry = new THREE.CylinderGeometry(0.1, 0.1, 0.1, 8);
   const antennaBaseMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
@@ -620,16 +592,28 @@ function createRealisticRover() {
   antenna.position.y = 0.5;
   antennaBase.add(antenna);
 
-  const dishGeometry = new THREE.SphereGeometry(0.2, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+  // High-gain dish: a shallow parabolic bowl with its feed horn, tipped skyward
+  const dishProfile = [];
+  for (let i = 0; i <= 8; i++) {
+    const r = 0.3 * i / 8;
+    dishProfile.push(new THREE.Vector2(r, r * r * 1.1));
+  }
   const dishMaterial = new THREE.MeshStandardMaterial({
-    color: 0xdddddd,
-    roughness: 0.3,
-    metalness: 0.7
+    color: 0xa39f96, // matte grey: a polished white bowl bloomed in full sun
+    roughness: 0.6,
+    metalness: 0.3,
+    side: THREE.DoubleSide
   });
-  const dish = new THREE.Mesh(dishGeometry, dishMaterial);
-  dish.position.y = 1.0;
-  dish.rotation.x = Math.PI;
+  const dish = new THREE.Mesh(new THREE.LatheGeometry(dishProfile, 24), dishMaterial);
+  dish.position.y = 0.52; // seated on the tip of the whip (it used to hover above it)
+  dish.rotation.x = 0.45;
+  dish.castShadow = !perfSettings.isMobile;
   antenna.add(dish);
+  const dishFeed = new THREE.Mesh(mergeGeometryList([
+    { geometry: new THREE.CylinderGeometry(0.012, 0.012, 0.22, 6), matrix: _xf(0, 0.11, 0) },
+    { geometry: new THREE.SphereGeometry(0.035, 10, 8), matrix: _xf(0, 0.23, 0) }
+  ]), antennaMaterial);
+  dish.add(dishFeed);
 
   // Robotic arm
   const armBaseGeometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
@@ -659,13 +643,6 @@ function createRealisticRover() {
 
   // Wheels - create 6 wheels with proper suspension mounting points
   const wheels = [];
-  // Increase wheel size by making them larger
-  const wheelGeometry = new THREE.CylinderGeometry(0.8, 0.8, 0.5, 24);
-  const wheelMaterial = new THREE.MeshStandardMaterial({
-    color: 0x222222,
-    roughness: 0.9,
-    metalness: 0.1
-  });
 
   // Add high-detail treads to wheels
   const wheelTextureCanvas = document.createElement('canvas');
@@ -707,8 +684,48 @@ function createRealisticRover() {
     color: 0x252525,
     roughness: 0.95,
     metalness: 0.05,
-    map: wheelTexture
+    map: wheelTexture,
+    side: THREE.DoubleSide // the open tyre shows its inner wall
   });
+
+  // Tyre (axle along local Y): tread band, rounded shoulders, sidewalls, the
+  // inner wall and raised grousers. Same size as the plain drum it replaces.
+  const SEG = perfSettings.isMobile ? 20 : 28;
+  const tyreParts = [
+    { geometry: new THREE.CylinderGeometry(0.8, 0.8, 0.38, SEG, 1, true) },
+    { geometry: new THREE.CylinderGeometry(0.74, 0.8, 0.06, SEG, 1, true), matrix: _xf(0, 0.22, 0) },
+    { geometry: new THREE.CylinderGeometry(0.8, 0.74, 0.06, SEG, 1, true), matrix: _xf(0, -0.22, 0) },
+    { geometry: new THREE.RingGeometry(0.56, 0.74, SEG), matrix: _xf(0, 0.25, 0, -Math.PI / 2) },
+    { geometry: new THREE.RingGeometry(0.56, 0.74, SEG), matrix: _xf(0, -0.25, 0, Math.PI / 2) },
+    { geometry: new THREE.CylinderGeometry(0.56, 0.56, 0.5, SEG, 1, true) }
+  ];
+  const GROUSERS = 18;
+  for (let k = 0; k < GROUSERS; k++) {
+    const a = k / GROUSERS * Math.PI * 2;
+    tyreParts.push({
+      geometry: new THREE.BoxGeometry(0.07, 0.42, 0.1),
+      matrix: _xf(Math.cos(a) * 0.815, 0, -Math.sin(a) * 0.815, 0, a, 0)
+    });
+  }
+  const tyreGeometry = mergeGeometryList(tyreParts);
+
+  // Hub: centre web, axle cap, rim lips and six spokes a side
+  const hubParts = [
+    { geometry: new THREE.CylinderGeometry(0.57, 0.57, 0.05, SEG) },
+    { geometry: new THREE.CylinderGeometry(0.13, 0.16, 0.54, 12) }
+  ];
+  for (const s of [1, -1]) {
+    hubParts.push({ geometry: new THREE.TorusGeometry(0.565, 0.025, 6, SEG), matrix: _xf(0, s * 0.24, 0, Math.PI / 2) });
+    for (let k = 0; k < 6; k++) {
+      const a = k / 6 * Math.PI * 2;
+      hubParts.push({
+        geometry: new THREE.BoxGeometry(0.42, 0.04, 0.07),
+        matrix: _xf(Math.cos(a) * 0.35, s * 0.17, -Math.sin(a) * 0.35, 0, a, 0)
+      });
+    }
+  }
+  const hubGeometry = mergeGeometryList(hubParts);
+  const hubMaterial = new THREE.MeshStandardMaterial({ color: 0xa89e8c, roughness: 0.5, metalness: 0.6 });
 
   // Wheel positions - 3 on each side (adjust positions for larger wheels)
   const wheelPositions = [
@@ -723,11 +740,14 @@ function createRealisticRover() {
   const originalWheelPositions = [];
 
   wheelPositions.forEach((pos, index) => {
-    const wheel = new THREE.Mesh(wheelGeometry, wheelMaterialWithTexture);
+    const wheel = new THREE.Mesh(tyreGeometry, wheelMaterialWithTexture);
     wheel.position.set(pos.x, pos.y, pos.z);
     wheel.rotation.z = Math.PI / 2; // Rotate to correct orientation
     wheel.castShadow = !perfSettings.isMobile;
     wheel.receiveShadow = !perfSettings.isMobile;
+    const hub = new THREE.Mesh(hubGeometry, hubMaterial); // spins with the tyre
+    hub.castShadow = !perfSettings.isMobile;
+    wheel.add(hub);
 
     // Store original position for suspension
     originalWheelPositions.push(pos.y);
@@ -765,6 +785,18 @@ function createRealisticRover() {
     lamp.position.set(lx, ly, lz);
     roverGroup.add(lamp);
   });
+  // Lamp shrouds and a bumper bar across the nose
+  const noseTrim = new THREE.Mesh(mergeGeometryList([
+    ...lampPositions.map(([lx, ly, lz]) => ({
+      geometry: new THREE.CylinderGeometry(0.17, 0.15, 0.2, 14, 1, true),
+      matrix: _xf(lx, ly, lz + 0.02, Math.PI / 2)
+    })),
+    { geometry: new THREE.BoxGeometry(2.3, 0.09, 0.09), matrix: _xf(0, 0.6, -1.66) },
+    { geometry: new THREE.BoxGeometry(0.07, 0.3, 0.07), matrix: _xf(-0.75, 0.76, -1.64) },
+    { geometry: new THREE.BoxGeometry(0.07, 0.3, 0.07), matrix: _xf(0.75, 0.76, -1.64) }
+  ]), new THREE.MeshStandardMaterial({ color: 0x3a3833, roughness: 0.6, metalness: 0.5, side: THREE.DoubleSide }));
+  noseTrim.castShadow = !perfSettings.isMobile;
+  roverGroup.add(noseTrim);
 
   if (perfSettings.isMobile) {
     // Mobile: one cheap point light at the front, no spotlights
@@ -988,9 +1020,6 @@ function showWelcomeMessage() {
 
   setTimeout(hide, 8000);
 }
-
-// Initialize Game Systems
-const gameSystem = initializeGameSystems(rover, wheels, scene);
 
 // Show welcome message with new features (reduced delay)
 setTimeout(() => {
@@ -1344,6 +1373,7 @@ const adaptiveResolution = {
 // tenth of real speed in once-a-second jumps. It is cheap and self-throttled
 // for its heavy parts, so it now runs every frame (every third on low tier)
 let _mobileSceneDelta = 0;
+let _mobileSkipCounter = 0;
 
 function renderFrame(timeMs) {
   if (postProcessing) postProcessing.render(timeMs);
@@ -1399,11 +1429,6 @@ function resetRoverMotion(clearInput = false) {
 // === DEV DEBUG HELPERS (toggle with V key) ===
 window.showRoadDebug = false;
 let _roadDebugGroup = null;
-
-// Distance tracking variables
-let distanceTraveled = 0;
-let lastUpdateTime = 0;
-const DISTANCE_SCALE_FACTOR = 50; // Increased scale factor to make distance more visible
 
 // Centralized event listener management to prevent duplicates
 if (!window.gameEventListeners) {
@@ -3852,7 +3877,9 @@ class StarshipSpaceport {
     const site = this.site;
     const padSurface = [], berms = [], markings = [];
     const padMat = new THREE.MeshStandardMaterial({ color: 0x3a302b, roughness: 0.92, metalness: 0.05 });
+    weatherStatic(padMat, { seam: [8, 8], seamStrength: 0.7, grime: 1.3, dust: 0.7 });
     const bermMat = new THREE.MeshStandardMaterial({ color: 0x8f3416, roughness: 1.0, metalness: 0.0 });
+    weatherStatic(bermMat, { seam: [0, 0], grime: 1.2, dust: 0, planar: true });
     const markMat = new THREE.MeshStandardMaterial({ color: 0x8a8580, roughness: 0.7, metalness: 0.0 });
     const toColony = Math.atan2(this.U.z, this.U.x);
 
@@ -3940,6 +3967,10 @@ class StarshipSpaceport {
     const bandMat = new THREE.MeshStandardMaterial({ color: 0x0b1e55, roughness: 0.5, metalness: 0.2 });
     const regolithMat = new THREE.MeshStandardMaterial({ color: 0x8f3416, roughness: 1.0, metalness: 0.0 });
     const metalMat = new THREE.MeshStandardMaterial({ color: 0x4a4c50, roughness: 0.5, metalness: 0.8 });
+    weatherStatic(whiteMat, { seam: [3.2, 2.4] });
+    weatherStatic(bandMat, { seam: [3.2, 2.4], dust: 0.6 });
+    weatherStatic(regolithMat, { seam: [0, 0], grime: 1.2, dust: 0, planar: true });
+    weatherStatic(metalMat, { seam: [1.6, 1.6], seamStrength: 0.6, dust: 0.7 });
     this.lampMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffd9a8, emissiveIntensity: 0.3 });
     [[white, whiteMat, true], [bands, bandMat, false], [regolith, regolithMat, true], [metal, metalMat, true], [lamps, this.lampMat, false]]
       .forEach(([list, mat, shadow]) => {
@@ -4439,6 +4470,7 @@ class MarsSceneManager {
     }, 0.0, 0.1);
     const frameMat = new THREE.MeshStandardMaterial({ color: 0xe6e6ea, metalness: 0.65, roughness: 0.35 });
     const baseMat = new THREE.MeshStandardMaterial({ color: 0x6b6258, metalness: 0.05, roughness: 0.9 });
+    weatherStatic(baseMat, { seam: [4, 1.2], seamStrength: 0.6 });
     const gardenMat = night({ vertexColors: true, roughness: 0.85, metalness: 0.0, emissive: 0x6a2a7a, emissiveIntensity: 0 }, 0.0, 0.35);
     const waterMat = new THREE.MeshStandardMaterial({ color: 0x1d4a5c, metalness: 0.2, roughness: 0.08, envMapIntensity: 1.4 });
 
@@ -4486,6 +4518,8 @@ class MarsSceneManager {
     const mats = this.getColonyMaterials();
     const deckMat = new THREE.MeshStandardMaterial({ color: 0xc9c9d4, roughness: 0.25, metalness: 0.85 });
     const pylonMat = new THREE.MeshStandardMaterial({ color: 0x5c5d63, roughness: 0.45, metalness: 0.8 });
+    weatherStatic(deckMat, { seam: [6, 0], seamStrength: 0.5, grime: 0.7, dust: 0.5 });
+    weatherStatic(pylonMat, { seam: [0, 4], seamStrength: 0.5, dust: 0.6 });
     [[parts.white, mats.white, true], [parts.metal, mats.metal, true], [parts.lamp, mats.lamp, false],
      [parts.deck, deckMat, true], [parts.pylon, pylonMat, true]].forEach(([list, mat, shadow]) => {
       if (!list.length) return;
@@ -5077,6 +5111,12 @@ class MarsSceneManager {
       plants: std({ color: 0x0f3a0a, roughness: 0.85, metalness: 0.0, emissive: 0x6a1a70, emissiveIntensity: 0.0 }, [0.0, 0.8]),
       pv: std({ color: 0x02081a, roughness: 0.22, metalness: 0.4, envMapIntensity: 1.2 })
     };
+    const cm = this._colonyMats;
+    weatherStatic(cm.regolith, { seam: [0, 0], grime: 1.2, dust: 0, planar: true });
+    weatherStatic(cm.printed, { seam: [0, 0.22], seamStrength: 0.45, dust: 0.4 }); // 3D-print layer lines
+    weatherStatic(cm.white, { seam: [3.0, 2.4] });
+    weatherStatic(cm.metal, { seam: [1.6, 1.6], seamStrength: 0.6, dust: 0.7 });
+    weatherStatic(cm.band, { seam: [3.0, 2.4], dust: 0.6 });
     return this._colonyMats;
   }
 
@@ -5425,12 +5465,14 @@ class MarsSceneManager {
         roughness: 0.95,
         metalness: 0.08
       });
+      weatherStatic(serviceMat, { seam: [6, 6], seamStrength: 0.5, grime: 1.2, dust: 0.8 });
       const lineMat = new THREE.MeshBasicMaterial({ color: 0xffb45a });
       const padMat = new THREE.MeshStandardMaterial({
         color: 0x56585d,
         roughness: 0.7,
         metalness: 0.35
       });
+      weatherStatic(padMat, { seam: [6, 6], seamStrength: 0.6, grime: 1.2, dust: 0.7 });
       const glowCyan = new THREE.MeshBasicMaterial({ color: 0x66eaff });
       const glowAmber = new THREE.MeshBasicMaterial({ color: 0xffaa44 });
       const cargoMat = new THREE.MeshStandardMaterial({
@@ -5438,11 +5480,13 @@ class MarsSceneManager {
         roughness: 0.45,
         metalness: 0.75
       });
+      weatherStatic(cargoMat, { seam: [2.4, 2.6], seamStrength: 0.8 });
       const darkCargoMat = new THREE.MeshStandardMaterial({
         color: 0x303842,
         roughness: 0.5,
         metalness: 0.65
       });
+      weatherStatic(darkCargoMat, { seam: [0, 0], dust: 0.8 });
       // On desktop the Cybertruck ring road (createTrafficRoutes) is draped
       // over the terrain on this radius; the flat torus stays for mobile.
       if (perfSettings.isMobile) {
@@ -5763,6 +5807,7 @@ class MarsSceneManager {
         emissive: 0x2244aa,
         emissiveIntensity: 0.55
       });
+      weatherStatic(towerMat, { seam: [5, 3.6], seamStrength: 0.8, grime: 0.5, dust: 0.25 });
       const tower = new THREE.Mesh(towerGeom, towerMat);
       tower.position.set(x, groundY + baseHeight / 2, z);
       tower.castShadow = true;
@@ -5812,6 +5857,7 @@ class MarsSceneManager {
       emissive: 0x223366,
       emissiveIntensity: 0.55
     });
+    weatherStatic(flagshipMat, { seam: [5, 3.6], seamStrength: 0.8, grime: 0.4, dust: 0.2 });
     const flagship = new THREE.Mesh(flagshipGeom, flagshipMat);
     flagship.position.set(center.x, center.y + flagshipHeight / 2, center.z);
     flagship.castShadow = true;
@@ -5878,6 +5924,7 @@ class MarsSceneManager {
         roughness: 0.35,
         metalness: 0.9
       });
+      weatherStatic(pylonMaterial, { seam: [0, 4], seamStrength: 0.5, dust: 0.6 });
 
       for (let i = 0; i <= segmentCount; i++) {
         const t = i / segmentCount;
@@ -5901,6 +5948,7 @@ class MarsSceneManager {
         roughness: 0.18,
         metalness: 0.92
       });
+      weatherStatic(deckMaterial, { seam: [6, 0], seamStrength: 0.5, grime: 0.7, dust: 0.5 });
       const deck = new THREE.Mesh(deckGeometry, deckMaterial);
 
       const deckGroup = new THREE.Group();
@@ -6297,13 +6345,16 @@ class MarsSceneManager {
     const pal = palettes[Math.floor(rand() * palettes.length)];
 
     const wallMat = new THREE.MeshStandardMaterial({ color: pal.wall, metalness: 0.7, roughness: 0.3, emissive: pal.emissive, emissiveIntensity: 0.35 });
+    weatherStatic(wallMat, { seam: [3.2, 3.0], grime: 0.8, dust: 0.6 });
     // Glowing window band material so towers light up at night
     const winMat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.9 });
     const glowMat = new THREE.MeshBasicMaterial({ color: pal.accent, transparent: true, opacity: 0.85 });
     const glow2Mat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.7 });
     const padMat  = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9, metalness: 0.2 });
+    weatherStatic(padMat, { seam: [6, 6], seamStrength: 0.6, grime: 1.2, dust: 0.8 });
     const glassMat = new THREE.MeshStandardMaterial({ color: 0x88ccff, metalness: 0.9, roughness: 0.05, transparent: true, opacity: 0.4 });
     const plazaMat = new THREE.MeshStandardMaterial({ color: 0x31343a, roughness: 0.72, metalness: 0.32 });
+    weatherStatic(plazaMat, { seam: [4, 4], seamStrength: 0.6, grime: 1.1, dust: 0.8 });
     const laneMat = new THREE.MeshBasicMaterial({ color: pal.accent, transparent: true, opacity: 0.78 });
     const beaconMat = new THREE.MeshBasicMaterial({ color: pal.beacon });
 
@@ -6523,11 +6574,13 @@ class MarsSceneManager {
         emissive: 0x120906,
         emissiveIntensity: 0.18
       });
+      weatherStatic(modernWallMat, { seam: [3.0, 2.4] });
       const darkTrimMat = new THREE.MeshStandardMaterial({
         color: 0x28211d,
         roughness: 0.7,
         metalness: 0.42
       });
+      weatherStatic(darkTrimMat, { seam: [0, 0], dust: 0.8 });
       const modernGlassMat = new THREE.MeshStandardMaterial({
         color: 0x84c5dd,
         roughness: 0.18,
@@ -6542,6 +6595,7 @@ class MarsSceneManager {
         roughness: 1.0,
         metalness: 0.0
       });
+      weatherStatic(regolithMat, { seam: [0, 0], grime: 1.2, dust: 0, planar: true });
       const lightMat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.74 });
 
       const commandW = 34 * scale;
@@ -7305,6 +7359,7 @@ class MarsSceneManager {
         roughness: 0.4,
         metalness: 0.8
       });
+      weatherStatic(pylonMaterial, { seam: [0, 4], seamStrength: 0.5, dust: 0.6 });
 
       for (let i = 0; i <= segmentCount; i++) {
         const t = i / segmentCount;
@@ -7329,6 +7384,7 @@ class MarsSceneManager {
         roughness: 0.2,
         metalness: 0.9
       });
+      weatherStatic(deckMaterial, { seam: [6, 0], seamStrength: 0.5, grime: 0.7, dust: 0.5 });
       const deck = new THREE.Mesh(deckGeometry, deckMaterial);
 
       const deckGroup = new THREE.Group();
@@ -7966,70 +8022,43 @@ function animate(time) {
     if (!emergencyPerformanceMode && mobilePerformanceMonitor.shouldTriggerEmergencyMode()) {
       emergencyPerformanceMode = true;
       mobilePerformanceMonitor.emergencyModeTriggered = true;
-      console.warn('CRITICAL: Emergency performance mode activated - maximum quality reduction');
-      
-      // Hide all objects except rover and essential lights
-      scene.children.forEach(child => {
-        if (child !== rover && child.type !== 'DirectionalLight' && child.type !== 'AmbientLight') {
-          child.visible = false;
-        }
-      });
-      
-      // Drastically reduce rover detail
-      rover.traverse(child => {
-        if (child.isMesh && child.material) {
-          child.material.needsUpdate = false;
-          // Remove ALL textures and use basic material
-          if (child.material.map) {
-            child.material.map.dispose();
-            child.material.map = null;
-          }
-          if (child.material.normalMap) {
-            child.material.normalMap.dispose();
-            child.material.normalMap = null;
-          }
-          // Use basic material
-          child.material = new THREE.MeshBasicMaterial({
-            color: child.material.color || 0xffffff
-          });
-        }
-      });
-      
-      // Force minimal render settings
-      renderer.setPixelRatio(0.5); // Extremely low resolution
+      console.warn('Emergency performance mode: dropping to minimum resolution');
+
+      // Keep the world intact (this used to hide the terrain and sky and strip
+      // the rover's materials for good); just render at the lowest resolution
+      // and stop the optional effects, which check emergencyPerformanceMode
+      renderer.setPixelRatio(0.75);
+      adaptiveResolution.max = adaptiveResolution.min = 0.75; // pins it there
+      if (postProcessing) postProcessing.setSize();
+    }
+
+    // Poor performance: render only every second (high tier) or two of every
+    // three frames. Done before lastTime advances so the next frame's delta
+    // covers the skipped one and the simulation keeps real-time speed.
+    const mobileTier = currentPerfSettings.mobileTier || 'low';
+    const performanceThreshold = mobileTier === 'high' ? 25 :
+                                mobileTier === 'medium' ? 20 : 15;
+    if (lastTime && mobilePerformanceMonitor.isPerformancePoor() &&
+        mobilePerformanceMonitor.getAverageFPS() < performanceThreshold) {
+      _mobileSkipCounter++;
+      if (_mobileSkipCounter % (mobileTier === 'high' ? 2 : 3) === 0) {
+        return;
+      }
     }
   }
 
-  // Calculate delta time for consistent movement regardless of frame rate
-  const delta = lastTime ? time - lastTime : 16.67; // Default to 60fps on the first frame
+  // Frame time for consistent movement regardless of frame rate. A long frame
+  // (a GC pause, a settlement spawning, a resumed tab) is clamped rather than
+  // dropped: dropping it used to zero the rover's speed, so on a slow phone
+  // the rover could barely move. Hidden tabs reset motion in visibilitychange.
+  const delta = lastTime ? Math.min(time - lastTime, 100) : 16.67;
   lastTime = time;
 
-  // Skip frames if browser tab is inactive or delta is too large (indicating lag)
-  if (delta > 100) {
-    resetRoverMotion(false);
-    return;
-  }
   adaptiveResolution.update(delta, time);
   // Movement constants are tuned per 60 Hz frame. Scale by the real frame time
   // so the rover keeps the same speed at 30 or 144 fps (was capped at 1.0,
   // which made it crawl whenever the frame rate dropped below 60).
   const controlFrameScale = Math.min(delta / 16.67, 3.0);
-
-  // Mobile adaptive throttling (frame times were sampled above)
-  if (currentPerfSettings.isMobile) {
-    // Adaptive frame skipping based on performance and device tier
-    const mobileTier = currentPerfSettings.mobileTier || 'low';
-    const performanceThreshold = mobileTier === 'high' ? 25 : 
-                                mobileTier === 'medium' ? 20 : 15;
-    
-    // Skip frames more intelligently based on actual performance
-    if (mobilePerformanceMonitor.isPerformancePoor() && 
-        mobilePerformanceMonitor.getAverageFPS() < performanceThreshold) {
-      if (frameCount % (mobileTier === 'high' ? 2 : 3) === 0) {
-        return;
-      }
-    }
-  }
 
   frameCount++;
 
@@ -8064,20 +8093,6 @@ function animate(time) {
         _mobileSceneDelta = 0;
       }
     }
-    
-    // Disable all atmospheric effects and particles on mobile in emergency mode
-    if (!emergencyPerformanceMode && !currentPerfSettings.disableAtmosphericEffects && window.atmosphericEffects && 
-        frameCount % (frameThrottle * 20) === 0) {
-      window.atmosphericEffects.update(delta, rover.position);
-    }
-    
-    // Disable dust particles entirely in emergency mode
-    if (!emergencyPerformanceMode && currentPerfSettings.mobileTier === 'high' && 
-        isMoving && frameCount % (frameThrottle * 10) === 0) {
-      if (window.dustParticles) {
-        window.dustParticles.update(rover.position, isMoving);
-      }
-    }
   } else {
     // Scene manager runs every frame: traffic, trains and rockets are animated
     // with the real frame time. Heavy work inside it (settlement spawning) is
@@ -8093,6 +8108,8 @@ function animate(time) {
       }
     }
   }
+
+  if (window.rockField && rover) window.rockField.update(rover.position);
 
   // Rover Movement
   isMoving = false;
@@ -8170,28 +8187,11 @@ function animate(time) {
     velocity = 0;
   }
 
-  // Update Game Systems
-  updateGameSystems(time, delta);
+  updateGameHUD();
 
   // Update guided driving route progress if available
   if (window.marsSceneManager) {
     window.marsSceneManager.updateGuidedRoute(rover.position);
-  }
-
-  // Update terrain system with current rover position
-  terrainSystem.update(rover.position);
-
-  // Basic collision detection - prevent going off the edge of the current terrain system
-  const currentChunk = terrainSystem.getChunkCoords(rover.position.x, rover.position.z);
-  const chunkDistance = Math.max(
-    Math.abs(currentChunk.x - terrainSystem.currentChunk.x),
-    Math.abs(currentChunk.z - terrainSystem.currentChunk.z)
-  );
-
-  // If we're too far from the current chunk center, update the chunk tracking
-  // (no longer blocks movement — the rover can explore freely)
-  if (chunkDistance > 2) {
-    terrainSystem.currentChunk = { ...currentChunk };
   }
 
   // Handle turning with smooth acceleration - turning radius scales with speed
@@ -8235,8 +8235,9 @@ function animate(time) {
     }
   }
 
-  // Position rover on terrain - throttle for performance
-  if (frameCount % (frameThrottle * 2) === 0) {
+  // While moving the rover was already placed above; when parked, keep easing
+  // its tilt to the ground now and then
+  if (!isMoving && frameCount % (frameThrottle * 2) === 0) {
     positionRoverOnTerrain();
   }
 
@@ -8250,7 +8251,7 @@ function animate(time) {
   updateCamera(delta);
 
   // Update dust particles - only when moving and throttled based on performance
-  if (isMoving && frameCount % (frameThrottle * 2) === 0) {
+  if (isMoving && !emergencyPerformanceMode && frameCount % (frameThrottle * 2) === 0) {
     dustParticles.update(rover.position, isMoving);
   }
 
@@ -8262,48 +8263,9 @@ function animate(time) {
   // Render scene (through the post-processing chain on desktop)
   renderFrame(time);
 
-  // Update distance traveled
-  if (lastUpdateTime === 0) {
-    lastUpdateTime = time;
-  } else {
-    const deltaTime = (time - lastUpdateTime) / 1000; // Convert to seconds
-    lastUpdateTime = time;
-
-      // Update atmospheric effects system (now that deltaTime is available)
-  if (window.atmosphericEffects && rover) {
-    window.atmosphericEffects.update(deltaTime * 1000, rover.position); // Convert back to milliseconds for consistency
+  if (window.atmosphericEffects && rover && !emergencyPerformanceMode) {
+    window.atmosphericEffects.update(delta, rover.position);
   }
-
-  // Update enhanced systems (missions, samples, etc.) - throttled for performance
-  if (typeof updateEnhancedSystems === 'function' && rover && frameCount % (frameThrottle * 3) === 0) {
-    // Update enhanced systems with reduced frequency on mobile
-    if (!perfSettings.isMobile) {
-      updateEnhancedSystems(deltaTime, rover.position);
-    } else {
-      // Mobile: Update with reduced functionality but keep essential systems working
-      updateEnhancedSystems(deltaTime, rover.position);
-    }
-  }
-
-  // Calculate distance based on current speed with scaling factor
-  // Only add distance when moving forward (positive speed)
-  if (currentSpeed > 0) {
-    // Apply a scaling factor to make the distance more noticeable
-    const scaledSpeed = currentSpeed * DISTANCE_SCALE_FACTOR;
-    const speedInMilesPerSecond = scaledSpeed * 0.000621371;
-    distanceTraveled += speedInMilesPerSecond * deltaTime;
-  }
-
-    // Update the HUD with the distance traveled
-    if (window.distanceText) {
-      window.distanceText.innerHTML = `Distance Traveled: ${distanceTraveled.toFixed(2)} miles`;
-    }
-  }
-
-  // Mars Scene Manager events are now updated via marsSceneManager.update() call
-  
-  // Track frame time for performance monitoring
-  window.lastFrameTime = time;
 }
 
 // Helper function to optimize wheel rotation updates
@@ -8367,8 +8329,15 @@ function getGroundHeight(x, z, fallback = 0) {
 // Flatten a disc of the Mars terrain toward a target height, with a smooth
 // blended rim. Used to remove the bumps that poke up around colony buildings
 // (which are placed at a fixed ground height, not the undulating terrain).
+// Where the ground has been built on: flattened sites and graded roads. The
+// rock field keeps clear of these and re-seats itself when the ground changes.
+const _terrainEdits = { version: 0, zones: [], roadCells: new Set() };
+const ROAD_CELL = 5;
+
 function flattenMarsTerrain(cx, cz, radius, targetY = 0) {
   if (typeof marsSurface === 'undefined' || !marsSurface || !marsSurface.geometry) return;
+  _terrainEdits.zones.push({ x: cx, z: cz, r: radius });
+  _terrainEdits.version++;
   const geo = marsSurface.geometry;
   const pos = geo.attributes.position;
   const arr = pos.array;
@@ -8396,6 +8365,13 @@ function gradeTerrainAlongPath(points, closed, halfWidth = 7, shoulder = 24, max
   const grid = marsSurface.geometry.userData.heightGrid;
   const n = points.length;
   if (!grid || n < 2) return;
+  for (const p of points) {
+    const gx = Math.floor(p.x / ROAD_CELL), gz = Math.floor(p.z / ROAD_CELL);
+    for (let ax = -2; ax <= 2; ax++) {
+      for (let az = -2; az <= 2; az++) _terrainEdits.roadCells.add((gx + ax) + '|' + (gz + az));
+    }
+  }
+  _terrainEdits.version++;
 
   // Longitudinal profile: ground heights, box-filtered twice (~ +/-40 m)
   let profile = points.map(p => sampleTerrainHeight(p.x, p.z));
@@ -8823,6 +8799,84 @@ function _bandLimitedFbm(u, v, base, octaves, seed, size) {
 }
 
 // RGBA detail: R broad fBm, G pebble mask, B fine grit, A second broad fBm
+// Surface weathering for static structures, done entirely in the fragment
+// shader from world position: panel seams, blotchy grime, rain-less "dust
+// streaks" down walls and regolith settled on upward faces, plus matching
+// roughness/metalness variation. It needs no textures, UVs, extra geometry or
+// draw calls, so the buildings cost the same to draw as flat-coloured ones.
+// World-space patterns would swim across anything that moves: static only.
+//   seam: [width, height] of a panel in metres (0 = no seams on that axis)
+//   planar: project straight down (mounds and berms, which have no walls)
+function weatherStatic(material, { seam = [3.0, 2.4], seamStrength = 1, grime = 1, dust = 1, planar = false } = {}) {
+  if (!material || !material.isMeshStandardMaterial || getPerformanceSettings().isMobile) return material;
+  const f = (v) => Number(v).toFixed(3);
+  const key = [seam[0], seam[1], seamStrength, grime, dust].map(f).join('|') + (planar ? '|p' : '');
+  material.customProgramCacheKey = () => 'weather|' + key;
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWxPos;')
+      .replace('#include <project_vertex>', `#include <project_vertex>
+        vec4 wxPos = vec4(transformed, 1.0);
+        #ifdef USE_INSTANCING
+          wxPos = instanceMatrix * wxPos;
+        #endif
+        vWxPos = (modelMatrix * wxPos).xyz;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vWxPos;
+        // Arithmetic-only hash (no sin): cheap on every GPU
+        float wxHash(vec2 p) {
+          vec3 q = fract(vec3(p.xyx) * 0.1031);
+          q += dot(q, q.yzx + 33.33);
+          return fract((q.x + q.y) * q.z);
+        }
+        float wxNoise(vec2 p) {
+          vec2 i = floor(p), u = fract(p);
+          u = u * u * (3.0 - 2.0 * u);
+          return mix(mix(wxHash(i), wxHash(i + vec2(1.0, 0.0)), u.x),
+                     mix(wxHash(i + vec2(0.0, 1.0)), wxHash(i + vec2(1.0, 1.0)), u.x), u.y);
+        }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        // World-space normal: the smooth one where there is one, so curved
+        // shells don't show their facets
+        #ifdef FLAT_SHADED
+          vec3 wxN = normalize(cross(dFdx(vWxPos), dFdy(vWxPos)));
+        #else
+          vec3 wxN = normalize((vec4(normalize(vNormal), 0.0) * viewMatrix).xyz) * (gl_FrontFacing ? 1.0 : -1.0);
+        #endif
+        vec3 wxA = abs(wxN);
+        bool wxFlat = ${planar ? 'true' : 'wxA.y > 0.6'};
+        vec2 wxUv = wxFlat ? vWxPos.xz : (wxA.x > wxA.z ? vWxPos.zy : vWxPos.xy);
+        float wxFade = 1.0 - smoothstep(140.0, 380.0, length(vWxPos - cameraPosition));
+        float wxGrime = wxNoise(wxUv * 0.55);
+        float wxStreak = wxFlat ? 0.0 : wxNoise(vec2(wxUv.x * 2.3, wxUv.y * 0.16));
+        float wxSeam = 0.0;
+        ${seam[0] > 0 || seam[1] > 0 ? `{
+          vec2 g = wxUv / vec2(${f(seam[0] || 1e6)}, ${f(seam[1] || 1e6)});
+          vec2 w = fwidth(g);
+          vec2 d = 0.5 - abs(fract(g) - 0.5);
+          vec2 l = 1.0 - smoothstep(vec2(0.0), max(w * 1.5, vec2(0.004)), d);
+          // Fade each axis out before its lines get thinner than a pixel
+          l *= clamp(1.0 - w * 5.0, 0.0, 1.0);
+          l *= vec2(${seam[0] > 0 ? '1.0' : '0.0'}, ${seam[1] > 0 ? '1.0' : '0.0'});
+          wxSeam = max(l.x, l.y) * ${f(seamStrength)};
+        }` : ''}
+        float wxK = ${f(grime)} * wxFade;
+        diffuseColor.rgb *= 1.0 - 0.42 * wxSeam;
+        diffuseColor.rgb *= mix(1.0, 0.74 + 0.4 * wxGrime, wxK);
+        diffuseColor.rgb *= 1.0 - 0.2 * wxStreak * wxStreak * wxK;
+        float wxDust = ${f(dust)} * (0.14 + 0.5 * smoothstep(0.35, 0.9, wxN.y)) * (0.55 + 0.45 * wxGrime);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.40, 0.19, 0.10), wxDust);`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = clamp(roughnessFactor + (wxGrime - 0.45) * 0.3 * wxK + wxDust * 0.6, 0.04, 1.0);`)
+      .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+        metalnessFactor *= 1.0 - wxDust;`);
+  };
+  material.needsUpdate = true;
+  return material;
+}
+
+
 function createRegolithDetailTexture(size = 512) {
   const data = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++) {
@@ -10132,6 +10186,180 @@ function createMarsMoonsLayer() {
 }
 
 // Lazy loading system for non-essential components
+// Loose rocks and pebbles scattered over the open ground around the rover.
+// Placement is a pure function of world position, so the same rocks are there
+// every time you come back; only the ones within range exist, as three
+// instanced meshes (three draw calls in all). They are small enough to drive
+// over, so they need no collision.
+class RockField {
+  constructor(scene) {
+    const perf = getPerformanceSettings();
+    this.range = perf.isMobile ? 110 : (perf.detailLevel === 'high' ? 220 : 170);
+    this.cell = 8;
+    const capacity = perf.isMobile ? 900 : 3600;
+    const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.96, metalness: 0, flatShading: true });
+
+    const makeRock = (seed, detail, squash) => {
+      const g = new THREE.IcosahedronGeometry(1, detail);
+      const p = g.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+        // Hash the corner itself so faces that share it stay joined
+        const h = _terrainHash2(Math.round(x * 50) + seed * 13.1, Math.round(y * 50) * 1.7 + Math.round(z * 50) * 0.37);
+        const k = 0.72 + h * 0.5;
+        p.setXYZ(i, x * k, y * k * squash, z * k);
+      }
+      g.computeVertexNormals();
+      g.computeBoundingSphere();
+      return g;
+    };
+    // Two boulder shapes and one cheap pebble. Two copies of each: one is on
+    // screen while the next layout is written into the other a slice per
+    // frame, so re-seating the field never costs a visible hitch.
+    const shapes = [makeRock(1, 1, 0.62), makeRock(2, 1, 0.8), makeRock(3, 0, 0.6)];
+    const makeSet = () => shapes.map((g, i) => {
+      const mesh = new THREE.InstancedMesh(g, material, i === 2 ? capacity : Math.ceil(capacity / 2.5));
+      mesh.count = 0;
+      mesh.visible = false;
+      mesh.frustumCulled = false; // instances surround the rover; culling tests only the base shape
+      mesh.castShadow = !perf.isMobile && i < 2;
+      mesh.receiveShadow = !perf.isMobile;
+      scene.add(mesh);
+      return mesh;
+    });
+    this.meshes = makeSet();   // on screen
+    this._spare = makeSet();   // being written
+    this._job = null;
+    this._dummy = new THREE.Object3D();
+    this._color = new THREE.Color();
+    this._dark = new THREE.Color(0x24140e);
+    this._light = new THREE.Color(0x55301e);
+    this.lastX = Infinity;
+    this.lastZ = Infinity;
+    this.version = -1;
+    this.settlementCount = -1;
+  }
+
+  update(position) {
+    const sm = window.marsSceneManager;
+    const settlementCount = sm && sm.settlements ? sm.settlements.size : 0;
+    if (!this._job) {
+      const dx = position.x - this.lastX, dz = position.z - this.lastZ;
+      if (dx * dx + dz * dz < 24 * 24 && this.version === _terrainEdits.version &&
+          settlementCount === this.settlementCount) return;
+      const first = this.version === -1;
+      this.lastX = position.x;
+      this.lastZ = position.z;
+      this.version = _terrainEdits.version;
+      this.settlementCount = settlementCount;
+      this._job = this._layout(position.x, position.z, sm, this._spare);
+      if (first) { // behind the loading screen: finish in one go
+        while (!this._job.next().done) { /* keep going */ }
+        this._swap();
+        return;
+      }
+    }
+    // About a millisecond of layout per frame
+    const deadline = performance.now() + 1;
+    while (performance.now() < deadline) {
+      if (this._job.next().done) {
+        this._swap();
+        break;
+      }
+    }
+  }
+
+  _swap() {
+    this._job = null;
+    const shown = this._spare;
+    this._spare = this.meshes;
+    this.meshes = shown;
+    shown.forEach(mesh => { mesh.visible = true; });
+    this._spare.forEach(mesh => { mesh.visible = false; });
+  }
+
+  _blocked(x, z, sm) {
+    for (const zone of _terrainEdits.zones) {
+      const dx = x - zone.x, dz = z - zone.z, r = zone.r * 0.85;
+      if (dx * dx + dz * dz < r * r) return true;
+    }
+    if (_terrainEdits.roadCells.has(Math.floor(x / ROAD_CELL) + '|' + Math.floor(z / ROAD_CELL))) return true;
+    if (!sm) return false;
+    if (sm.settlements) {
+      for (const s of sm.settlements.values()) {
+        const dx = x - s.center.x, dz = z - s.center.z;
+        if (dx * dx + dz * dz < 55 * 55) return true;
+      }
+    }
+    if (sm.roads) {
+      for (const road of sm.roads.values()) {
+        const lx = road.endX - road.startX, lz = road.endZ - road.startZ;
+        const t = Math.max(0, Math.min(1, ((x - road.startX) * lx + (z - road.startZ) * lz) / (lx * lx + lz * lz || 1)));
+        const dx = x - (road.startX + lx * t), dz = z - (road.startZ + lz * t);
+        if (dx * dx + dz * dz < 7 * 7) return true;
+      }
+    }
+    for (const c of sm.collidables || []) {
+      const dx = x - c.x, dz = z - c.z, r = c.r + 1.5;
+      if (dx * dx + dz * dz < r * r) return true;
+    }
+    return false;
+  }
+
+  // Writes the layout centred on (px, pz) into `meshes`, yielding after each
+  // column of cells so update() can spread the work over several frames
+  *_layout(px, pz, sm, meshes) {
+    const position = { x: px, z: pz };
+    const R = this.range, C = this.cell;
+    const half = marsSurface.geometry.userData.heightGrid.half - 2;
+    const counts = [0, 0, 0];
+    const d = this._dummy;
+    const gx0 = Math.floor((position.x - R) / C), gx1 = Math.floor((position.x + R) / C);
+    const gz0 = Math.floor((position.z - R) / C), gz1 = Math.floor((position.z + R) / C);
+    for (let gx = gx0; gx <= gx1; gx++) {
+      for (let gz = gz0; gz <= gz1; gz++) {
+        // Rocks gather in patches ~40 m across with barer ground between
+        const patch = _terrainHash2(Math.floor(gx / 5) * 3.7 + 11, Math.floor(gz / 5) * 5.3 - 7);
+        const n = Math.floor(patch * patch * 6 + _terrainHash2(gx + 0.5, gz + 0.25) * 1.6);
+        for (let k = 0; k < n; k++) {
+          const h1 = _terrainHash2(gx * 1.31 + k * 7.7, gz * 1.73 - k * 3.1);
+          const h2 = _terrainHash2(gx * 2.17 - k * 1.9, gz * 0.91 + k * 5.3);
+          const x = (gx + h1) * C, z = (gz + h2) * C;
+          if (Math.abs(x) > half || Math.abs(z) > half) continue;
+          const dist = Math.hypot(x - position.x, z - position.z);
+          const h3 = _terrainHash2(gx * 0.77 + k * 2.3, gz * 1.19 + k * 4.1);
+          // Pebbles are sub-pixel long before boulders are, so they get a
+          // shorter reach: dense underfoot, cheap at range
+          const reach = R * Math.min(1, 0.28 + h3 * 1.3);
+          if (dist > reach) continue;
+          const h4 = _terrainHash2(gx * 3.3 - k * 6.1, gz * 2.9 - k * 0.7);
+          // Mostly pebbles, a few knee-high rocks; shrink into the far edge so
+          // nothing pops in or out
+          const size = (0.12 + h3 * h3 * h3 * 0.65) * Math.min(1, (reach - dist) / (reach * 0.2));
+          if (size < 0.04) continue;
+          const variant = size > 0.3 ? (h4 < 0.5 ? 0 : 1) : 2;
+          if (counts[variant] >= meshes[variant].instanceMatrix.count) continue;
+          if (this._blocked(x, z, sm)) continue;
+          d.position.set(x, sampleTerrainHeight(x, z) - size * 0.22, z);
+          d.rotation.set((h4 - 0.5) * 0.7, h1 * 6.283, (h2 - 0.5) * 0.7);
+          d.scale.set(size * (0.8 + h2 * 0.5), size * (0.75 + h4 * 0.4), size * (0.8 + h1 * 0.5));
+          d.updateMatrix();
+          const mesh = meshes[variant];
+          mesh.setMatrixAt(counts[variant], d.matrix);
+          mesh.setColorAt(counts[variant], this._color.copy(this._dark).lerp(this._light, h3 * 0.5 + h4 * 0.5));
+          counts[variant]++;
+        }
+      }
+      yield;
+    }
+    meshes.forEach((mesh, i) => {
+      mesh.count = counts[i];
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    });
+  }
+}
+
 class LazyLoader {
   constructor() {
     this.loadedComponents = new Set();
@@ -10226,6 +10454,12 @@ function loadCoreComponents() {
       console.error('❌ Failed to create MarsSceneManager eagerly:', e);
       console.error('Error stack:', e.stack);
     }
+  }
+
+  try {
+    window.rockField = new RockField(scene);
+  } catch (e) {
+    console.error('Rock field unavailable:', e);
   }
 
   // Initialize basic UI elements (may not exist as a function, skip if undefined)

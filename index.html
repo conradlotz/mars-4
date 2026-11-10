@@ -1823,7 +1823,6 @@
 
       function onStart(e) {
         e.preventDefault();
-        const touch = e.touches[0];
         const rect = joystick.getBoundingClientRect();
         centerX = rect.left + rect.width / 2;
         centerY = rect.top + rect.height / 2;
@@ -1835,7 +1834,10 @@
       function onMove(e) {
         if (!active) return;
         e.preventDefault();
-        const touch = e.touches[0];
+        // The finger on the joystick itself: e.touches[0] is the first finger
+        // on the screen, which is the BOOST thumb when that went down first
+        const touch = e.targetTouches[0];
+        if (!touch) return;
         let dx = touch.clientX - centerX;
         let dy = touch.clientY - centerY;
 
@@ -1854,6 +1856,7 @@
 
       function onEnd(e) {
         e.preventDefault();
+        if (e.targetTouches.length > 0) return; // another finger is still on it
         active = false;
         releaseAll();
       }
@@ -1876,12 +1879,6 @@
         boost.addEventListener('touchcancel', setBoost(false), { passive: false });
         boost.addEventListener('contextmenu', (e) => e.preventDefault());
       }
-
-      // Retry until mars.js exposes window.keys
-      (function waitForKeys() {
-        if (window.keys) return;
-        setTimeout(waitForKeys, 200);
-      })();
     })();
   </script>
 </body>
