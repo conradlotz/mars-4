@@ -3877,7 +3877,9 @@ class StarshipSpaceport {
     const site = this.site;
     const padSurface = [], berms = [], markings = [];
     const padMat = new THREE.MeshStandardMaterial({ color: 0x3a302b, roughness: 0.92, metalness: 0.05 });
+    weatherStatic(padMat, { seam: [8, 8], seamStrength: 0.7, grime: 1.3, dust: 0.7 });
     const bermMat = new THREE.MeshStandardMaterial({ color: 0x8f3416, roughness: 1.0, metalness: 0.0 });
+    weatherStatic(bermMat, { seam: [0, 0], grime: 1.2, dust: 0, planar: true });
     const markMat = new THREE.MeshStandardMaterial({ color: 0x8a8580, roughness: 0.7, metalness: 0.0 });
     const toColony = Math.atan2(this.U.z, this.U.x);
 
@@ -3965,6 +3967,10 @@ class StarshipSpaceport {
     const bandMat = new THREE.MeshStandardMaterial({ color: 0x0b1e55, roughness: 0.5, metalness: 0.2 });
     const regolithMat = new THREE.MeshStandardMaterial({ color: 0x8f3416, roughness: 1.0, metalness: 0.0 });
     const metalMat = new THREE.MeshStandardMaterial({ color: 0x4a4c50, roughness: 0.5, metalness: 0.8 });
+    weatherStatic(whiteMat, { seam: [3.2, 2.4] });
+    weatherStatic(bandMat, { seam: [3.2, 2.4], dust: 0.6 });
+    weatherStatic(regolithMat, { seam: [0, 0], grime: 1.2, dust: 0, planar: true });
+    weatherStatic(metalMat, { seam: [1.6, 1.6], seamStrength: 0.6, dust: 0.7 });
     this.lampMat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffd9a8, emissiveIntensity: 0.3 });
     [[white, whiteMat, true], [bands, bandMat, false], [regolith, regolithMat, true], [metal, metalMat, true], [lamps, this.lampMat, false]]
       .forEach(([list, mat, shadow]) => {
@@ -4464,6 +4470,7 @@ class MarsSceneManager {
     }, 0.0, 0.1);
     const frameMat = new THREE.MeshStandardMaterial({ color: 0xe6e6ea, metalness: 0.65, roughness: 0.35 });
     const baseMat = new THREE.MeshStandardMaterial({ color: 0x6b6258, metalness: 0.05, roughness: 0.9 });
+    weatherStatic(baseMat, { seam: [4, 1.2], seamStrength: 0.6 });
     const gardenMat = night({ vertexColors: true, roughness: 0.85, metalness: 0.0, emissive: 0x6a2a7a, emissiveIntensity: 0 }, 0.0, 0.35);
     const waterMat = new THREE.MeshStandardMaterial({ color: 0x1d4a5c, metalness: 0.2, roughness: 0.08, envMapIntensity: 1.4 });
 
@@ -4511,6 +4518,8 @@ class MarsSceneManager {
     const mats = this.getColonyMaterials();
     const deckMat = new THREE.MeshStandardMaterial({ color: 0xc9c9d4, roughness: 0.25, metalness: 0.85 });
     const pylonMat = new THREE.MeshStandardMaterial({ color: 0x5c5d63, roughness: 0.45, metalness: 0.8 });
+    weatherStatic(deckMat, { seam: [6, 0], seamStrength: 0.5, grime: 0.7, dust: 0.5 });
+    weatherStatic(pylonMat, { seam: [0, 4], seamStrength: 0.5, dust: 0.6 });
     [[parts.white, mats.white, true], [parts.metal, mats.metal, true], [parts.lamp, mats.lamp, false],
      [parts.deck, deckMat, true], [parts.pylon, pylonMat, true]].forEach(([list, mat, shadow]) => {
       if (!list.length) return;
@@ -5102,6 +5111,12 @@ class MarsSceneManager {
       plants: std({ color: 0x0f3a0a, roughness: 0.85, metalness: 0.0, emissive: 0x6a1a70, emissiveIntensity: 0.0 }, [0.0, 0.8]),
       pv: std({ color: 0x02081a, roughness: 0.22, metalness: 0.4, envMapIntensity: 1.2 })
     };
+    const cm = this._colonyMats;
+    weatherStatic(cm.regolith, { seam: [0, 0], grime: 1.2, dust: 0, planar: true });
+    weatherStatic(cm.printed, { seam: [0, 0.22], seamStrength: 0.45, dust: 0.4 }); // 3D-print layer lines
+    weatherStatic(cm.white, { seam: [3.0, 2.4] });
+    weatherStatic(cm.metal, { seam: [1.6, 1.6], seamStrength: 0.6, dust: 0.7 });
+    weatherStatic(cm.band, { seam: [3.0, 2.4], dust: 0.6 });
     return this._colonyMats;
   }
 
@@ -5450,12 +5465,14 @@ class MarsSceneManager {
         roughness: 0.95,
         metalness: 0.08
       });
+      weatherStatic(serviceMat, { seam: [6, 6], seamStrength: 0.5, grime: 1.2, dust: 0.8 });
       const lineMat = new THREE.MeshBasicMaterial({ color: 0xffb45a });
       const padMat = new THREE.MeshStandardMaterial({
         color: 0x56585d,
         roughness: 0.7,
         metalness: 0.35
       });
+      weatherStatic(padMat, { seam: [6, 6], seamStrength: 0.6, grime: 1.2, dust: 0.7 });
       const glowCyan = new THREE.MeshBasicMaterial({ color: 0x66eaff });
       const glowAmber = new THREE.MeshBasicMaterial({ color: 0xffaa44 });
       const cargoMat = new THREE.MeshStandardMaterial({
@@ -5463,11 +5480,13 @@ class MarsSceneManager {
         roughness: 0.45,
         metalness: 0.75
       });
+      weatherStatic(cargoMat, { seam: [2.4, 2.6], seamStrength: 0.8 });
       const darkCargoMat = new THREE.MeshStandardMaterial({
         color: 0x303842,
         roughness: 0.5,
         metalness: 0.65
       });
+      weatherStatic(darkCargoMat, { seam: [0, 0], dust: 0.8 });
       // On desktop the Cybertruck ring road (createTrafficRoutes) is draped
       // over the terrain on this radius; the flat torus stays for mobile.
       if (perfSettings.isMobile) {
@@ -5788,6 +5807,7 @@ class MarsSceneManager {
         emissive: 0x2244aa,
         emissiveIntensity: 0.55
       });
+      weatherStatic(towerMat, { seam: [5, 3.6], seamStrength: 0.8, grime: 0.5, dust: 0.25 });
       const tower = new THREE.Mesh(towerGeom, towerMat);
       tower.position.set(x, groundY + baseHeight / 2, z);
       tower.castShadow = true;
@@ -5837,6 +5857,7 @@ class MarsSceneManager {
       emissive: 0x223366,
       emissiveIntensity: 0.55
     });
+    weatherStatic(flagshipMat, { seam: [5, 3.6], seamStrength: 0.8, grime: 0.4, dust: 0.2 });
     const flagship = new THREE.Mesh(flagshipGeom, flagshipMat);
     flagship.position.set(center.x, center.y + flagshipHeight / 2, center.z);
     flagship.castShadow = true;
@@ -5903,6 +5924,7 @@ class MarsSceneManager {
         roughness: 0.35,
         metalness: 0.9
       });
+      weatherStatic(pylonMaterial, { seam: [0, 4], seamStrength: 0.5, dust: 0.6 });
 
       for (let i = 0; i <= segmentCount; i++) {
         const t = i / segmentCount;
@@ -5926,6 +5948,7 @@ class MarsSceneManager {
         roughness: 0.18,
         metalness: 0.92
       });
+      weatherStatic(deckMaterial, { seam: [6, 0], seamStrength: 0.5, grime: 0.7, dust: 0.5 });
       const deck = new THREE.Mesh(deckGeometry, deckMaterial);
 
       const deckGroup = new THREE.Group();
@@ -6322,13 +6345,16 @@ class MarsSceneManager {
     const pal = palettes[Math.floor(rand() * palettes.length)];
 
     const wallMat = new THREE.MeshStandardMaterial({ color: pal.wall, metalness: 0.7, roughness: 0.3, emissive: pal.emissive, emissiveIntensity: 0.35 });
+    weatherStatic(wallMat, { seam: [3.2, 3.0], grime: 0.8, dust: 0.6 });
     // Glowing window band material so towers light up at night
     const winMat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.9 });
     const glowMat = new THREE.MeshBasicMaterial({ color: pal.accent, transparent: true, opacity: 0.85 });
     const glow2Mat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.7 });
     const padMat  = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.9, metalness: 0.2 });
+    weatherStatic(padMat, { seam: [6, 6], seamStrength: 0.6, grime: 1.2, dust: 0.8 });
     const glassMat = new THREE.MeshStandardMaterial({ color: 0x88ccff, metalness: 0.9, roughness: 0.05, transparent: true, opacity: 0.4 });
     const plazaMat = new THREE.MeshStandardMaterial({ color: 0x31343a, roughness: 0.72, metalness: 0.32 });
+    weatherStatic(plazaMat, { seam: [4, 4], seamStrength: 0.6, grime: 1.1, dust: 0.8 });
     const laneMat = new THREE.MeshBasicMaterial({ color: pal.accent, transparent: true, opacity: 0.78 });
     const beaconMat = new THREE.MeshBasicMaterial({ color: pal.beacon });
 
@@ -6548,11 +6574,13 @@ class MarsSceneManager {
         emissive: 0x120906,
         emissiveIntensity: 0.18
       });
+      weatherStatic(modernWallMat, { seam: [3.0, 2.4] });
       const darkTrimMat = new THREE.MeshStandardMaterial({
         color: 0x28211d,
         roughness: 0.7,
         metalness: 0.42
       });
+      weatherStatic(darkTrimMat, { seam: [0, 0], dust: 0.8 });
       const modernGlassMat = new THREE.MeshStandardMaterial({
         color: 0x84c5dd,
         roughness: 0.18,
@@ -6567,6 +6595,7 @@ class MarsSceneManager {
         roughness: 1.0,
         metalness: 0.0
       });
+      weatherStatic(regolithMat, { seam: [0, 0], grime: 1.2, dust: 0, planar: true });
       const lightMat = new THREE.MeshBasicMaterial({ color: pal.glow, transparent: true, opacity: 0.74 });
 
       const commandW = 34 * scale;
@@ -7330,6 +7359,7 @@ class MarsSceneManager {
         roughness: 0.4,
         metalness: 0.8
       });
+      weatherStatic(pylonMaterial, { seam: [0, 4], seamStrength: 0.5, dust: 0.6 });
 
       for (let i = 0; i <= segmentCount; i++) {
         const t = i / segmentCount;
@@ -7354,6 +7384,7 @@ class MarsSceneManager {
         roughness: 0.2,
         metalness: 0.9
       });
+      weatherStatic(deckMaterial, { seam: [6, 0], seamStrength: 0.5, grime: 0.7, dust: 0.5 });
       const deck = new THREE.Mesh(deckGeometry, deckMaterial);
 
       const deckGroup = new THREE.Group();
@@ -8768,6 +8799,84 @@ function _bandLimitedFbm(u, v, base, octaves, seed, size) {
 }
 
 // RGBA detail: R broad fBm, G pebble mask, B fine grit, A second broad fBm
+// Surface weathering for static structures, done entirely in the fragment
+// shader from world position: panel seams, blotchy grime, rain-less "dust
+// streaks" down walls and regolith settled on upward faces, plus matching
+// roughness/metalness variation. It needs no textures, UVs, extra geometry or
+// draw calls, so the buildings cost the same to draw as flat-coloured ones.
+// World-space patterns would swim across anything that moves: static only.
+//   seam: [width, height] of a panel in metres (0 = no seams on that axis)
+//   planar: project straight down (mounds and berms, which have no walls)
+function weatherStatic(material, { seam = [3.0, 2.4], seamStrength = 1, grime = 1, dust = 1, planar = false } = {}) {
+  if (!material || !material.isMeshStandardMaterial || getPerformanceSettings().isMobile) return material;
+  const f = (v) => Number(v).toFixed(3);
+  const key = [seam[0], seam[1], seamStrength, grime, dust].map(f).join('|') + (planar ? '|p' : '');
+  material.customProgramCacheKey = () => 'weather|' + key;
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vWxPos;')
+      .replace('#include <project_vertex>', `#include <project_vertex>
+        vec4 wxPos = vec4(transformed, 1.0);
+        #ifdef USE_INSTANCING
+          wxPos = instanceMatrix * wxPos;
+        #endif
+        vWxPos = (modelMatrix * wxPos).xyz;`);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying vec3 vWxPos;
+        // Arithmetic-only hash (no sin): cheap on every GPU
+        float wxHash(vec2 p) {
+          vec3 q = fract(vec3(p.xyx) * 0.1031);
+          q += dot(q, q.yzx + 33.33);
+          return fract((q.x + q.y) * q.z);
+        }
+        float wxNoise(vec2 p) {
+          vec2 i = floor(p), u = fract(p);
+          u = u * u * (3.0 - 2.0 * u);
+          return mix(mix(wxHash(i), wxHash(i + vec2(1.0, 0.0)), u.x),
+                     mix(wxHash(i + vec2(0.0, 1.0)), wxHash(i + vec2(1.0, 1.0)), u.x), u.y);
+        }`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        // World-space normal: the smooth one where there is one, so curved
+        // shells don't show their facets
+        #ifdef FLAT_SHADED
+          vec3 wxN = normalize(cross(dFdx(vWxPos), dFdy(vWxPos)));
+        #else
+          vec3 wxN = normalize((vec4(normalize(vNormal), 0.0) * viewMatrix).xyz) * (gl_FrontFacing ? 1.0 : -1.0);
+        #endif
+        vec3 wxA = abs(wxN);
+        bool wxFlat = ${planar ? 'true' : 'wxA.y > 0.6'};
+        vec2 wxUv = wxFlat ? vWxPos.xz : (wxA.x > wxA.z ? vWxPos.zy : vWxPos.xy);
+        float wxFade = 1.0 - smoothstep(140.0, 380.0, length(vWxPos - cameraPosition));
+        float wxGrime = wxNoise(wxUv * 0.55);
+        float wxStreak = wxFlat ? 0.0 : wxNoise(vec2(wxUv.x * 2.3, wxUv.y * 0.16));
+        float wxSeam = 0.0;
+        ${seam[0] > 0 || seam[1] > 0 ? `{
+          vec2 g = wxUv / vec2(${f(seam[0] || 1e6)}, ${f(seam[1] || 1e6)});
+          vec2 w = fwidth(g);
+          vec2 d = 0.5 - abs(fract(g) - 0.5);
+          vec2 l = 1.0 - smoothstep(vec2(0.0), max(w * 1.5, vec2(0.004)), d);
+          // Fade each axis out before its lines get thinner than a pixel
+          l *= clamp(1.0 - w * 5.0, 0.0, 1.0);
+          l *= vec2(${seam[0] > 0 ? '1.0' : '0.0'}, ${seam[1] > 0 ? '1.0' : '0.0'});
+          wxSeam = max(l.x, l.y) * ${f(seamStrength)};
+        }` : ''}
+        float wxK = ${f(grime)} * wxFade;
+        diffuseColor.rgb *= 1.0 - 0.42 * wxSeam;
+        diffuseColor.rgb *= mix(1.0, 0.74 + 0.4 * wxGrime, wxK);
+        diffuseColor.rgb *= 1.0 - 0.2 * wxStreak * wxStreak * wxK;
+        float wxDust = ${f(dust)} * (0.14 + 0.5 * smoothstep(0.35, 0.9, wxN.y)) * (0.55 + 0.45 * wxGrime);
+        diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.40, 0.19, 0.10), wxDust);`)
+      .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+        roughnessFactor = clamp(roughnessFactor + (wxGrime - 0.45) * 0.3 * wxK + wxDust * 0.6, 0.04, 1.0);`)
+      .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+        metalnessFactor *= 1.0 - wxDust;`);
+  };
+  material.needsUpdate = true;
+  return material;
+}
+
+
 function createRegolithDetailTexture(size = 512) {
   const data = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++) {
