@@ -599,9 +599,9 @@ function createRealisticRover() {
     dishProfile.push(new THREE.Vector2(r, r * r * 1.1));
   }
   const dishMaterial = new THREE.MeshStandardMaterial({
-    color: 0xdddddd,
-    roughness: 0.3,
-    metalness: 0.7,
+    color: 0xa39f96, // matte grey: a polished white bowl bloomed in full sun
+    roughness: 0.6,
+    metalness: 0.3,
     side: THREE.DoubleSide
   });
   const dish = new THREE.Mesh(new THREE.LatheGeometry(dishProfile, 24), dishMaterial);
@@ -8078,6 +8078,8 @@ function animate(time) {
     }
   }
 
+  if (window.rockField && rover) window.rockField.update(rover.position);
+
   // Rover Movement
   isMoving = false;
   currentSpeed = 0; // Reset current speed
@@ -8296,8 +8298,15 @@ function getGroundHeight(x, z, fallback = 0) {
 // Flatten a disc of the Mars terrain toward a target height, with a smooth
 // blended rim. Used to remove the bumps that poke up around colony buildings
 // (which are placed at a fixed ground height, not the undulating terrain).
+// Where the ground has been built on: flattened sites and graded roads. The
+// rock field keeps clear of these and re-seats itself when the ground changes.
+const _terrainEdits = { version: 0, zones: [], roadCells: new Set() };
+const ROAD_CELL = 5;
+
 function flattenMarsTerrain(cx, cz, radius, targetY = 0) {
   if (typeof marsSurface === 'undefined' || !marsSurface || !marsSurface.geometry) return;
+  _terrainEdits.zones.push({ x: cx, z: cz, r: radius });
+  _terrainEdits.version++;
   const geo = marsSurface.geometry;
   const pos = geo.attributes.position;
   const arr = pos.array;
@@ -8325,6 +8334,13 @@ function gradeTerrainAlongPath(points, closed, halfWidth = 7, shoulder = 24, max
   const grid = marsSurface.geometry.userData.heightGrid;
   const n = points.length;
   if (!grid || n < 2) return;
+  for (const p of points) {
+    const gx = Math.floor(p.x / ROAD_CELL), gz = Math.floor(p.z / ROAD_CELL);
+    for (let ax = -2; ax <= 2; ax++) {
+      for (let az = -2; az <= 2; az++) _terrainEdits.roadCells.add((gx + ax) + '|' + (gz + az));
+    }
+  }
+  _terrainEdits.version++;
 
   // Longitudinal profile: ground heights, box-filtered twice (~ +/-40 m)
   let profile = points.map(p => sampleTerrainHeight(p.x, p.z));
@@ -10061,6 +10077,180 @@ function createMarsMoonsLayer() {
 }
 
 // Lazy loading system for non-essential components
+// Loose rocks and pebbles scattered over the open ground around the rover.
+// Placement is a pure function of world position, so the same rocks are there
+// every time you come back; only the ones within range exist, as three
+// instanced meshes (three draw calls in all). They are small enough to drive
+// over, so they need no collision.
+class RockField {
+  constructor(scene) {
+    const perf = getPerformanceSettings();
+    this.range = perf.isMobile ? 110 : (perf.detailLevel === 'high' ? 220 : 170);
+    this.cell = 8;
+    const capacity = perf.isMobile ? 900 : 3600;
+    const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.96, metalness: 0, flatShading: true });
+
+    const makeRock = (seed, detail, squash) => {
+      const g = new THREE.IcosahedronGeometry(1, detail);
+      const p = g.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+        // Hash the corner itself so faces that share it stay joined
+        const h = _terrainHash2(Math.round(x * 50) + seed * 13.1, Math.round(y * 50) * 1.7 + Math.round(z * 50) * 0.37);
+        const k = 0.72 + h * 0.5;
+        p.setXYZ(i, x * k, y * k * squash, z * k);
+      }
+      g.computeVertexNormals();
+      g.computeBoundingSphere();
+      return g;
+    };
+    // Two boulder shapes and one cheap pebble. Two copies of each: one is on
+    // screen while the next layout is written into the other a slice per
+    // frame, so re-seating the field never costs a visible hitch.
+    const shapes = [makeRock(1, 1, 0.62), makeRock(2, 1, 0.8), makeRock(3, 0, 0.6)];
+    const makeSet = () => shapes.map((g, i) => {
+      const mesh = new THREE.InstancedMesh(g, material, i === 2 ? capacity : Math.ceil(capacity / 2.5));
+      mesh.count = 0;
+      mesh.visible = false;
+      mesh.frustumCulled = false; // instances surround the rover; culling tests only the base shape
+      mesh.castShadow = !perf.isMobile && i < 2;
+      mesh.receiveShadow = !perf.isMobile;
+      scene.add(mesh);
+      return mesh;
+    });
+    this.meshes = makeSet();   // on screen
+    this._spare = makeSet();   // being written
+    this._job = null;
+    this._dummy = new THREE.Object3D();
+    this._color = new THREE.Color();
+    this._dark = new THREE.Color(0x24140e);
+    this._light = new THREE.Color(0x55301e);
+    this.lastX = Infinity;
+    this.lastZ = Infinity;
+    this.version = -1;
+    this.settlementCount = -1;
+  }
+
+  update(position) {
+    const sm = window.marsSceneManager;
+    const settlementCount = sm && sm.settlements ? sm.settlements.size : 0;
+    if (!this._job) {
+      const dx = position.x - this.lastX, dz = position.z - this.lastZ;
+      if (dx * dx + dz * dz < 24 * 24 && this.version === _terrainEdits.version &&
+          settlementCount === this.settlementCount) return;
+      const first = this.version === -1;
+      this.lastX = position.x;
+      this.lastZ = position.z;
+      this.version = _terrainEdits.version;
+      this.settlementCount = settlementCount;
+      this._job = this._layout(position.x, position.z, sm, this._spare);
+      if (first) { // behind the loading screen: finish in one go
+        while (!this._job.next().done) { /* keep going */ }
+        this._swap();
+        return;
+      }
+    }
+    // About a millisecond of layout per frame
+    const deadline = performance.now() + 1;
+    while (performance.now() < deadline) {
+      if (this._job.next().done) {
+        this._swap();
+        break;
+      }
+    }
+  }
+
+  _swap() {
+    this._job = null;
+    const shown = this._spare;
+    this._spare = this.meshes;
+    this.meshes = shown;
+    shown.forEach(mesh => { mesh.visible = true; });
+    this._spare.forEach(mesh => { mesh.visible = false; });
+  }
+
+  _blocked(x, z, sm) {
+    for (const zone of _terrainEdits.zones) {
+      const dx = x - zone.x, dz = z - zone.z, r = zone.r * 0.85;
+      if (dx * dx + dz * dz < r * r) return true;
+    }
+    if (_terrainEdits.roadCells.has(Math.floor(x / ROAD_CELL) + '|' + Math.floor(z / ROAD_CELL))) return true;
+    if (!sm) return false;
+    if (sm.settlements) {
+      for (const s of sm.settlements.values()) {
+        const dx = x - s.center.x, dz = z - s.center.z;
+        if (dx * dx + dz * dz < 55 * 55) return true;
+      }
+    }
+    if (sm.roads) {
+      for (const road of sm.roads.values()) {
+        const lx = road.endX - road.startX, lz = road.endZ - road.startZ;
+        const t = Math.max(0, Math.min(1, ((x - road.startX) * lx + (z - road.startZ) * lz) / (lx * lx + lz * lz || 1)));
+        const dx = x - (road.startX + lx * t), dz = z - (road.startZ + lz * t);
+        if (dx * dx + dz * dz < 7 * 7) return true;
+      }
+    }
+    for (const c of sm.collidables || []) {
+      const dx = x - c.x, dz = z - c.z, r = c.r + 1.5;
+      if (dx * dx + dz * dz < r * r) return true;
+    }
+    return false;
+  }
+
+  // Writes the layout centred on (px, pz) into `meshes`, yielding after each
+  // column of cells so update() can spread the work over several frames
+  *_layout(px, pz, sm, meshes) {
+    const position = { x: px, z: pz };
+    const R = this.range, C = this.cell;
+    const half = marsSurface.geometry.userData.heightGrid.half - 2;
+    const counts = [0, 0, 0];
+    const d = this._dummy;
+    const gx0 = Math.floor((position.x - R) / C), gx1 = Math.floor((position.x + R) / C);
+    const gz0 = Math.floor((position.z - R) / C), gz1 = Math.floor((position.z + R) / C);
+    for (let gx = gx0; gx <= gx1; gx++) {
+      for (let gz = gz0; gz <= gz1; gz++) {
+        // Rocks gather in patches ~40 m across with barer ground between
+        const patch = _terrainHash2(Math.floor(gx / 5) * 3.7 + 11, Math.floor(gz / 5) * 5.3 - 7);
+        const n = Math.floor(patch * patch * 6 + _terrainHash2(gx + 0.5, gz + 0.25) * 1.6);
+        for (let k = 0; k < n; k++) {
+          const h1 = _terrainHash2(gx * 1.31 + k * 7.7, gz * 1.73 - k * 3.1);
+          const h2 = _terrainHash2(gx * 2.17 - k * 1.9, gz * 0.91 + k * 5.3);
+          const x = (gx + h1) * C, z = (gz + h2) * C;
+          if (Math.abs(x) > half || Math.abs(z) > half) continue;
+          const dist = Math.hypot(x - position.x, z - position.z);
+          const h3 = _terrainHash2(gx * 0.77 + k * 2.3, gz * 1.19 + k * 4.1);
+          // Pebbles are sub-pixel long before boulders are, so they get a
+          // shorter reach: dense underfoot, cheap at range
+          const reach = R * Math.min(1, 0.28 + h3 * 1.3);
+          if (dist > reach) continue;
+          const h4 = _terrainHash2(gx * 3.3 - k * 6.1, gz * 2.9 - k * 0.7);
+          // Mostly pebbles, a few knee-high rocks; shrink into the far edge so
+          // nothing pops in or out
+          const size = (0.12 + h3 * h3 * h3 * 0.65) * Math.min(1, (reach - dist) / (reach * 0.2));
+          if (size < 0.04) continue;
+          const variant = size > 0.3 ? (h4 < 0.5 ? 0 : 1) : 2;
+          if (counts[variant] >= meshes[variant].instanceMatrix.count) continue;
+          if (this._blocked(x, z, sm)) continue;
+          d.position.set(x, sampleTerrainHeight(x, z) - size * 0.22, z);
+          d.rotation.set((h4 - 0.5) * 0.7, h1 * 6.283, (h2 - 0.5) * 0.7);
+          d.scale.set(size * (0.8 + h2 * 0.5), size * (0.75 + h4 * 0.4), size * (0.8 + h1 * 0.5));
+          d.updateMatrix();
+          const mesh = meshes[variant];
+          mesh.setMatrixAt(counts[variant], d.matrix);
+          mesh.setColorAt(counts[variant], this._color.copy(this._dark).lerp(this._light, h3 * 0.5 + h4 * 0.5));
+          counts[variant]++;
+        }
+      }
+      yield;
+    }
+    meshes.forEach((mesh, i) => {
+      mesh.count = counts[i];
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    });
+  }
+}
+
 class LazyLoader {
   constructor() {
     this.loadedComponents = new Set();
@@ -10155,6 +10345,12 @@ function loadCoreComponents() {
       console.error('❌ Failed to create MarsSceneManager eagerly:', e);
       console.error('Error stack:', e.stack);
     }
+  }
+
+  try {
+    window.rockField = new RockField(scene);
+  } catch (e) {
+    console.error('Rock field unavailable:', e);
   }
 
   // Initialize basic UI elements (may not exist as a function, skip if undefined)
