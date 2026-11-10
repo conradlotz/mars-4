@@ -405,6 +405,36 @@ function createRealisticRover() {
     emissiveIntensity: perfSettings.isMobile ? 0.3 : 0.04
   });
   
+  // Panel seams, fasteners, a vent and regolith dust creeping up from below
+  {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 128;
+    const g = c.getContext('2d');
+    g.fillStyle = '#ffffff';
+    g.fillRect(0, 0, 256, 128);
+    g.fillStyle = 'rgba(70, 62, 52, 0.55)';
+    [84, 170].forEach(x => g.fillRect(x, 6, 2, 116));   // vertical seams
+    g.fillRect(6, 30, 244, 2);                           // upper seam
+    g.fillStyle = 'rgba(60, 54, 46, 0.7)';
+    for (let x = 14; x < 250; x += 26) {                 // fasteners
+      g.fillRect(x, 12, 3, 3);
+      g.fillRect(x, 112, 3, 3);
+    }
+    g.fillStyle = 'rgba(40, 38, 36, 0.8)';
+    for (let i = 0; i < 5; i++) g.fillRect(190, 46 + i * 9, 44, 4); // vent louvres
+    g.fillStyle = '#ff8a4c';
+    g.fillRect(6, 20, 244, 5);                           // accent stripe
+    const dust = g.createLinearGradient(0, 128, 0, 62);
+    dust.addColorStop(0, 'rgba(176, 98, 52, 0.6)');
+    dust.addColorStop(1, 'rgba(176, 98, 52, 0)');
+    g.fillStyle = dust;
+    g.fillRect(0, 62, 256, 66);
+    const bodyTexture = new THREE.CanvasTexture(c);
+    bodyTexture.colorSpace = THREE.SRGBColorSpace;
+    bodyTexture.anisotropy = 4;
+    bodyMaterial.map = bodyTexture;
+  }
+
   // Mark this as the main body for color customization
   bodyMaterial.userData = { isBody: true };
   const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
@@ -490,6 +520,17 @@ function createRealisticRover() {
   rightLens.rotation.x = Math.PI / 2;
   cameraBox.add(rightLens);
 
+  // Camera head trim: lens bezels, a sun hood and the pan/tilt neck
+  const trimMaterial = new THREE.MeshStandardMaterial({ color: 0xb4ab9a, roughness: 0.45, metalness: 0.6 });
+  const headTrim = new THREE.Mesh(mergeGeometryList([
+    { geometry: new THREE.CylinderGeometry(0.068, 0.068, 0.03, 16), matrix: _xf(-0.08, 0, 0.095, Math.PI / 2) },
+    { geometry: new THREE.CylinderGeometry(0.068, 0.068, 0.03, 16), matrix: _xf(0.08, 0, 0.095, Math.PI / 2) },
+    { geometry: new THREE.BoxGeometry(0.36, 0.025, 0.3), matrix: _xf(0, 0.115, 0.03) },
+    { geometry: new THREE.CylinderGeometry(0.06, 0.075, 0.1, 12), matrix: _xf(0, -0.15, 0) }
+  ]), trimMaterial);
+  headTrim.castShadow = !perfSettings.isMobile;
+  cameraBox.add(headTrim);
+
   // Solar panels
   const panelGeometry = new THREE.BoxGeometry(2.8, 0.05, 1.8);
   const panelMaterial = new THREE.MeshStandardMaterial({
@@ -524,6 +565,20 @@ function createRealisticRover() {
   panelDetailsBottom.rotation.x = Math.PI / 2;
   panel.add(panelDetailsBottom);
 
+  // Aluminium frame round the array and the posts that carry it off the body
+  const panelFrame = new THREE.Mesh(mergeGeometryList([
+    { geometry: new THREE.BoxGeometry(2.86, 0.08, 0.06), matrix: _xf(0, 0, 0.9) },
+    { geometry: new THREE.BoxGeometry(2.86, 0.08, 0.06), matrix: _xf(0, 0, -0.9) },
+    { geometry: new THREE.BoxGeometry(0.06, 0.08, 1.8), matrix: _xf(1.4, 0, 0) },
+    { geometry: new THREE.BoxGeometry(0.06, 0.08, 1.8), matrix: _xf(-1.4, 0, 0) },
+    { geometry: new THREE.CylinderGeometry(0.04, 0.05, 0.2, 8), matrix: _xf(0.7, -0.12, 0.6) },
+    { geometry: new THREE.CylinderGeometry(0.04, 0.05, 0.2, 8), matrix: _xf(-0.7, -0.12, 0.6) },
+    { geometry: new THREE.CylinderGeometry(0.04, 0.05, 0.2, 8), matrix: _xf(0.7, -0.12, -0.6) },
+    { geometry: new THREE.CylinderGeometry(0.04, 0.05, 0.2, 8), matrix: _xf(-0.7, -0.12, -0.6) }
+  ]), trimMaterial);
+  panelFrame.castShadow = !perfSettings.isMobile;
+  panel.add(panelFrame);
+
   // Communications antenna
   const antennaBaseGeometry = new THREE.CylinderGeometry(0.1, 0.1, 0.1, 8);
   const antennaBaseMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
@@ -537,16 +592,28 @@ function createRealisticRover() {
   antenna.position.y = 0.5;
   antennaBase.add(antenna);
 
-  const dishGeometry = new THREE.SphereGeometry(0.2, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+  // High-gain dish: a shallow parabolic bowl with its feed horn, tipped skyward
+  const dishProfile = [];
+  for (let i = 0; i <= 8; i++) {
+    const r = 0.3 * i / 8;
+    dishProfile.push(new THREE.Vector2(r, r * r * 1.1));
+  }
   const dishMaterial = new THREE.MeshStandardMaterial({
     color: 0xdddddd,
     roughness: 0.3,
-    metalness: 0.7
+    metalness: 0.7,
+    side: THREE.DoubleSide
   });
-  const dish = new THREE.Mesh(dishGeometry, dishMaterial);
-  dish.position.y = 1.0;
-  dish.rotation.x = Math.PI;
+  const dish = new THREE.Mesh(new THREE.LatheGeometry(dishProfile, 24), dishMaterial);
+  dish.position.y = 0.52; // seated on the tip of the whip (it used to hover above it)
+  dish.rotation.x = 0.45;
+  dish.castShadow = !perfSettings.isMobile;
   antenna.add(dish);
+  const dishFeed = new THREE.Mesh(mergeGeometryList([
+    { geometry: new THREE.CylinderGeometry(0.012, 0.012, 0.22, 6), matrix: _xf(0, 0.11, 0) },
+    { geometry: new THREE.SphereGeometry(0.035, 10, 8), matrix: _xf(0, 0.23, 0) }
+  ]), antennaMaterial);
+  dish.add(dishFeed);
 
   // Robotic arm
   const armBaseGeometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
@@ -576,13 +643,6 @@ function createRealisticRover() {
 
   // Wheels - create 6 wheels with proper suspension mounting points
   const wheels = [];
-  // Increase wheel size by making them larger
-  const wheelGeometry = new THREE.CylinderGeometry(0.8, 0.8, 0.5, 24);
-  const wheelMaterial = new THREE.MeshStandardMaterial({
-    color: 0x222222,
-    roughness: 0.9,
-    metalness: 0.1
-  });
 
   // Add high-detail treads to wheels
   const wheelTextureCanvas = document.createElement('canvas');
@@ -624,8 +684,48 @@ function createRealisticRover() {
     color: 0x252525,
     roughness: 0.95,
     metalness: 0.05,
-    map: wheelTexture
+    map: wheelTexture,
+    side: THREE.DoubleSide // the open tyre shows its inner wall
   });
+
+  // Tyre (axle along local Y): tread band, rounded shoulders, sidewalls, the
+  // inner wall and raised grousers. Same size as the plain drum it replaces.
+  const SEG = perfSettings.isMobile ? 20 : 28;
+  const tyreParts = [
+    { geometry: new THREE.CylinderGeometry(0.8, 0.8, 0.38, SEG, 1, true) },
+    { geometry: new THREE.CylinderGeometry(0.74, 0.8, 0.06, SEG, 1, true), matrix: _xf(0, 0.22, 0) },
+    { geometry: new THREE.CylinderGeometry(0.8, 0.74, 0.06, SEG, 1, true), matrix: _xf(0, -0.22, 0) },
+    { geometry: new THREE.RingGeometry(0.56, 0.74, SEG), matrix: _xf(0, 0.25, 0, -Math.PI / 2) },
+    { geometry: new THREE.RingGeometry(0.56, 0.74, SEG), matrix: _xf(0, -0.25, 0, Math.PI / 2) },
+    { geometry: new THREE.CylinderGeometry(0.56, 0.56, 0.5, SEG, 1, true) }
+  ];
+  const GROUSERS = 18;
+  for (let k = 0; k < GROUSERS; k++) {
+    const a = k / GROUSERS * Math.PI * 2;
+    tyreParts.push({
+      geometry: new THREE.BoxGeometry(0.07, 0.42, 0.1),
+      matrix: _xf(Math.cos(a) * 0.815, 0, -Math.sin(a) * 0.815, 0, a, 0)
+    });
+  }
+  const tyreGeometry = mergeGeometryList(tyreParts);
+
+  // Hub: centre web, axle cap, rim lips and six spokes a side
+  const hubParts = [
+    { geometry: new THREE.CylinderGeometry(0.57, 0.57, 0.05, SEG) },
+    { geometry: new THREE.CylinderGeometry(0.13, 0.16, 0.54, 12) }
+  ];
+  for (const s of [1, -1]) {
+    hubParts.push({ geometry: new THREE.TorusGeometry(0.565, 0.025, 6, SEG), matrix: _xf(0, s * 0.24, 0, Math.PI / 2) });
+    for (let k = 0; k < 6; k++) {
+      const a = k / 6 * Math.PI * 2;
+      hubParts.push({
+        geometry: new THREE.BoxGeometry(0.42, 0.04, 0.07),
+        matrix: _xf(Math.cos(a) * 0.35, s * 0.17, -Math.sin(a) * 0.35, 0, a, 0)
+      });
+    }
+  }
+  const hubGeometry = mergeGeometryList(hubParts);
+  const hubMaterial = new THREE.MeshStandardMaterial({ color: 0xa89e8c, roughness: 0.5, metalness: 0.6 });
 
   // Wheel positions - 3 on each side (adjust positions for larger wheels)
   const wheelPositions = [
@@ -640,11 +740,14 @@ function createRealisticRover() {
   const originalWheelPositions = [];
 
   wheelPositions.forEach((pos, index) => {
-    const wheel = new THREE.Mesh(wheelGeometry, wheelMaterialWithTexture);
+    const wheel = new THREE.Mesh(tyreGeometry, wheelMaterialWithTexture);
     wheel.position.set(pos.x, pos.y, pos.z);
     wheel.rotation.z = Math.PI / 2; // Rotate to correct orientation
     wheel.castShadow = !perfSettings.isMobile;
     wheel.receiveShadow = !perfSettings.isMobile;
+    const hub = new THREE.Mesh(hubGeometry, hubMaterial); // spins with the tyre
+    hub.castShadow = !perfSettings.isMobile;
+    wheel.add(hub);
 
     // Store original position for suspension
     originalWheelPositions.push(pos.y);
@@ -682,6 +785,18 @@ function createRealisticRover() {
     lamp.position.set(lx, ly, lz);
     roverGroup.add(lamp);
   });
+  // Lamp shrouds and a bumper bar across the nose
+  const noseTrim = new THREE.Mesh(mergeGeometryList([
+    ...lampPositions.map(([lx, ly, lz]) => ({
+      geometry: new THREE.CylinderGeometry(0.17, 0.15, 0.2, 14, 1, true),
+      matrix: _xf(lx, ly, lz + 0.02, Math.PI / 2)
+    })),
+    { geometry: new THREE.BoxGeometry(2.3, 0.09, 0.09), matrix: _xf(0, 0.6, -1.66) },
+    { geometry: new THREE.BoxGeometry(0.07, 0.3, 0.07), matrix: _xf(-0.75, 0.76, -1.64) },
+    { geometry: new THREE.BoxGeometry(0.07, 0.3, 0.07), matrix: _xf(0.75, 0.76, -1.64) }
+  ]), new THREE.MeshStandardMaterial({ color: 0x3a3833, roughness: 0.6, metalness: 0.5, side: THREE.DoubleSide }));
+  noseTrim.castShadow = !perfSettings.isMobile;
+  roverGroup.add(noseTrim);
 
   if (perfSettings.isMobile) {
     // Mobile: one cheap point light at the front, no spotlights
