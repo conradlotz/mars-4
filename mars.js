@@ -4236,6 +4236,7 @@ class MarsSceneManager {
     if (this.spaceportSite && near(this.spaceportSite, 650)) return false;
     for (const c of this.expansionCities || []) if (near(c.center, 560)) return false;
     for (const f of this.falconSites || []) if (near(f, 620)) return false;
+    for (const u of (window.underground && window.underground.sites) || []) if (near(u, u.r + 80)) return false;
     for (const d of this.biodomes || []) if (near(d, d.r + 260)) return false;
     for (const line of this.railLines || []) {
       const lx = line.end.x - line.start.x, lz = line.end.z - line.start.z;
@@ -8073,6 +8074,8 @@ function animate(time) {
   if (typeof updateDayNightCycle === 'function') {
     updateDayNightCycle(time);
   }
+  if (!window.underground && window.marsSceneManager) ensureUnderground();
+  if (window.underground && rover) window.underground.applyLighting(rover.position, delta);
 
   // Keep the sky around the camera and update fades continuously on all devices.
   if (spaceSkybox) {
@@ -8168,14 +8171,22 @@ function animate(time) {
       }
     }
 
-    // Collision detection — revert if the rover hits a structure
-    if (window.marsSceneManager &&
-        window.marsSceneManager.checkCollision(rover.position.x, rover.position.z, 2.5,
-          previousPosition.x, previousPosition.z)) {
+    // Collision detection. Below ground the rover is held inside the tunnel
+    // walls instead; on the surface it reverts if it hits a structure or the
+    // edge of an open cutting.
+    const ug = window.underground;
+    if (ug && ug.active) {
+      if (ug.afterMove(rover.position, previousPosition.x, previousPosition.z)) velocity *= 0.6;
+    } else if ((ug && ug.blocksSurface(rover.position.x, rover.position.z, previousPosition.x, previousPosition.z)) ||
+        (window.marsSceneManager &&
+          window.marsSceneManager.checkCollision(rover.position.x, rover.position.z, 2.5,
+            previousPosition.x, previousPosition.z))) {
       rover.position.x = previousPosition.x;
       rover.position.z = previousPosition.z;
       velocity *= -0.3; // slight bounce-back on collision
       isMoving = false;
+    } else if (ug) {
+      ug.afterMove(rover.position, previousPosition.x, previousPosition.z); // may drive into a mouth
     }
 
     // Position rover on terrain after movement
@@ -8286,6 +8297,17 @@ function updateWheelRotation(wheels, baseSpeed, turnDirection) {
 // O(1) - raycasting the mesh tested every one of its ~40k+ triangles per call,
 // and the rover, camera and traffic made a dozen of those calls per frame.
 function sampleTerrainHeight(x, z, fallback = 0) {
+  // Below ground the tunnel or cavern floor stands in for the terrain
+  const ug = window.underground;
+  if (ug && ug.active) {
+    const floor = ug.floorAt(x, z);
+    if (floor !== null) return floor;
+  }
+  return sampleSurfaceHeight(x, z, fallback);
+}
+
+// The height field itself, whatever is bored beneath it
+function sampleSurfaceHeight(x, z, fallback = 0) {
   const grid = (typeof marsSurface !== 'undefined' && marsSurface)
     ? marsSurface.geometry.userData.heightGrid
     : null;
@@ -8624,6 +8646,7 @@ function updateCamera(deltaMs) {
         const clearY = sampleTerrainHeight(sx, sz, rover.position.y) + 1.0;
         if (lineY < clearY) vectors.target.y += (clearY - lineY) / t;
       }
+      if (window.underground) window.underground.clampCamera(vectors.target);
 
       // Spring-damper follow: a touch of lag sells the rover's weight, but a
       // drag should feel direct, so stiffen the spring while looking around
@@ -8642,6 +8665,7 @@ function updateCamera(deltaMs) {
       cameraSpring.velocity.addScaledVector(displacement, stiffness * dt);
       cameraSpring.velocity.multiplyScalar(Math.max(0, 1 - damping * dt));
       camera.position.addScaledVector(cameraSpring.velocity, dt);
+      if (window.underground) window.underground.clampCamera(camera.position);
 
       const groundY = getGroundHeight(camera.position.x, camera.position.z, rover.position.y);
       if (camera.position.y < groundY + 1.2) camera.position.y = groundY + 1.2;
@@ -9480,6 +9504,8 @@ function createRealisticMarsTerrain() {
     material = createRegolithMaterial(terrainPerfSettings.isMobile ? 256 : 512);
   }
 
+  patchTerrainCuts(material); // tunnel mouths (see Underground)
+
   const terrain = new THREE.Mesh(geometry, material);
   terrain.receiveShadow = true;
   terrain.castShadow = false; // ground receives shadows but shouldn't cast them
@@ -10186,6 +10212,703 @@ function createMarsMoonsLayer() {
 }
 
 // Lazy loading system for non-essential components
+// ===========================================================================
+// Tunnels and the underground city
+//
+// The terrain is a height field: one height per (x, z), so it cannot hold a
+// cave. Everything below ground is therefore separate geometry, and three
+// small hooks make it drivable:
+//   1. sampleTerrainHeight() answers with the tunnel or cavern floor while the
+//      rover is below ground, so the rover, wheels and camera follow it.
+//   2. The terrain shader discards the ground inside each bore between its
+//      floor and roof, which opens the mouths wherever a bore meets daylight.
+//   3. Below ground the rover and camera are kept inside the bores and the
+//      cavern instead of being tested against surface buildings.
+// A "bore" runs in a straight line from A to B with a constant gradient. Where
+// the ground above is thinner than the bore is tall it is an open cutting with
+// retaining walls; deeper in it gets a roof. Mouths need no special casing.
+// ===========================================================================
+
+// Shared with the terrain materials (see patchTerrainCuts)
+const TERRAIN_CUT_MAX = 8;
+const terrainCutUniforms = {
+  uCutSites: { value: [new THREE.Vector4(0, 0, -1, 0), new THREE.Vector4(0, 0, -1, 0)] },
+  uCutA: { value: Array.from({ length: TERRAIN_CUT_MAX }, () => new THREE.Vector4()) },
+  uCutB: { value: Array.from({ length: TERRAIN_CUT_MAX }, () => new THREE.Vector4()) }
+};
+
+// Adds the bore cut-outs to a terrain material's shader. Chains after any
+// onBeforeCompile the material already has.
+function patchTerrainCuts(material) {
+  const previous = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, rendererRef) => {
+    if (previous) previous(shader, rendererRef);
+    Object.assign(shader.uniforms, terrainCutUniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying highp vec3 vCutWorld;')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvCutWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying highp vec3 vCutWorld;
+        uniform vec4 uCutSites[2];
+        uniform vec4 uCutA[${TERRAIN_CUT_MAX}];
+        uniform vec4 uCutB[${TERRAIN_CUT_MAX}];
+        bool terrainIsCut(vec3 p) {
+          // Two cheap distance tests reject nearly every fragment on the map
+          if (distance(p.xz, uCutSites[0].xy) > uCutSites[0].z &&
+              distance(p.xz, uCutSites[1].xy) > uCutSites[1].z) return false;
+          for (int i = 0; i < ${TERRAIN_CUT_MAX}; i++) {
+            vec2 a = uCutA[i].xy;
+            vec2 ab = uCutA[i].zw - a;
+            float l2 = dot(ab, ab);
+            if (l2 < 1.0) continue;
+            float t = dot(p.xz - a, ab) / l2;
+            if (t < 0.0 || t > 1.0) continue;
+            if (distance(p.xz, a + ab * t) > uCutB[i].x) continue;
+            float floorY = mix(uCutB[i].y, uCutB[i].z, t);
+            if (p.y > floorY - 0.3 && p.y < floorY + uCutB[i].w) return true;
+          }
+          return false;
+        }`)
+      .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        if (terrainIsCut(vCutWorld)) discard;`);
+  };
+  material.needsUpdate = true;
+}
+
+class Underground {
+  constructor(scene, sceneManager) {
+    this.scene = scene;
+    this.sm = sceneManager;
+    this.perf = getPerformanceSettings();
+    this.group = new THREE.Group();
+    this.group.name = 'underground';
+    scene.add(this.group);
+
+    this.regions = [];      // bores and caverns the rover can be inside
+    this.collidables = [];  // buildings on the cavern floor
+    this.sites = [];        // { x, z, r } kept clear of settlements
+    this.rockClear = [];    // { x, z, r } open cuttings, kept clear of rocks
+    this.active = false;    // true while the rover is below ground
+    this.u = 0;             // 0 in daylight .. 1 fully enclosed
+    this._lit = false;
+    this._cutCount = 0;
+    this._nearest = { region: null, x: 0, z: 0, dist: Infinity };
+    this._tmpDir = new THREE.Vector3();
+    this._overhead = new THREE.Vector3(0.22, 1, 0.16).normalize();
+    this._lampColor = new THREE.Color(0xdfe9ff);
+    this._ambColor = new THREE.Color(0x8fa0c8);
+    this._fogBase = null;
+
+    this._parts = { concrete: [], floor: [], lamp: [], accent: [], cyan: [], rock: [], plaza: [], tower: [], mark: [] };
+    this.half = marsSurface.geometry.userData.heightGrid.half;
+
+    try { this._buildRidgeTunnel(); } catch (e) { console.error('Ridge tunnel unavailable:', e); }
+    try { this._buildCity(); } catch (e) { console.error('Underground city unavailable:', e); }
+    this._commit();
+    _terrainEdits.version++;
+  }
+
+  // ---- Site selection ----------------------------------------------------
+
+  _roadFree(x, z, radius) {
+    for (let dx = -radius; dx <= radius; dx += ROAD_CELL) {
+      for (let dz = -radius; dz <= radius; dz += ROAD_CELL) {
+        if (_terrainEdits.roadCells.has(Math.floor((x + dx) / ROAD_CELL) + '|' + Math.floor((z + dz) / ROAD_CELL))) return false;
+      }
+    }
+    return true;
+  }
+
+  _zoneFree(x, z, margin, scale = 1) {
+    for (const zone of _terrainEdits.zones) {
+      if (Math.hypot(x - zone.x, z - zone.z) < zone.r * scale + margin) return false;
+    }
+    for (const s of this.sites) {
+      if (Math.hypot(x - s.x, z - s.z) < s.r + margin) return false;
+    }
+    return true;
+  }
+
+  _inWorld(x, z, margin) {
+    return Math.abs(x) < this.half - margin && Math.abs(z) < this.half - margin;
+  }
+
+  // ---- The drive-through tunnel -------------------------------------------
+
+  // Raises a ridge across the line of travel and bores straight through it.
+  _buildRidgeTunnel() {
+    const candidates = [[120, -380], [380, -150], [420, 260], [-200, 420], [150, 520], [-520, 150], [600, -500], [-650, -150], [820, 120], [-150, 860]];
+    const site = candidates.find(([x, z]) =>
+      this._inWorld(x, z, 320) && this._zoneFree(x, z, 200) && this._roadFree(x, z, 170));
+    if (!site) { console.warn('No clear ground for the ridge tunnel'); return; }
+    const [cx, cz] = site;
+    // Travel direction: straight out from the landing site, so the mouth faces it
+    const len = Math.hypot(cx, cz) || 1;
+    const dx = cx / len, dz = cz / len;
+
+    // Ridge: a 26 m wall of ground, Gaussian across the tunnel, ~300 m long
+    const height = 26, sigma = 48, halfLength = 110, taper = 70;
+    const pos = marsSurface.geometry.attributes.position;
+    const arr = pos.array;
+    for (let i = 0; i < arr.length; i += 3) {
+      const rx = arr[i] - cx, rz = arr[i + 2] - cz;
+      const along = rx * dx + rz * dz;      // along the tunnel
+      if (Math.abs(along) > sigma * 3.2) continue;
+      const across = Math.abs(rx * dz - rz * dx); // along the ridge crest
+      if (across > halfLength + taper) continue;
+      let w = Math.exp(-(along * along) / (sigma * sigma));
+      if (across > halfLength) {
+        const k = 1 - (across - halfLength) / taper;
+        w *= k * k * (3 - 2 * k);
+      }
+      // A little raggedness so the crest is not a ruled line
+      arr[i + 1] += height * w * (0.86 + 0.28 * _terrainHash2(Math.round(arr[i]) * 0.37, Math.round(arr[i + 2]) * 0.53));
+    }
+    pos.needsUpdate = true;
+    marsSurface.geometry.computeVertexNormals();
+    marsSurface.geometry.computeBoundingSphere();
+    marsSurface.geometry.computeBoundingBox();
+
+    const reach = 118;
+    const ax = cx - dx * reach, az = cz - dz * reach;
+    const bx = cx + dx * reach, bz = cz + dz * reach;
+    this._addBore({
+      name: 'tunnel', ax, az, bx, bz,
+      yA: sampleSurfaceHeight(ax, az), yB: sampleSurfaceHeight(bx, bz),
+      openA: true, openB: true, accent: 'accent'
+    });
+    this._addPylon(ax - dz * 9, az + dx * 9, 'accent');
+    this._addPylon(bx - dz * 9, bz + dx * 9, 'accent');
+    this.sites.push({ x: cx, z: cz, r: 210 });
+    this.rockClear.push({ x: ax + dx * 45, z: az + dz * 45, r: 60 }, { x: bx - dx * 45, z: bz - dz * 45, r: 60 });
+    this.tunnelSite = { x: cx, z: cz, ax, az, bx, bz };
+  }
+
+  // ---- The underground city -----------------------------------------------
+
+  _buildCity() {
+    const R = 95, domeH = 30, wallH = 12, gradient = 0.2;
+    const candidates = [[520, 300], [-300, 620], [650, -250], [-700, 300], [250, -750], [900, 500], [-850, -350], [200, 950], [-450, 950]];
+    let chosen = null;
+    for (const [cx, cz] of candidates) {
+      if (!this._inWorld(cx, cz, R + 80) || !this._zoneFree(cx, cz, R, 0.7)) continue;
+      // Entrance on the side facing the landing site
+      const len = Math.hypot(cx, cz) || 1;
+      const ex = -cx / len, ez = -cz / len;
+      // Floor far enough down that the dome clears the lowest ground above it
+      let minGround = Infinity;
+      for (let a = 0; a < 24; a++) {
+        for (const r of [0, R * 0.5, R]) {
+          minGround = Math.min(minGround, sampleSurfaceHeight(cx + Math.sin(a * 0.262) * r, cz + Math.cos(a * 0.262) * r));
+        }
+      }
+      const floorY = minGround - domeH - 7;
+      // The ramp starts where its gradient meets the surface
+      let rampLen = 200, ax = 0, az = 0, yA = 0;
+      for (let k = 0; k < 4; k++) {
+        ax = cx + ex * (R - 3 + rampLen);
+        az = cz + ez * (R - 3 + rampLen);
+        yA = sampleSurfaceHeight(ax, az);
+        rampLen = Math.max(120, (yA - floorY) / gradient);
+      }
+      ax = cx + ex * (R - 3 + rampLen);
+      az = cz + ez * (R - 3 + rampLen);
+      yA = sampleSurfaceHeight(ax, az);
+      if (!this._inWorld(ax, az, 60)) continue;
+      // The open cutting (first ~70 m) must not land on a road or a site
+      let clear = true;
+      for (let s = -20; s <= 80 && clear; s += 10) {
+        const px = ax - ex * s, pz = az - ez * s;
+        clear = this._zoneFree(px, pz, 30, 0.85) && this._roadFree(px, pz, 12);
+      }
+      if (!clear) continue;
+      chosen = { cx, cz, ex, ez, floorY, rampLen, ax, az, yA };
+      break;
+    }
+    if (!chosen) { console.warn('No clear ground for the underground city'); return; }
+    const { cx, cz, ex, ez, floorY, ax, az, yA } = chosen;
+    const bx = cx + ex * (R - 3), bz = cz + ez * (R - 3);
+
+    const bore = this._addBore({
+      name: 'ramp', ax, az, bx, bz, yA, yB: floorY,
+      openA: true, openB: false, accent: 'cyan', portalAtB: true
+    });
+    this._addPylon(ax + ez * 9, az - ex * 9, 'cyan');
+
+    this.regions.push({ type: 'disc', name: 'city', x: cx, z: cz, r: R, y: floorY, wallH, domeH });
+    this.sites.push({ x: cx, z: cz, r: R + 60 });
+    this.sites.push({ x: ax - ex * 30, z: az - ez * 30, r: 60 });
+    this.rockClear.push({ x: ax - ex * 35, z: az - ez * 35, r: 55 });
+    this.citySite = { x: cx, z: cz, ax, az, floorY, r: R };
+
+    const P = this._parts;
+    const entrance = Math.atan2(ex, ez);
+    const gap = Math.asin((bore.half + bore.wallT + 0.1) / R);
+
+    // Floor, wall (with a doorway for the ramp) and dome
+    P.plaza.push({ geometry: new THREE.CircleGeometry(R + 0.5, 72), matrix: _xf(cx, floorY, cz, -Math.PI / 2) });
+    P.rock.push({
+      geometry: new THREE.CylinderGeometry(R, R, wallH, 72, 1, true, entrance + gap, Math.PI * 2 - gap * 2),
+      matrix: _xf(cx, floorY + wallH / 2, cz)
+    });
+    P.rock.push({ // wall above the doorway
+      geometry: new THREE.BoxGeometry((bore.half + bore.wallT) * 2 + 1.5, wallH - bore.h, 1.2),
+      matrix: _xf(cx + ex * (R + 0.3), floorY + bore.h + (wallH - bore.h) / 2, cz + ez * (R + 0.3), 0, entrance, 0)
+    });
+    P.rock.push({
+      geometry: new THREE.SphereGeometry(R, 56, 14, 0, Math.PI * 2, 0, Math.PI / 2),
+      matrix: _xf(cx, floorY + wallH, cz, 0, 0, 0, 1, (domeH - wallH) / R, 1)
+    });
+    const domeAt = (r) => wallH + (domeH - wallH) * Math.sqrt(Math.max(0, 1 - (r / R) * (r / R)));
+
+    // Central spire: the city's light well
+    P.cyan.push({ geometry: new THREE.CylinderGeometry(1.6, 2.6, domeH - 0.4, 16), matrix: _xf(cx, floorY + (domeH - 0.4) / 2, cz) });
+    P.concrete.push({ geometry: new THREE.CylinderGeometry(7, 8.5, 1.2, 28), matrix: _xf(cx, floorY + 0.6, cz) });
+    P.concrete.push({ geometry: new THREE.TorusGeometry(5, 0.5, 8, 28), matrix: _xf(cx, floorY + 9, cz, Math.PI / 2) });
+    P.concrete.push({ geometry: new THREE.TorusGeometry(4, 0.4, 8, 28), matrix: _xf(cx, floorY + 18, cz, Math.PI / 2) });
+    this.collidables.push({ x: cx, z: cz, r: 8.5 });
+
+    // Lit ring roads and the boulevard from the ramp to the spire
+    for (const r of [18, 42, 66, 90]) {
+      P.mark.push({ geometry: new THREE.RingGeometry(r - 0.22, r + 0.22, 96), matrix: _xf(cx, floorY + 0.04, cz, -Math.PI / 2) });
+    }
+    for (const side of [-1, 1]) {
+      P.mark.push({
+        geometry: new THREE.BoxGeometry(0.3, 0.04, R - 14),
+        matrix: _xf(cx + ex * (R + 8) / 2 + ez * side * 5.5, floorY + 0.04, cz + ez * (R + 8) / 2 - ex * side * 5.5, 0, entrance, 0)
+      });
+    }
+
+    // Three rings of towers, leaving the boulevard clear
+    const rings = [
+      { r: 30, n: 8, hMin: 15, hMax: 27, w: 9.5 },
+      { r: 54, n: 14, hMin: 10, hMax: 20, w: 10 },
+      { r: 78, n: 20, hMin: 6, hMax: 13, w: 10.5 }
+    ];
+    rings.forEach((ring, ri) => {
+      for (let k = 0; k < ring.n; k++) {
+        const a = (k + 0.5 * (ri % 2)) / ring.n * Math.PI * 2;
+        let da = Math.atan2(Math.sin(a - entrance), Math.cos(a - entrance));
+        if (Math.abs(da) < Math.asin(Math.min(1, 12 / ring.r))) continue;
+        const h1 = _terrainHash2(ri * 7.1 + k * 3.3, k * 1.7 + 4.2);
+        const h2 = _terrainHash2(k * 5.9 - ri, ri * 2.3 + k * 0.61);
+        const w = ring.w * (0.75 + h2 * 0.5);
+        const d = ring.w * (0.75 + h1 * 0.5);
+        const tall = Math.min(ring.hMin + (ring.hMax - ring.hMin) * h1, domeAt(ring.r + 7) - 2.5);
+        const bxp = cx + Math.sin(a) * ring.r, bzp = cz + Math.cos(a) * ring.r;
+        const g = new THREE.BoxGeometry(w, tall, d);
+        // Window texture repeats every 8 m, whatever the tower's size
+        const uv = g.attributes.uv;
+        for (let v = 0; v < uv.count; v++) {
+          const face = Math.floor(v / 4);
+          if (face === 2 || face === 3) uv.setXY(v, 0.01, 0.01); // roof and base: plain wall
+          else uv.setXY(v, uv.getX(v) * (face < 2 ? d : w) / 8, uv.getY(v) * tall / 8);
+        }
+        P.tower.push({ geometry: g, matrix: _xf(bxp, floorY + tall / 2, bzp, 0, a, 0) });
+        // Rooftop plant and a beacon on the tall ones
+        P.concrete.push({ geometry: new THREE.BoxGeometry(w * 0.4, 1.2, d * 0.4), matrix: _xf(bxp, floorY + tall + 0.6, bzp, 0, a, 0) });
+        if (tall > 16) P.accent.push({ geometry: new THREE.BoxGeometry(0.5, 0.5, 0.5), matrix: _xf(bxp, floorY + tall + 1.5, bzp) });
+        this.collidables.push({ x: bxp, z: bzp, r: Math.max(w, d) * 0.6 });
+      }
+    });
+
+    // Floodlights studding the dome
+    for (let k = 0; k < 46; k++) {
+      const a = _terrainHash2(k * 1.9, 3.1) * Math.PI * 2;
+      const r = 12 + _terrainHash2(k * 0.7, 9.4) * (R - 22);
+      P.lamp.push({
+        geometry: new THREE.BoxGeometry(1.1, 0.25, 1.1),
+        matrix: _xf(cx + Math.sin(a) * r, floorY + domeAt(r) - 0.5, cz + Math.cos(a) * r)
+      });
+    }
+  }
+
+  // ---- Bores ----------------------------------------------------------------
+
+  _addBore({ name, ax, az, bx, bz, yA, yB, openA, openB, accent, portalAtB = false }) {
+    const half = 4.5, h = 6.5, wallT = 0.6, roofT = 0.8, step = 4;
+    const L = Math.hypot(bx - ax, bz - az);
+    const dx = (bx - ax) / L, dz = (bz - az) / L;
+    const slope = (yB - yA) / L;
+    const theta = Math.atan2(dx, dz);
+    const n = Math.ceil(L / step);
+    const P = this._parts;
+
+    // Local frame: x across, y up from the floor line, z along A -> B
+    const base = new THREE.Matrix4().makeRotationY(theta).setPosition(ax, yA, az);
+    const shear = new THREE.Matrix4().set(1, 0, 0, 0, 0, 1, slope, 0, 0, 0, 1, 0, 0, 0, 0, 1);
+    const frame = base.clone().multiply(shear);
+    const at = (lx, ly, lz) => frame.clone().multiply(new THREE.Matrix4().makeTranslation(lx, ly, lz));
+
+    // How much ground is over each step decides cutting or covered tunnel
+    const covered = [];
+    for (let i = 0; i < n; i++) {
+      const tm = Math.min((i + 0.5) * step, L);
+      const px = ax + dx * tm, pz = az + dz * tm;
+      const floorY = yA + slope * tm;
+      const off = half + wallT;
+      const depthL = sampleSurfaceHeight(px + dz * off, pz - dx * off) - floorY;
+      const depthR = sampleSurfaceHeight(px - dz * off, pz + dx * off) - floorY;
+      const depthC = sampleSurfaceHeight(px, pz) - floorY;
+      const isCovered = Math.min(depthL, depthR, depthC) >= h + roofT + 0.4;
+      covered.push(isCovered);
+      const len = Math.min(step, L - i * step) + 0.04;
+      const wallHeights = isCovered
+        ? [h + roofT, h + roofT]
+        : [depthL, depthR].map(d => THREE.MathUtils.clamp(d + 1.1, 0.45, h + roofT));
+      [1, -1].forEach((side, s) => {
+        const wh = wallHeights[s];
+        P.concrete.push({ geometry: new THREE.BoxGeometry(wallT, wh, len), matrix: at(side * (half + wallT / 2), wh / 2, tm) });
+      });
+      if (isCovered) {
+        P.concrete.push({ geometry: new THREE.BoxGeometry((half + wallT) * 2, roofT, len), matrix: at(0, h + roofT / 2, tm) });
+        if (i % 3 === 1) P.lamp.push({ geometry: new THREE.BoxGeometry(0.6, 0.12, 2.4), matrix: at(0, h - 0.07, tm) });
+      }
+      if (i % 2 === 0) P.mark.push({ geometry: new THREE.BoxGeometry(0.2, 0.03, 2.2), matrix: at(0, 0.03, tm) });
+    }
+    // Roadway, running a little past each end so there is no lip
+    P.floor.push({ geometry: new THREE.BoxGeometry((half + wallT) * 2, 0.5, L + 6), matrix: at(0, -0.25, L / 2) });
+
+    // A portal frame wherever daylight ends
+    const portal = (tm) => {
+      for (const side of [1, -1]) {
+        P.concrete.push({ geometry: new THREE.BoxGeometry(1.3, h + 1.9, 1.3), matrix: at(side * (half + 0.65), (h + 1.9) / 2, tm) });
+      }
+      P.concrete.push({ geometry: new THREE.BoxGeometry(half * 2 + 2.6, 1.5, 1.3), matrix: at(0, h + 1.15, tm) });
+      P[accent].push({ geometry: new THREE.BoxGeometry(half * 2 - 0.4, 0.22, 1.42), matrix: at(0, h + 0.3, tm) });
+    };
+    let firstCovered = -1, lastCovered = -1;
+    for (let i = 0; i < n; i++) {
+      if (!covered[i]) continue;
+      if (firstCovered < 0) firstCovered = i;
+      lastCovered = i;
+    }
+    if (firstCovered >= 0) {
+      if (openA) portal(firstCovered * step);
+      if (openB) portal(Math.min((lastCovered + 1) * step, L));
+    }
+    if (portalAtB) portal(L - 0.7);
+
+    const region = {
+      type: 'seg', name, ax, az, dx, dz, L, half, h, wallT, roofT, yA, slope, step, covered,
+      openA, openB,
+      coverStart: firstCovered < 0 ? L : firstCovered * step,
+      coverEnd: lastCovered < 0 ? 0 : Math.min((lastCovered + 1) * step, L)
+    };
+    this.regions.push(region);
+
+    // Tell the terrain shader to open the ground along this bore
+    if (this._cutCount < TERRAIN_CUT_MAX) {
+      terrainCutUniforms.uCutA.value[this._cutCount].set(ax, az, bx, bz);
+      terrainCutUniforms.uCutB.value[this._cutCount].set(half + wallT - 0.06, yA, yB, h + roofT - 0.06);
+      const siteSlot = Math.min(this._cutCount, 1);
+      terrainCutUniforms.uCutSites.value[siteSlot].set((ax + bx) / 2, (az + bz) / 2, L / 2 + half + 2, 0);
+      this._cutCount++;
+    }
+    return region;
+  }
+
+  // A tall marker so the mouths can be found from a distance
+  _addPylon(x, z, accent) {
+    const y = sampleSurfaceHeight(x, z);
+    this._parts.concrete.push({ geometry: new THREE.BoxGeometry(0.9, 24, 0.9), matrix: _xf(x, y + 12, z) });
+    this._parts[accent].push({ geometry: new THREE.BoxGeometry(1.7, 3.2, 1.7), matrix: _xf(x, y + 25.6, z) });
+  }
+
+  _towerTextures() {
+    const make = (draw) => {
+      const c = document.createElement('canvas');
+      c.width = c.height = 64;
+      draw(c.getContext('2d'));
+      const t = new THREE.CanvasTexture(c);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.anisotropy = 4;
+      return t;
+    };
+    const lit = [];
+    for (let i = 0; i < 16; i++) lit.push(_terrainHash2(i * 3.7, 1.3) < 0.62 ? (_terrainHash2(i, 8.8) < 0.7 ? '#ffd9a0' : '#a8d8ff') : null);
+    const cells = (g, wall, window) => {
+      g.fillStyle = wall;
+      g.fillRect(0, 0, 64, 64);
+      for (let i = 0; i < 16; i++) {
+        const colour = window(i);
+        if (!colour) continue;
+        g.fillStyle = colour;
+        g.fillRect((i % 4) * 16 + 3, Math.floor(i / 4) * 16 + 4, 10, 9);
+      }
+    };
+    return {
+      map: make(g => cells(g, '#33363d', i => (lit[i] ? '#6b6558' : '#15171b'))),
+      emissiveMap: make(g => cells(g, '#000000', i => lit[i]))
+    };
+  }
+
+  // Merge everything into one mesh per material
+  _commit() {
+    const P = this._parts;
+    const tex = this._towerTextures();
+    const materials = {
+      concrete: weatherStatic(new THREE.MeshStandardMaterial({ color: 0x77726a, roughness: 0.88, metalness: 0.05 }), { seam: [4, 3.25], seamStrength: 0.7, dust: 0.45 }),
+      floor: new THREE.MeshStandardMaterial({ color: 0x232327, roughness: 0.86, metalness: 0.1 }),
+      plaza: weatherStatic(new THREE.MeshStandardMaterial({ color: 0x2a2c31, roughness: 0.7, metalness: 0.3 }), { seam: [6, 6], seamStrength: 0.8, grime: 0.9, dust: 0.15 }),
+      rock: new THREE.MeshStandardMaterial({ color: 0x4d2c1d, roughness: 1, metalness: 0, side: THREE.BackSide }),
+      tower: new THREE.MeshStandardMaterial({
+        map: tex.map, emissiveMap: tex.emissiveMap, emissive: 0xffffff, emissiveIntensity: 0.7, roughness: 0.55, metalness: 0.35
+      }),
+      lamp: new THREE.MeshBasicMaterial({ color: 0xcdb48c }),
+      accent: new THREE.MeshBasicMaterial({ color: 0xd9682f }),
+      cyan: new THREE.MeshBasicMaterial({ color: 0x5fb8cc }),
+      mark: new THREE.MeshBasicMaterial({ color: 0x16282c })
+    };
+    const shadows = !this.perf.isMobile;
+    for (const key of Object.keys(P)) {
+      if (!P[key].length) continue;
+      const mesh = new THREE.Mesh(mergeGeometryList(P[key]), materials[key]);
+      mesh.name = 'underground-' + key;
+      // Only the towers cast: the roofs must not shade their own tunnels
+      mesh.castShadow = shadows && key === 'tower';
+      mesh.receiveShadow = shadows && (key === 'floor' || key === 'plaza' || key === 'concrete' || key === 'tower');
+      this.group.add(mesh);
+      P[key] = [];
+    }
+  }
+
+  // ---- Where is a point relative to the bores and caverns? -----------------
+
+  // Closest point inside any region (shrunk by margin) to (x, z). Result in
+  // this._nearest; dist is 0 when the point is already inside.
+  _closest(x, z, margin, exitRoom) {
+    const best = this._nearest;
+    best.region = null;
+    best.dist = Infinity;
+    for (const r of this.regions) {
+      let px, pz;
+      if (r.type === 'disc') {
+        const dx = x - r.x, dz = z - r.z;
+        const d = Math.hypot(dx, dz), lim = r.r - margin;
+        const k = d > lim ? lim / (d || 1) : 1;
+        px = r.x + dx * k;
+        pz = r.z + dz * k;
+      } else {
+        const rx = x - r.ax, rz = z - r.az;
+        const t = THREE.MathUtils.clamp(rx * r.dx + rz * r.dz, r.openA ? -exitRoom : 0, r.L + (r.openB ? exitRoom : 0));
+        const lim = Math.max(0.2, r.half - margin);
+        const lat = THREE.MathUtils.clamp(rx * r.dz - rz * r.dx, -lim, lim);
+        px = r.ax + r.dx * t + r.dz * lat;
+        pz = r.az + r.dz * t - r.dx * lat;
+      }
+      const dist = Math.hypot(px - x, pz - z);
+      if (dist < best.dist) {
+        best.dist = dist;
+        best.region = r;
+        best.x = px;
+        best.z = pz;
+      }
+    }
+    return best;
+  }
+
+  _floorOf(r, x, z) {
+    if (r.type === 'disc') return r.y;
+    const t = THREE.MathUtils.clamp((x - r.ax) * r.dx + (z - r.az) * r.dz, -8, r.L + 8);
+    return r.yA + r.slope * t;
+  }
+
+  // Clear height above the floor at a point (Infinity under open sky)
+  _ceilingOf(r, x, z) {
+    if (r.type === 'disc') {
+      const d = Math.hypot(x - r.x, z - r.z) / r.r;
+      return r.wallH + (r.domeH - r.wallH) * Math.sqrt(Math.max(0, 1 - d * d));
+    }
+    const t = (x - r.ax) * r.dx + (z - r.az) * r.dz;
+    const i = Math.floor(t / r.step);
+    return r.covered[i] ? r.h : Infinity;
+  }
+
+  // Floor height for sampleTerrainHeight() while the rover is below ground;
+  // null hands the query back to the real terrain (anything far from a bore).
+  floorAt(x, z) {
+    const c = this._closest(x, z, 0, 8);
+    if (!c.region || c.dist > 30) return null;
+    return this._floorOf(c.region, c.x, c.z);
+  }
+
+  // ---- Per-frame hooks -----------------------------------------------------
+
+  // Surface driving: is this move a drop into an open cutting from the side?
+  blocksSurface(x, z, prevX, prevZ) {
+    for (const r of this.regions) {
+      if (r.type !== 'seg') continue;
+      const lat = (x - r.ax) * r.dz - (z - r.az) * r.dx;
+      const t = (x - r.ax) * r.dx + (z - r.az) * r.dz;
+      if (t < 0 || t > r.L || Math.abs(lat) > r.half + r.wallT + 1.4) continue;
+      const depth = sampleSurfaceHeight(x, z) - (r.yA + r.slope * t);
+      if (depth < 0.9 || depth >= r.h + r.roofT) continue; // level with the road, or up on the roof
+      // Only stop a move towards the cutting, so the rover can always back away
+      const prevLat = (prevX - r.ax) * r.dz - (prevZ - r.az) * r.dx;
+      if (Math.abs(prevLat) > r.half && Math.abs(lat) < Math.abs(prevLat)) return true;
+    }
+    return false;
+  }
+
+  // Call after the rover has moved. Handles going below ground, the walls
+  // down there, and coming back out. Returns true if it stopped the rover.
+  afterMove(position, prevX, prevZ) {
+    if (!this.regions.length) return false;
+    if (!this.active) {
+      for (const r of this.regions) {
+        if (r.type !== 'seg') continue;
+        const lat = (position.x - r.ax) * r.dz - (position.z - r.az) * r.dx;
+        const t = (position.x - r.ax) * r.dx + (position.z - r.az) * r.dz;
+        if (t < 0 || t > r.L || Math.abs(lat) > r.half) continue;
+        const depth = sampleSurfaceHeight(position.x, position.z) - (r.yA + r.slope * t);
+        if (depth < r.h + r.roofT) { // in the cutting, not on the roof
+          this.active = true;
+          this._announce(r);
+          break;
+        }
+      }
+      if (!this.active) return false;
+    }
+
+    let hit = false;
+    // Walls: slide along them rather than stopping dead
+    const c = this._closest(position.x, position.z, 1.75, 5);
+    if (c.region && c.dist > 0.001) {
+      position.x = c.x;
+      position.z = c.z;
+    }
+    for (const b of this.collidables) {
+      const dx = position.x - b.x, dz = position.z - b.z;
+      const d = Math.hypot(dx, dz), min = b.r + 2.2;
+      if (d < min) {
+        position.x = b.x + dx / (d || 1) * min;
+        position.z = b.z + dz / (d || 1) * min;
+        hit = true;
+      }
+    }
+
+    // Past an open end: back in daylight
+    const r = c.region;
+    if (r && r.type === 'seg') {
+      const t = (position.x - r.ax) * r.dx + (position.z - r.az) * r.dz;
+      if ((r.openA && t < -1) || (r.openB && t > r.L + 1)) {
+        this.active = false;
+        this._announced = null;
+      } else if (r.name !== this._announced) {
+        this._announce(r);
+      }
+    } else if (r && r.name !== this._announced) {
+      this._announce(r);
+    }
+    return hit;
+  }
+
+  _announce(region) {
+    this._announced = region.name;
+    const text = { tunnel: 'Ridge tunnel', ramp: 'Descending to the undercity', city: 'Undercity' }[region.name];
+    if (text && typeof window.showGameToast === 'function') window.showGameToast(text);
+  }
+
+  // How enclosed the rover is: 0 in the open, 1 deep inside
+  _enclosure(position) {
+    if (!this.active) return 0;
+    const c = this._closest(position.x, position.z, 0, 5);
+    const r = c.region;
+    if (!r) return 0;
+    this._inCavern = r.type === 'disc';
+    if (r.type === 'disc') return 1;
+    const t = (position.x - r.ax) * r.dx + (position.z - r.az) * r.dz;
+    if (r.coverEnd <= r.coverStart) return 0;
+    let inward = r.openA ? t - r.coverStart : Infinity;
+    if (r.openB) inward = Math.min(inward, r.coverEnd - t);
+    if (!r.openA && !r.openB) return 1;
+    return THREE.MathUtils.clamp(inward / 28, 0, 1);
+  }
+
+  // Keeps the chase camera inside the walls and under the roof
+  clampCamera(v) {
+    if (!this.active) return;
+    // Still flying in from far away (a respawn): don't pin it to the wrong bore
+    if (Math.abs(v.x - rover.position.x) + Math.abs(v.z - rover.position.z) > 80) return;
+    const c = this._closest(v.x, v.z, 0.7, 30);
+    if (!c.region) return;
+    v.x = c.x;
+    v.z = c.z;
+    const floor = this._floorOf(c.region, c.x, c.z);
+    const ceiling = this._ceilingOf(c.region, c.x, c.z);
+    if (ceiling !== Infinity && v.y > floor + ceiling - 0.7) v.y = floor + ceiling - 0.7;
+    if (v.y < floor + 1.0) v.y = floor + 1.0;
+  }
+
+  // Runs right after updateDayNightCycle(): swaps daylight for lamp light in
+  // proportion to how enclosed the rover is. No lights are added or removed,
+  // so no shader ever recompiles on the way in or out.
+  applyLighting(position, deltaMs) {
+    const target = this._enclosure(position);
+    const k = 1 - Math.exp(-(deltaMs || 16.7) / 260);
+    this.u += (target - this.u) * k;
+    if (Math.abs(target - this.u) < 0.002) this.u = target;
+    const u = this.u;
+    if (u <= 0 && !this._lit) return;
+    this._lit = u > 0;
+    const lerp = THREE.MathUtils.lerp;
+
+    if (sunLight) {
+      sunLight.intensity = lerp(sunLight.intensity, 0.26 * LEGACY_LIGHT_SCALE, u);
+      sunLight.color.lerp(this._lampColor, u);
+      const dir = this._tmpDir.copy(sunLight.position).sub(sunLight.target.position).normalize().lerp(this._overhead, u).normalize();
+      sunLight.position.copy(sunLight.target.position).addScaledVector(dir, 500);
+    }
+    ambientLight.intensity = lerp(ambientLight.intensity, 0.13 * LEGACY_LIGHT_SCALE, u);
+    ambientLight.color.lerp(this._ambColor, u);
+    hemisphereLight.intensity = lerp(hemisphereLight.intensity, 0.04 * LEGACY_LIGHT_SCALE, u);
+    scene.environmentIntensity = 1 - 0.86 * u;
+    renderer.toneMappingExposure = lerp(renderer.toneMappingExposure, this.perf.isMobile ? 1.0 : 1.05, u);
+
+    if (postProcessing && postProcessing.atmosphere) {
+      const fog = postProcessing.atmosphere.uFogDensity;
+      if (this._fogBase === null) this._fogBase = fog.value;
+      fog.value = this._fogBase * (1 - u);
+    }
+    if (scene.fog) {
+      scene.fog.color.multiplyScalar(1 - 0.9 * u);
+      scene.fog.near = lerp(scene.fog.near, 90, u);
+      scene.fog.far = lerp(scene.fog.far, 520, u);
+    }
+    if (scene.background && scene.background.isColor) scene.background.multiplyScalar(1 - u);
+
+    if (rover.userData.lamps) {
+      for (const light of rover.userData.lamps.lights) {
+        light.intensity = Math.max(light.intensity, light.userData.nightIntensity * u);
+      }
+      if (u > 0.5) rover.userData.lamps.material.color.setHex(0xfff6e0).multiplyScalar(0.6);
+    }
+
+    // In the cavern nothing on the surface can be seen, so don't draw it. (A
+    // tunnel still shows daylight at its mouths.)
+    const sealed = u > 0.995 && this._inCavern;
+    marsSurface.visible = !sealed;
+    if (spaceSkybox) spaceSkybox.visible = !sealed;
+    if (window.rockField && window.rockField.group) window.rockField.group.visible = !sealed;
+  }
+}
+
+// Built once the scene manager exists (its sites and roads decide where there
+// is room). Safe to call repeatedly.
+function ensureUnderground() {
+  if (window.underground || !window.marsSceneManager) return window.underground || null;
+  try {
+    window.underground = new Underground(scene, window.marsSceneManager);
+  } catch (e) {
+    console.error('Underground unavailable:', e);
+    window.underground = { regions: [], sites: [], rockClear: [], active: false, u: 0, floorAt: () => null, blocksSurface: () => false, afterMove: () => false, clampCamera: () => {}, applyLighting: () => {} };
+  }
+  return window.underground;
+}
+
 // Loose rocks and pebbles scattered over the open ground around the rover.
 // Placement is a pure function of world position, so the same rocks are there
 // every time you come back; only the ones within range exist, as three
@@ -10217,6 +10940,8 @@ class RockField {
     // screen while the next layout is written into the other a slice per
     // frame, so re-seating the field never costs a visible hitch.
     const shapes = [makeRock(1, 1, 0.62), makeRock(2, 1, 0.8), makeRock(3, 0, 0.6)];
+    this.group = new THREE.Group(); // hidden as one while the rover is sealed below ground
+    scene.add(this.group);
     const makeSet = () => shapes.map((g, i) => {
       const mesh = new THREE.InstancedMesh(g, material, i === 2 ? capacity : Math.ceil(capacity / 2.5));
       mesh.count = 0;
@@ -10224,7 +10949,7 @@ class RockField {
       mesh.frustumCulled = false; // instances surround the rover; culling tests only the base shape
       mesh.castShadow = !perf.isMobile && i < 2;
       mesh.receiveShadow = !perf.isMobile;
-      scene.add(mesh);
+      this.group.add(mesh);
       return mesh;
     });
     this.meshes = makeSet();   // on screen
@@ -10284,6 +11009,10 @@ class RockField {
       if (dx * dx + dz * dz < r * r) return true;
     }
     if (_terrainEdits.roadCells.has(Math.floor(x / ROAD_CELL) + '|' + Math.floor(z / ROAD_CELL))) return true;
+    for (const zone of (window.underground && window.underground.rockClear) || []) {
+      const dx = x - zone.x, dz = z - zone.z;
+      if (dx * dx + dz * dz < zone.r * zone.r) return true;
+    }
     if (!sm) return false;
     if (sm.settlements) {
       for (const s of sm.settlements.values()) {
@@ -10340,7 +11069,7 @@ class RockField {
           const variant = size > 0.3 ? (h4 < 0.5 ? 0 : 1) : 2;
           if (counts[variant] >= meshes[variant].instanceMatrix.count) continue;
           if (this._blocked(x, z, sm)) continue;
-          d.position.set(x, sampleTerrainHeight(x, z) - size * 0.22, z);
+          d.position.set(x, sampleSurfaceHeight(x, z) - size * 0.22, z);
           d.rotation.set((h4 - 0.5) * 0.7, h1 * 6.283, (h2 - 0.5) * 0.7);
           d.scale.set(size * (0.8 + h2 * 0.5), size * (0.75 + h4 * 0.4), size * (0.8 + h1 * 0.5));
           d.updateMatrix();
@@ -10447,6 +11176,7 @@ function loadCoreComponents() {
       console.log("🏗️ MARS SCENE: Creating MarsSceneManager now...");
       sceneManager = new MarsSceneManager(scene, 5000);
       window.marsSceneManager = sceneManager;
+      ensureUnderground(); // before settlements, so they keep off its sites
       // Build the settlements around the landing site behind the loading screen
       sceneManager.updateSettlements(rover.position, { prewarm: true });
       console.log('✅ MarsSceneManager eagerly created for desktop');
@@ -10487,6 +11217,7 @@ function loadNonEssentialComponents() {
         if (window.marsSceneManager.disableRocketLaunches && perfSettings.mobileTier === 'low') {
           window.marsSceneManager.disableRocketLaunches();
         }
+        ensureUnderground(); // before settlements, so they keep off its sites
         // Settlements around the landing site exist from the first frame
         // (a handful, so loading stays quick on a phone)
         window.marsSceneManager.updateSettlements(rover.position, { prewarm: true, prewarmMax: 6 });
